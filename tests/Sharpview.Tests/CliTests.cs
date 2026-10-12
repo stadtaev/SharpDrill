@@ -44,7 +44,7 @@ public sealed class CliTests
         var result = await Run("inspect", ResearchFixture.Input, "--format", "json");
         Assert.Equal(1, result.Exit);
         using var doc = JsonDocument.Parse(result.Out);
-        Assert.Equal(2, doc.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(3, doc.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.True(doc.RootElement.GetProperty("snapshot").GetProperty("exceptionRegions").GetArrayLength() > 0);
     }
     [Fact]

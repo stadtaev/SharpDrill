@@ -22,7 +22,7 @@ internal sealed record Arguments(string Command, AnalysisRequest Request, ChainO
           --framework <tfm>                         Required for ambiguous multi-target inputs.
           --exclude-generated                       Include generated sources by default.
           --locations                               Print call-site evidence alongside chains.
-          --format text|json                        inspect only; default text, JSON schema version 2.
+          --format text|json                        inspect only; default text, JSON schema version 3.
           --output <new path>                       inspect only; refuses to overwrite existing files.
           --help                                    No project load.
         Static paths preserve declared bindings; no interface/virtual implementation guesses.

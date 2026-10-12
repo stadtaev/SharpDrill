@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json;
 using Sharpview.Core;
 using Xunit;
 
@@ -15,20 +16,61 @@ public sealed class CoreTests
         name + "()", "Public", Type("Void"), [], [], BodyStatus.Source, [Evidence]);
     private static CallSiteFact Call(string owner, string target, string id, DispatchKind dispatch = DispatchKind.Direct,
         ImmutableArray<string> regions = default, bool awaited = false) => new(new(id), new(owner), new(target), target + "()", dispatch,
-            [], Evidence, false, regions.IsDefault ? [] : regions, awaited);
+            [], Evidence, false, Regions(regions), awaited);
     private static ThrowSiteFact Throw(string owner, string id = "origin", TypeUse? type = null, ImmutableArray<string> regions = default) =>
-        new(id, new(owner), ThrowKind.Explicit, type ?? ExceptionType, Evidence, regions.IsDefault ? [] : regions, true);
+        new(new(id), new(owner), ThrowKind.Explicit, type ?? ExceptionType, Evidence, Regions(regions), true);
+    private static ImmutableArray<ExceptionRegionId> Regions(ImmutableArray<string> ids) => ids.IsDefault ? [] : [.. ids.Select(x => new ExceptionRegionId(x))];
     private static ProgramSnapshot Snapshot(CallableFact[] methods, CallSiteFact[] calls, ThrowSiteFact[]? origins = null,
-        CatchFact[]? catches = null, ExceptionRegionFact[]? regions = null) => new([], [
+        CatchFact[]? catches = null, ExceptionRegionFact[]? regions = null) => new()
+    {
+        Types = [
             new(new("Exception"), Project, "Exception", "Public", [], [], []),
             new(new("OtherException"), Project, "OtherException", "Public", [], [], [])],
-            methods.ToImmutableArray(), calls.ToImmutableArray(), [], (origins ?? []).ToImmutableArray(), [],
-            (catches ?? []).ToImmutableArray(), (regions ?? []).ToImmutableArray(), [], []);
+        Callables = methods.ToImmutableArray(),
+        CallSites = calls.ToImmutableArray(),
+        ThrowSites = (origins ?? []).ToImmutableArray(),
+        Catches = (catches ?? []).ToImmutableArray(),
+        ExceptionRegions = (regions ?? []).ToImmutableArray()
+    };
     private static CatchFact Handler(string id, string owner, HandlerOutcome outcome, string? subsequent = null,
-        TypeUse? caught = null, string? filter = null) => new(id, new(owner), caught, filter, Evidence, Evidence, outcome, subsequent);
-    private static ExceptionRegionFact Region(string id, string owner, params string[] catches) => new(id, new(owner), Evidence, catches.ToImmutableArray(), false);
+        TypeUse? caught = null, string? filter = null) => new(new(id), new(owner), caught, filter, Evidence, Evidence, outcome, subsequent is null ? null : new ThrowSiteId(subsequent));
+    private static ExceptionRegionFact Region(string id, string owner, params string[] catches) => new(new(id), new(owner), Evidence, [.. catches.Select(x => new CatchId(x))], false);
     private static ExceptionWitness AnalyzeOrigin(ProgramSnapshot snapshot) => Assert.Single(
-        ExceptionQuery.Analyze(snapshot, [new("Action")], new()).Results, x => x.Origin == "origin");
+        ExceptionQuery.Analyze(snapshot, [new("Action")], new()).Results, x => x.Origin == new ThrowSiteId("origin"));
+
+    [Fact]
+    public void Snapshot_ids_serialize_as_plain_strings_and_round_trip()
+    {
+        var snapshot = Snapshot([Method("Action"), Method("Leaf")], [Call("Action", "Leaf", "al", regions: ["try"])],
+            [Throw("Leaf", regions: ["try"]) with { CatchId = new CatchId("catch") }],
+            [Handler("catch", "Action", HandlerOutcome.Rethrows, "origin")], [Region("try", "Action", "catch")]);
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var json = JsonSerializer.Serialize(snapshot, options);
+        using (var doc = JsonDocument.Parse(json))
+        {
+            var root = doc.RootElement;
+            Assert.Equal("Action", root.GetProperty("callables")[0].GetProperty("id").GetString());
+            Assert.Equal("al", root.GetProperty("callSites")[0].GetProperty("id").GetString());
+            Assert.Equal("try", root.GetProperty("callSites")[0].GetProperty("protectedRegions")[0].GetString());
+            var origin = root.GetProperty("throwSites")[0];
+            Assert.Equal("origin", origin.GetProperty("id").GetString());
+            Assert.Equal("catch", origin.GetProperty("catchId").GetString());
+            Assert.Equal("origin", root.GetProperty("catches")[0].GetProperty("subsequentThrow").GetString());
+            Assert.Equal("catch", root.GetProperty("exceptionRegions")[0].GetProperty("catches")[0].GetString());
+            Assert.Equal("test-project", root.GetProperty("callables")[0].GetProperty("compilation").GetString());
+            Assert.Equal("Exception", root.GetProperty("types")[0].GetProperty("id").GetString());
+        }
+        var back = JsonSerializer.Deserialize<ProgramSnapshot>(json, options)!;
+        Assert.Equal(new CallableId("Action"), back.Callables[0].Id);
+        Assert.Equal(new CallSiteId("al"), back.CallSites[0].Id);
+        Assert.Equal(new ExceptionRegionId("try"), Assert.Single(back.CallSites[0].ProtectedRegions));
+        Assert.Equal(new ThrowSiteId("origin"), back.ThrowSites[0].Id);
+        Assert.Equal(new CatchId("catch"), back.ThrowSites[0].CatchId);
+        Assert.Equal(new ThrowSiteId("origin"), back.Catches[0].SubsequentThrow);
+        Assert.Equal(new CatchId("catch"), Assert.Single(back.ExceptionRegions[0].Catches));
+        Assert.Equal(Project, back.Callables[0].Compilation);
+        Assert.Equal(new TypeId("Exception"), back.Types[0].Id);
+    }
 
     [Fact]
     public void Diamond_preserves_each_witness_without_global_visited_pruning()
@@ -102,7 +144,7 @@ public sealed class CoreTests
     [InlineData(HandlerOutcome.Replaces)]
     public void Changed_exception_retains_subsequent_interception(HandlerOutcome outcome)
     {
-        var next = Throw("Middle", "next") with { CatchId = "inner", Kind = outcome == HandlerOutcome.Rethrows ? ThrowKind.Rethrow : ThrowKind.Explicit };
+        var next = Throw("Middle", "next") with { CatchId = new CatchId("inner"), Kind = outcome == HandlerOutcome.Rethrows ? ThrowKind.Rethrow : ThrowKind.Explicit };
         var snapshot = Snapshot([Method("Action"), Method("Middle"), Method("Leaf")],
             [Call("Action", "Middle", "am", regions: ["outer-region"]), Call("Middle", "Leaf", "ml", regions: ["inner-region"])],
             [Throw("Leaf"), next], [Handler("inner", "Middle", outcome, "next"), Handler("outer", "Action", HandlerOutcome.Intercepts)],
@@ -110,8 +152,8 @@ public sealed class CoreTests
         var witness = AnalyzeOrigin(snapshot);
         Assert.Equal(ExceptionStatus.RethrownOrReplaced, witness.Status);
         Assert.Equal(ExceptionStatus.Intercepted, witness.SubsequentStatus);
-        Assert.Equal("next", witness.SubsequentOrigin);
-        Assert.Equal(new[] { "inner", "outer" }, witness.HandlerIds);
+        Assert.Equal(new ThrowSiteId("next"), witness.SubsequentOrigin);
+        Assert.Equal(new[] { new CatchId("inner"), new CatchId("outer") }, witness.HandlerIds);
     }
 
     [Fact]
@@ -119,7 +161,7 @@ public sealed class CoreTests
     {
         var snapshot = Snapshot([Method("Action"), Method("Middle"), Method("Leaf")],
             [Call("Action", "Middle", "am", regions: ["outer-region"]), Call("Middle", "Leaf", "ml", regions: ["inner-region"])],
-            [Throw("Leaf"), Throw("Middle", "next") with { Kind = ThrowKind.Rethrow, CatchId = "inner" }],
+            [Throw("Leaf"), Throw("Middle", "next") with { Kind = ThrowKind.Rethrow, CatchId = new CatchId("inner") }],
             [Handler("inner", "Middle", HandlerOutcome.Rethrows, "next"), Handler("outer", "Action", HandlerOutcome.Intercepts, filter: "enabled")],
             [Region("inner-region", "Middle", "inner"), Region("outer-region", "Action", "outer")]);
         var witness = AnalyzeOrigin(snapshot);
@@ -135,18 +177,18 @@ public sealed class CoreTests
             [Handler("catch", "Action", HandlerOutcome.Intercepts, caught: Type("OtherException"))], [Region("try", "Action", "catch")]);
         var witness = AnalyzeOrigin(snapshot);
         Assert.Equal(ExceptionStatus.Unknown, witness.Status);
-        Assert.Equal(new[] { "catch" }, witness.HandlerIds);
+        Assert.Equal(new[] { new CatchId("catch") }, witness.HandlerIds);
         Assert.Contains("matching", witness.Reason);
     }
 
     [Fact]
     public void Handler_origin_is_retained_with_scoped_uncertainty()
     {
-        var snapshot = Snapshot([Method("Action")], [], [Throw("Action") with { CatchId = "catch" }],
+        var snapshot = Snapshot([Method("Action")], [], [Throw("Action") with { CatchId = new CatchId("catch") }],
             [Handler("catch", "Action", HandlerOutcome.Unknown)]);
         var witness = AnalyzeOrigin(snapshot);
         Assert.Equal(ExceptionStatus.Unknown, witness.Status);
-        Assert.Equal("origin", witness.Origin);
+        Assert.Equal(new ThrowSiteId("origin"), witness.Origin);
         Assert.Contains("inside a handler", witness.Reason);
     }
 

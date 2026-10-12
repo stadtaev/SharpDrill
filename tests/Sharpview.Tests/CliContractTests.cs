@@ -67,7 +67,7 @@ public sealed class CliContractTests
         using var doc = JsonDocument.Parse(first.Out);
         var method = doc.RootElement.GetProperty("snapshot").GetProperty("callables").EnumerateArray()
             .Single(x => x.GetProperty("displaySignature").GetString() == "Research.Api.OrdersController.Get()");
-        var id = method.GetProperty("id").GetProperty("value").GetString()!;
+        var id = method.GetProperty("id").GetString()!;
         var result = await Run("chains", ResearchFixture.Input, "--root-id", id);
         Assert.Equal(1, result.Exit);
         Assert.Contains("OrdersController.Get() --> Research.Application.Service.Load()", result.Out);

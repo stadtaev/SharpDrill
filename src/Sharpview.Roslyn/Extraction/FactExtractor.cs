@@ -227,20 +227,29 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
             if (t.ToDisplayString() == "Microsoft.AspNetCore.Mvc.ControllerBase" || Attributes(t).Contains("Microsoft.AspNetCore.Mvc.ControllerAttribute")) return true;
         return false;
     }
-    public ProgramSnapshot Snapshot() => new(compilations,
-        types.Values.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(), methods.Values.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
-        calls.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(), dependencies.Distinct().OrderBy(x => x.OwningCallable?.Value, StringComparer.Ordinal).ThenBy(x => x.ReferencedType.DisplayName, StringComparer.Ordinal).ToImmutableArray(),
-        throws.OrderBy(x => x.Id, StringComparer.Ordinal).ToImmutableArray(), gaps.OrderBy(x => x.Compilation?.Value, StringComparer.Ordinal).ThenBy(x => x.Evidence?.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence?.SpanStart).ThenBy(x => x.Message, StringComparer.Ordinal).ToImmutableArray(),
-        catches.OrderBy(x => x.Id, StringComparer.Ordinal).ToImmutableArray(), regions.OrderBy(x => x.Id, StringComparer.Ordinal).ToImmutableArray(), actions.Distinct().OrderBy(x => x.Method.Value, StringComparer.Ordinal).ToImmutableArray(), boundaries.OrderBy(x => x.Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence.SpanStart).ToImmutableArray());
+    public ProgramSnapshot Snapshot() => new()
+    {
+        Compilations = compilations,
+        Types = types.Values.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
+        Callables = methods.Values.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
+        CallSites = calls.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
+        Dependencies = dependencies.Distinct().OrderBy(x => x.OwningCallable?.Value, StringComparer.Ordinal).ThenBy(x => x.ReferencedType.DisplayName, StringComparer.Ordinal).ToImmutableArray(),
+        ThrowSites = throws.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
+        Gaps = gaps.OrderBy(x => x.Compilation?.Value, StringComparer.Ordinal).ThenBy(x => x.Evidence?.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence?.SpanStart).ThenBy(x => x.Message, StringComparer.Ordinal).ToImmutableArray(),
+        Catches = catches.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
+        ExceptionRegions = regions.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
+        ControllerActions = actions.Distinct().OrderBy(x => x.Method.Value, StringComparer.Ordinal).ToImmutableArray(),
+        BoundaryHandling = boundaries.OrderBy(x => x.Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence.SpanStart).ToImmutableArray()
+    };
 
     private sealed class BodyWalker(FactExtractor facts, SemanticModel model, CompilationFact compilation, CallableId owner, CancellationToken token) : OperationWalker
     {
         private int ordinal;
         private string NodeId(string kind, SyntaxNode n) => $"{owner.Value}|{kind}|{n.SyntaxTree.FilePath}:{n.SpanStart}";
         private static bool IsDeclaration(SyntaxNode node) => node is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax or LocalFunctionStatementSyntax or AnonymousFunctionExpressionSyntax or PropertyDeclarationSyntax or IndexerDeclarationSyntax;
-        private ImmutableArray<string> Protected(SyntaxNode node) => node.Ancestors().TakeWhile(x => !IsDeclaration(x))
-            .OfType<TryStatementSyntax>().Where(x => x.Block.Span.Contains(node.Span)).Select(x => NodeId("try", x)).ToImmutableArray();
-        private string? CatchOwner(SyntaxNode node) => node.Ancestors().TakeWhile(x => !IsDeclaration(x)).OfType<CatchClauseSyntax>().Select(x => NodeId("catch", x)).FirstOrDefault();
+        private ImmutableArray<ExceptionRegionId> Protected(SyntaxNode node) => node.Ancestors().TakeWhile(x => !IsDeclaration(x))
+            .OfType<TryStatementSyntax>().Where(x => x.Block.Span.Contains(node.Span)).Select(x => new ExceptionRegionId(NodeId("try", x))).ToImmutableArray();
+        private CatchId? CatchOwner(SyntaxNode node) => node.Ancestors().TakeWhile(x => !IsDeclaration(x)).OfType<CatchClauseSyntax>().Select(x => (CatchId?)new CatchId(NodeId("catch", x))).FirstOrDefault();
         internal void Gap(string message, SyntaxNode node) => facts.gaps.Add(new(GapKind.Unsupported, compilation.Id, owner, message, facts.Evidence(node)));
         public override void Visit(IOperation? operation) { token.ThrowIfCancellationRequested(); base.Visit(operation); }
         public override void VisitAnonymousFunction(IAnonymousFunctionOperation operation) { }
@@ -336,7 +345,7 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
             var exactType = exactOperand is IObjectCreationOperation { Type: { TypeKind: not TypeKind.Error } constructedType } ? constructedType : null;
             if (staticOperand?.ConstantValue is { HasValue: true, Value: null })
                 Gap("Throwing null produces an implicit NullReferenceException; implicit exception origins are outside supported analysis.", operation.Syntax);
-            facts.throws.Add(new(NodeId("throw", operation.Syntax), owner, operation.Exception is null ? ThrowKind.Rethrow : ThrowKind.Explicit,
+            facts.throws.Add(new(new(NodeId("throw", operation.Syntax)), owner, operation.Exception is null ? ThrowKind.Rethrow : ThrowKind.Explicit,
                 staticType is null ? null : facts.Use(staticType), facts.Evidence(operation.Syntax), Protected(operation.Syntax), exactType is not null,
                 CatchOwner(operation.Syntax), exactType is null ? null : facts.Use(exactType)));
             base.VisitThrow(operation);
@@ -360,23 +369,23 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
         {
             foreach (var region in declaration.DescendantNodes(x => x == declaration || !IsDeclaration(x)).OfType<TryStatementSyntax>())
             {
-                var ids = ImmutableArray.CreateBuilder<string>();
+                var ids = ImmutableArray.CreateBuilder<CatchId>();
                 foreach (var clause in region.Catches)
                 {
-                    var id = NodeId("catch", clause); ids.Add(id);
+                    var id = new CatchId(NodeId("catch", clause)); ids.Add(id);
                     var statements = clause.Block.Statements;
-                    var outcome = HandlerOutcome.Unknown; string? next = null;
+                    var outcome = HandlerOutcome.Unknown; ThrowSiteId? next = null;
                     if (statements.Count == 0 || statements.All(x => x is ReturnStatementSyntax { Expression: null } or EmptyStatementSyntax)) outcome = HandlerOutcome.Intercepts;
                     if (statements.Count == 1 && statements[0] is ThrowStatementSyntax t)
                     {
                         outcome = t.Expression is null ? HandlerOutcome.Rethrows : HandlerOutcome.Replaces;
-                        next = NodeId("throw", t);
+                        next = new ThrowSiteId(NodeId("throw", t));
                     }
                     var type = clause.Declaration is null ? null : model.GetTypeInfo(clause.Declaration.Type, token).Type;
                     facts.catches.Add(new(id, owner, type is null ? null : facts.Use(type), clause.Filter?.FilterExpression.ToString(),
                         facts.Evidence(clause), facts.Evidence(clause.Block), outcome, next));
                 }
-                facts.regions.Add(new(NodeId("try", region), owner, facts.Evidence(region.Block), ids.ToImmutable(), region.Finally is not null));
+                facts.regions.Add(new(new(NodeId("try", region)), owner, facts.Evidence(region.Block), ids.ToImmutable(), region.Finally is not null));
             }
             foreach (var node in declaration.DescendantNodes(x => x == declaration || !IsDeclaration(x)).Where(x => x is YieldStatementSyntax or LockStatementSyntax))
                 Gap("Iterator/lock exception behaviour is outside the supported model.", node);

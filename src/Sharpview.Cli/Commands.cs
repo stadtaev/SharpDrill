@@ -27,7 +27,7 @@ internal static class Commands
             case "inspect":
                 if (options.Format == "json")
                     await JsonSerializer.SerializeAsync(file?.BaseStream ?? Console.OpenStandardOutput(),
-                        new { schemaVersion = 2, producerVersion = "0.1.0", snapshot },
+                        new { schemaVersion = 3, producerVersion = "0.1.0", snapshot },
                         new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true }, token);
                 else report.Inspect(token);
                 break;

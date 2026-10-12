@@ -2,10 +2,10 @@ using System.Collections.Immutable;
 namespace Sharpview.Core;
 
 public enum ExceptionStatus { Intercepted, RethrownOrReplaced, MayEscape, Unknown }
-public sealed record ExceptionWitness(CallableId Action, string? Origin, string? SubsequentOrigin,
+public sealed record ExceptionWitness(CallableId Action, ThrowSiteId? Origin, ThrowSiteId? SubsequentOrigin,
     string? ExceptionType, bool IsExactType, ImmutableArray<CallableId> Path,
     ExceptionStatus Status, string Reason, ImmutableArray<SourceEvidence> Evidence,
-    ImmutableArray<string> HandlerIds, ExceptionStatus? SubsequentStatus = null,
+    ImmutableArray<CatchId> HandlerIds, ExceptionStatus? SubsequentStatus = null,
     string? StaticExceptionType = null, string? ExactExceptionType = null);
 public sealed record ExceptionSearchResult(ImmutableArray<ExceptionWitness> Results, bool OutputLimitReached,
     bool WorkLimitReached, bool DepthLimitReached, int ExpandedSites);
@@ -19,7 +19,7 @@ public static class ExceptionQuery
         var methods = snapshot.Callables.ToDictionary(x => x.Id);
         foreach (var action in actions) if (!methods.ContainsKey(action)) throw new ArgumentException($"Unknown root: {action.Value}");
         var calls = snapshot.CallSites.GroupBy(x => x.Caller).ToDictionary(g => g.Key, g => g.OrderBy(x => x.TargetDisplay, StringComparer.Ordinal).ThenBy(x => x.Id.Value, StringComparer.Ordinal).ToArray());
-        var origins = snapshot.ThrowSites.Where(x => x.Kind == ThrowKind.Explicit).GroupBy(x => x.Owner).ToDictionary(g => g.Key, g => g.OrderBy(x => x.Id, StringComparer.Ordinal).ToArray());
+        var origins = snapshot.ThrowSites.Where(x => x.Kind == ThrowKind.Explicit).GroupBy(x => x.Owner).ToDictionary(g => g.Key, g => g.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToArray());
         var regions = snapshot.ExceptionRegions.ToDictionary(x => x.Id);
         var catches = snapshot.Catches.ToDictionary(x => x.Id);
         var throws = snapshot.ThrowSites.ToDictionary(x => x.Id);
@@ -86,14 +86,14 @@ public static class ExceptionQuery
 
     private static ExceptionWitness Unwind(CallableId root, ImmutableArray<CallableId> path,
         ImmutableArray<CallSiteFact> sites, ThrowSiteFact origin, Dictionary<CallableId, CallableFact> methods,
-        Dictionary<string, ExceptionRegionFact> regions, Dictionary<string, CatchFact> catches,
-        Dictionary<string, ThrowSiteFact> throws, Dictionary<TypeId, TypeFact> types, CancellationToken token)
+        Dictionary<ExceptionRegionId, ExceptionRegionFact> regions, Dictionary<CatchId, CatchFact> catches,
+        Dictionary<ThrowSiteId, ThrowSiteFact> throws, Dictionary<TypeId, TypeFact> types, CancellationToken token)
     {
         var staticType = origin.StaticExceptionType;
         var exactType = origin.ExactExceptionType ?? (origin.IsExactType ? origin.StaticExceptionType : null);
-        var type = exactType ?? staticType; var exact = origin.IsExactType || origin.ExactExceptionType is not null; string? subsequent = null;
+        var type = exactType ?? staticType; var exact = origin.IsExactType || origin.ExactExceptionType is not null; ThrowSiteId? subsequent = null;
         var evidence = ImmutableArray.CreateBuilder<SourceEvidence>(); evidence.Add(origin.Evidence);
-        var handlers = ImmutableArray.CreateBuilder<string>();
+        var handlers = ImmutableArray.CreateBuilder<CatchId>();
         bool changed = false;
         ExceptionWitness Finish(ExceptionStatus status, string reason) => new(root, origin.Id, subsequent, type?.DisplayName, exact, path,
             changed ? ExceptionStatus.RethrownOrReplaced : status, reason, evidence.ToImmutable(), handlers.ToImmutable(), changed ? status : null, staticType?.DisplayName, exactType?.DisplayName);
@@ -101,7 +101,7 @@ public static class ExceptionQuery
             return Finish(ExceptionStatus.Unknown, "Origin is inside a handler; reaching it depends on the caught exception and handler control flow.");
         if (methods[origin.Owner].IsAsync && !methods[origin.Owner].ReturnsTask)
             return Finish(ExceptionStatus.Unknown, "Async void or custom awaitable propagation is outside the supported model.");
-        ExceptionWitness? Apply(ImmutableArray<string> protectedRegions)
+        ExceptionWitness? Apply(ImmutableArray<ExceptionRegionId> protectedRegions)
         {
             foreach (var regionId in protectedRegions)
             {
@@ -128,7 +128,7 @@ public static class ExceptionQuery
                             break;
                         case HandlerOutcome.Replaces:
                             if (handler.SubsequentThrow is null) return Finish(ExceptionStatus.Unknown, "Replacement origin unavailable.");
-                            var replacement = throws[handler.SubsequentThrow];
+                            var replacement = throws[handler.SubsequentThrow.Value];
                             subsequent = replacement.Id;
                             staticType = replacement.StaticExceptionType;
                             exactType = replacement.ExactExceptionType ?? (replacement.IsExactType ? replacement.StaticExceptionType : null);

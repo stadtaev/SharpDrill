@@ -26,7 +26,7 @@ dotnet run --project src/Sharpview.Cli -- methods tests/Fixtures/ResearchSolutio
 dotnet run --project src/Sharpview.Cli -- inspect tests/Fixtures/ResearchSolution/ResearchSolution.slnx --format json --output snapshot.json
 ```
 
-`--output` creates a new file and refuses to overwrite an existing file. JSON is schema version 2 and goes to stdout when no file is selected; diagnostics go to stderr. Input may be `.csproj`, `.sln` or `.slnx`. Select `--framework` for multi-target projects and `--configuration` when required.
+`--output` creates a new file and refuses to overwrite an existing file. JSON is schema version 3 and goes to stdout when no file is selected; diagnostics go to stderr. Input may be `.csproj`, `.sln` or `.slnx`. Select `--framework` for multi-target projects and `--configuration` when required.
 
 A path looks like:
 

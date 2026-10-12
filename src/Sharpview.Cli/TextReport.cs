@@ -6,7 +6,7 @@ internal sealed class TextReport(ProgramSnapshot snapshot, TextWriter output, Ar
 {
     private readonly Dictionary<CallableId, CallableFact> methods = snapshot.Callables.ToDictionary(x => x.Id);
     private readonly Dictionary<CallSiteId, CallSiteFact> sites = snapshot.CallSites.ToDictionary(x => x.Id);
-    private readonly Dictionary<string, ThrowSiteFact> throws = snapshot.ThrowSites.ToDictionary(x => x.Id);
+    private readonly Dictionary<ThrowSiteId, ThrowSiteFact> throws = snapshot.ThrowSites.ToDictionary(x => x.Id);
     private readonly HashSet<string> ambiguous = snapshot.Callables.GroupBy(x => x.DisplaySignature)
         .Where(x => x.Count() > 1).Select(x => x.Key).ToHashSet(StringComparer.Ordinal);
     internal string Name(CallableId id)
@@ -69,7 +69,7 @@ internal sealed class TextReport(ProgramSnapshot snapshot, TextWriter output, Ar
         {
             token.ThrowIfCancellationRequested();
             var method = methods[origin.Owner];
-            output.WriteLine($"Project: {Project(method)}\nOrigin: {Name(origin.Owner)}\n  Type: {snapshot.Types.FirstOrDefault(x => x.Id == method.DeclaringType)?.DisplayName}\n  Throw: {origin.Kind} | Static exception type: {origin.StaticExceptionType?.DisplayName ?? "unknown / original for rethrow"} ({(origin.IsExactType ? "static type" : "static; runtime type may differ")})\n  Exact construction type: {origin.ExactExceptionType?.DisplayName ?? (origin.IsExactType ? origin.StaticExceptionType?.DisplayName : null) ?? "unknown"}\n  Evidence: {Location(origin.Evidence)}\n  Origin ID: {origin.Id}");
+            output.WriteLine($"Project: {Project(method)}\nOrigin: {Name(origin.Owner)}\n  Type: {snapshot.Types.FirstOrDefault(x => x.Id == method.DeclaringType)?.DisplayName}\n  Throw: {origin.Kind} | Static exception type: {origin.StaticExceptionType?.DisplayName ?? "unknown / original for rethrow"} ({(origin.IsExactType ? "static type" : "static; runtime type may differ")})\n  Exact construction type: {origin.ExactExceptionType?.DisplayName ?? (origin.IsExactType ? origin.StaticExceptionType?.DisplayName : null) ?? "unknown"}\n  Evidence: {Location(origin.Evidence)}\n  Origin ID: {origin.Id.Value}");
         }
         foreach (var handler in snapshot.Catches)
         {
@@ -77,7 +77,7 @@ internal sealed class TextReport(ProgramSnapshot snapshot, TextWriter output, Ar
             output.WriteLine($"Catch: {handler.CaughtType?.DisplayName ?? "all exceptions"} | Handler: {handler.Outcome}\n  Project: {Project(methods[handler.Owner])} | Method: {Name(handler.Owner)}\n  Filter: {handler.Filter ?? "none"}\n  Evidence: {Location(handler.Evidence)}");
             foreach (var region in snapshot.ExceptionRegions.Where(x => x.Catches.Contains(handler.Id)))
                 output.WriteLine($"  Protected region: {Location(region.ProtectedBlock)} | span {region.ProtectedBlock.SpanStart}+{region.ProtectedBlock.SpanLength} | Finally: {region.HasFinally}");
-            if (handler.SubsequentThrow is { } next && throws.TryGetValue(next, out var nextThrow)) output.WriteLine($"  Subsequent origin: {Location(nextThrow.Evidence)} ({next})");
+            if (handler.SubsequentThrow is { } next && throws.TryGetValue(next, out var nextThrow)) output.WriteLine($"  Subsequent origin: {Location(nextThrow.Evidence)} ({next.Value})");
         }
         output.WriteLine("Boundary registrations (evidence only; runtime coverage and middleware order unknown):");
         foreach (var boundary in snapshot.BoundaryHandling)
@@ -96,7 +96,7 @@ internal sealed class TextReport(ProgramSnapshot snapshot, TextWriter output, Ar
         output.WriteLine($"Path: {string.Join(" --> ", witness.Path.Select(Name))}");
         output.WriteLine($"Status: {Status(witness.Status)}\nReason: {witness.Reason}");
         if (witness.SubsequentOrigin is { } next && throws.TryGetValue(next, out var subsequent))
-            output.WriteLine($"Subsequent origin: {Name(subsequent.Owner)} at {Location(subsequent.Evidence)} | {next}");
+            output.WriteLine($"Subsequent origin: {Name(subsequent.Owner)} at {Location(subsequent.Evidence)} | {next.Value}");
         if (witness.SubsequentStatus is { } nextStatus) output.WriteLine($"Subsequent status: {Status(nextStatus)}");
         foreach (var evidence in witness.Evidence) output.WriteLine($"Evidence: {Location(evidence)}");
         var action = methods[witness.Action];
