@@ -52,6 +52,8 @@ internal static class Commands
                 var graph = LayerGraph.Build(index, report.Layers, token);
                 var findings = LayerRules.AllowedDependencies(graph, report.Layers.Model);
                 report.LayerOverview(graph, findings);
+                foreach (var name in options.Allowed.SelectMany(x => new[] { x.From, x.To }).Distinct().Where(x => !report.Layers.Model.Layers.Contains(x)))
+                    Console.Error.WriteLine($"Warning: --allow names layer '{name}', which no --layer mapping defines.");
                 var violations = findings.Count(x => x.Verdict == Verdict.Violation);
                 var undecided = findings.Count(x => x.Verdict == Verdict.Unknown);
                 incomplete |= violations > 0 || undecided > 0;
@@ -76,7 +78,8 @@ internal static class Commands
     private static ImmutableArray<CallableId> SelectRoots(ProgramIndex index, Arguments options, CancellationToken token)
     {
         var source = index.Snapshot.Callables.Where(x => x.Body != BodyStatus.MetadataOnly);
-        if (options.Command is "controllers" or "exceptions" or "reach")
+        // reach defaults to controller actions but accepts any explicit source root.
+        if (options.Command is "controllers" or "exceptions" || options.Command == "reach" && options.Root is null && options.RootId is null)
         {
             var actions = AspNetConventions.ControllerActions(index, token).Select(x => x.Method).ToHashSet();
             source = source.Where(x => actions.Contains(x.Id));

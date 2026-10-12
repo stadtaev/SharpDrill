@@ -63,7 +63,7 @@ public sealed class ProgramIndex
     public string ProjectName(CompilationId id) => compilations.TryGetValue(id, out var fact) ? Path.GetFileNameWithoutExtension(fact.ProjectPath) : "metadata";
     public TypeFact? DeclaringType(CallableId id) => callables.TryGetValue(id, out var fact) && fact.DeclaringType is { } type ? types.GetValueOrDefault(type) : null;
 
-    public CallSiteFact CallSite(CallSiteId id) => sites[id];
+    public CallSiteFact CallSite(CallSiteId id) => sites.TryGetValue(id, out var fact) ? fact : throw new KeyNotFoundException($"Unknown call site: {id.Value}");
     // Ordered by target display, then site ID.
     public ImmutableArray<CallSiteFact> Outgoing(CallableId caller) => outgoing.GetValueOrDefault(caller, []);
     // Sites whose declared binding is the callable, ordered by site ID.
@@ -72,10 +72,10 @@ public sealed class ProgramIndex
     public ImmutableArray<ThrowSiteFact> ThrowSites(CallableId owner) => throwsByOwner.GetValueOrDefault(owner, []);
     public ImmutableArray<CatchFact> Catches(CallableId owner) => catchesByOwner.GetValueOrDefault(owner, []);
     public ImmutableArray<AnalysisGap> Gaps(CallableId owner) => gapsByOwner.GetValueOrDefault(owner, []);
-    public ThrowSiteFact ThrowSite(ThrowSiteId id) => throwSites[id];
+    public ThrowSiteFact ThrowSite(ThrowSiteId id) => throwSites.TryGetValue(id, out var fact) ? fact : throw new KeyNotFoundException($"Unknown throw site: {id.Value}");
     public bool TryGetThrowSite(ThrowSiteId id, out ThrowSiteFact fact) => throwSites.TryGetValue(id, out fact!);
-    public CatchFact Catch(CatchId id) => catches[id];
-    public ExceptionRegionFact Region(ExceptionRegionId id) => regions[id];
+    public CatchFact Catch(CatchId id) => catches.TryGetValue(id, out var fact) ? fact : throw new KeyNotFoundException($"Unknown catch: {id.Value}");
+    public ExceptionRegionFact Region(ExceptionRegionId id) => regions.TryGetValue(id, out var fact) ? fact : throw new KeyNotFoundException($"Unknown region: {id.Value}");
     // Regions listing the handler, in snapshot order.
     public ImmutableArray<ExceptionRegionFact> RegionsOf(CatchId handler) => regionsByCatch.GetValueOrDefault(handler, []);
     // Callables declared by the type, ordered by display signature, then ID.

@@ -77,6 +77,13 @@ public sealed class ArchitectureTests
             graph.Edges.Select(x => $"{x.From}-->{x.To} {x.Kind} {x.Count} {x.Evidence?.Path} {x.WitnessSource}-->{x.WitnessTarget}"));
         // Console.WriteLine is an unmapped referenced target; the metadata-owned signature fact is not a program edge.
         Assert.Equal(1, graph.ExternalReferences);
+        // Base-type arguments are dependencies too: Repo : Base<IRepo> reaches IRepo's layer.
+        var generic = new ProgramIndex(index.Snapshot with
+        {
+            Dependencies = [new(new TypeId("Controller"), null, new TypeUse(new TypeId("Repo"), "Repo<IRepo>", NullabilityKind.NotAnnotated, [Use("IRepo")]), DependencyKind.Inheritance, At("c.cs", 1))]
+        });
+        Assert.Equal(["API-->Infrastructure", "API-->Application"],
+            LayerGraph.Build(generic, new LayerMap(generic, new(Mappings))).Edges.Where(x => x.Kind == LayerEdgeKind.TypeDependency).Select(x => $"{x.From}-->{x.To}").OrderByDescending(x => x));
         Assert.Equal(1, graph.UnresolvedCalls);
     }
 

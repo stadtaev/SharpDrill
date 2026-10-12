@@ -92,6 +92,8 @@ public sealed class CliTests
         Assert.Contains("  [2] Research.Infrastructure.Repository.Read() | Project: Research.Infrastructure | Layer: Infrastructure", result.Out);
         Assert.Contains("    Path: Research.Api.OrdersController.Get() --> Research.Application.Service.Load() --> Research.Infrastructure.Repository.Read()", result.Out);
         Assert.Contains("| direct call", result.Out);
+        var service = await Run("reach", ResearchFixture.Input, "--root", "Research.Application.Service.Load()");
+        Assert.Contains("  [1] Research.Infrastructure.Repository.Read()", service.Out);
         var dispatch = await Run("reach", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Interface(Research.Infrastructure.IRepository)");
         Assert.Contains("Boundary: Interface dispatch --> Research.Infrastructure.IRepository.Read() | candidates followed: 0", dispatch.Out);
     }

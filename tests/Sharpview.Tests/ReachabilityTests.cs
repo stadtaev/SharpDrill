@@ -63,6 +63,19 @@ public sealed class ReachabilityTests
     }
 
     [Fact]
+    public void Definitely_reachable_callables_are_never_labelled_candidate_only()
+    {
+        // Root --I.Run (interface)--> Impl.Run at distance 1, but Root --> B --> Impl.Run directly at distance 2.
+        var index = Index([Method("Root"), Method("I.Run", BodyStatus.NoBody), Method("Impl.Run"), Method("B"), Method("Leaf")],
+            [Call("a-iface", "Root", "I.Run", DispatchKind.Interface), Call("b", "Root", "B"), Call("b-impl", "B", "Impl.Run"), Call("leaf", "Impl.Run", "Leaf")],
+            [new(new("I.Run"), new("Impl.Run"), ImplementationKind.Interface)]);
+        var reach = Reach(index, new(FollowCandidates: true));
+        Assert.Equal(["B@1:b", "Impl.Run@2:b>b-impl", "Leaf@3:b>b-impl>leaf"], reach.Reached.Select(Describe));
+        Assert.All(reach.Reached, x => Assert.False(x.ViaCandidate));
+        Assert.Equal(1, Assert.Single(reach.Boundaries, x => x.Kind == ReachBoundaryKind.Dispatch).CandidatesFollowed);
+    }
+
+    [Fact]
     public void Dispatch_stops_unless_candidates_are_followed_and_then_marks_them()
     {
         var index = Index([Method("Root"), Method("IRepo.Read", BodyStatus.NoBody), Method("Sql.Read"), Method("Cached.Read"), Method("Base.Run"), Method("Derived.Run")],

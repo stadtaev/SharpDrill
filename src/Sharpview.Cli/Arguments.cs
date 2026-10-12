@@ -98,7 +98,7 @@ internal sealed record Arguments(string Command, AnalysisRequest Request, ChainO
         }
         if (root is not null && rootId is not null) throw new ArgumentException("--root and --root-id are mutually exclusive.");
         if (command is "methods" or "inspect" && (root is not null || rootId is not null || locations || layers.Count > 0 || seen.Overlaps(["--dispatch", "--max-depth", "--max-chains", "--max-expansions"])))
-            throw new ArgumentException("Root, traversal, layer and location options require chains, controllers or exceptions.");
+            throw new ArgumentException("Root, traversal, layer and location options require chains, controllers, exceptions, reach or layers.");
         if (command != "inspect" && (seen.Contains("--format") || output is not null)) throw new ArgumentException("--format and --output require inspect.");
         if (command == "layers" && (root is not null || rootId is not null || locations || seen.Overlaps(["--dispatch", "--max-depth", "--max-chains", "--max-expansions"])))
             throw new ArgumentException("layers accepts only --layer, --allow and project-loading options.");

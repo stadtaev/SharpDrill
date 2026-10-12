@@ -20,7 +20,8 @@ public sealed record ReachBoundary(CallableId Caller, CallSiteId? Site, ReachBou
 public sealed record RootReach(CallableId Root, ImmutableArray<ReachedCallable> Reached, ImmutableArray<ReachBoundary> Boundaries, bool DepthLimitReached);
 public sealed record ReachResult(ImmutableArray<RootReach> Roots, bool WorkLimitReached, int ExpandedSites);
 
-// Breadth-first reachability per root: each callable is reported once with one shortest witness. Unlike path
+// Breadth-first reachability per root: each callable is reported once with one shortest witness. With candidates
+// followed, direct reachability is computed first; ViaCandidate marks callables reachable only through a candidate step. Unlike path
 // enumeration this stays linear in the call graph, so it suits "what can this action reach" rules on large solutions.
 public static class ReachabilityQuery
 {
@@ -43,8 +44,19 @@ public static class ReachabilityQuery
                 reached[target] = new(target, from.Distance + 1, from.Witness.Add(step), from.ViaCandidate || step.Candidate);
                 pending.Enqueue(target);
             }
-            while (!workLimited && queue.TryDequeue(out var current))
+            // Candidate steps found during the direct-only phase wait until every definitely reachable callable is known,
+            // so a callable reachable through direct calls is never labelled as candidate-only.
+            var deferred = new List<(ReachedCallable From, ReachStep Step)>();
+            var candidatePhase = false;
+            while (!workLimited && (queue.Count > 0 || (!candidatePhase && deferred.Count > 0)))
             {
+                if (queue.Count == 0)
+                {
+                    candidatePhase = true;
+                    foreach (var (from, step) in deferred) Visit(step.Target, from, step, queue);
+                    continue;
+                }
+                var current = queue.Dequeue();
                 cancellationToken.ThrowIfCancellationRequested();
                 var here = reached[current];
                 var callable = index.Callable(current);
@@ -72,7 +84,9 @@ public static class ReachabilityQuery
                     if (site.Dispatch == DispatchKind.Direct) { Visit(target, here, new(site.Id, target, false), queue); continue; }
                     var candidates = options.FollowCandidates ? Candidates(index, target) : [];
                     boundaries.Add(new(current, site.Id, ReachBoundaryKind.Dispatch, site.Dispatch, target, candidates.Length));
-                    foreach (var candidate in candidates) Visit(candidate, here, new(site.Id, candidate, true), queue);
+                    foreach (var candidate in candidates)
+                        if (candidatePhase) Visit(candidate, here, new(site.Id, candidate, true), queue);
+                        else deferred.Add((here, new(site.Id, candidate, true)));
                 }
             }
             results.Add(new(root, [.. reached.Values.Where(x => x.Callable != root)

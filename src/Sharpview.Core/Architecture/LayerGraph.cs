@@ -74,13 +74,20 @@ public sealed record LayerGraph(ImmutableArray<LayerEdge> Edges, int ExternalRef
             }
             else continue;
             // Type parameters have no declaration and are not dependencies on another element.
-            if (dependency.ReferencedType.Declaration is not { } referenced || !index.TryGetType(referenced, out var target)) continue;
-            Add(from, Layer(target.Compilation, map.LayerOf(referenced)), LayerEdgeKind.TypeDependency, dependency.Evidence, source, target.DisplayName);
+            // Other dependency kinds are already flattened into one fact per type argument; inheritance facts are not,
+            // so `class Order : Entity<Key>` also depends on Key.
+            foreach (var use in dependency.Kind == DependencyKind.Inheritance ? Flatten(dependency.ReferencedType) : [dependency.ReferencedType])
+            {
+                if (use.Declaration is not { } referenced || !index.TryGetType(referenced, out var target)) continue;
+                Add(from, Layer(target.Compilation, map.LayerOf(referenced)), LayerEdgeKind.TypeDependency, dependency.Evidence, source, target.DisplayName);
+            }
         }
 
         return new([.. edges.Select(x => new LayerEdge(x.Key.From, x.Key.To, x.Key.Kind, x.Value.Count, x.Value.Evidence, x.Value.Source, x.Value.Target))
             .OrderBy(x => x.From, StringComparer.Ordinal).ThenBy(x => x.To, StringComparer.Ordinal).ThenBy(x => x.Kind)], external, unresolved);
     }
+
+    private static IEnumerable<TypeUse> Flatten(TypeUse use) => use.Components.SelectMany(Flatten).Prepend(use);
 
     private static int Compare(SourceEvidence a, string aSource, string aTarget, SourceEvidence b, string bSource, string bTarget)
     {
