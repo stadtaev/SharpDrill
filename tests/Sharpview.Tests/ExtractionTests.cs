@@ -297,7 +297,9 @@ public sealed class ExtractionTests
         Assert.Equal(("object.ToString()", BodyStatus.MetadataOnly, CallableModifiers.Virtual), (objectToString.DisplaySignature, objectToString.Body, objectToString.Modifiers));
         Assert.Equal(CallableModifiers.ExplicitImplementation, Method("Greeter.IGreeter.Greet()").Modifiers);
         Assert.Null(Method("Greeter.IGreeter.Greet()").Overrides);
-        Assert.True(Method("Greeter.Finalize()").Modifiers.HasFlag(CallableModifiers.Finalizer));
+        Assert.Equal(CallableModifiers.Finalizer, Method("Greeter.Finalize()").Modifiers);
+        // Roslyn reports destructors as neither override nor overriding object.Finalize(); modifiers mirror Roslyn's flags.
+        Assert.Null(Method("Greeter.Finalize()").Overrides);
         Assert.Equal(CallableModifiers.Static | CallableModifiers.Generic, Method("Tools.Echo<T>(T)").Modifiers);
         Assert.Equal(CallableModifiers.Static | CallableModifiers.Extension, Method("Tools.Twice(int)").Modifiers);
         Assert.Equal(CallableModifiers.Static | CallableModifiers.Operator, Method("Money.op_Addition(Money, Money)").Modifiers);
@@ -366,6 +368,93 @@ public sealed class ExtractionTests
         });
         Assert.Equal(keys.Order(StringComparer.Ordinal).Select(x => x.Replace("@Input.cs", "@src/Input.cs", StringComparison.Ordinal)),
             moved.Types.Select(x => x.Key).Concat(moved.Callables.Select(x => x.Key)).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task Same_signature_lambdas_in_different_methods_of_one_type_are_distinct_callables()
+    {
+        var snapshot = await Extract("""
+            using System;
+            namespace Shop {
+                public static class Sample {
+                    public static void One() { Action a = () => First(); a(); }
+                    public static void Two() { Action b = () => Second(); b(); }
+                    public static void First() { }
+                    public static void Second() { }
+                }
+            }
+            """);
+        CallableFact Method(string signature) => Assert.Single(snapshot.Callables, x => x.DisplaySignature == signature);
+        var lambdas = snapshot.Callables.Where(x => x.Kind == CallableKind.Lambda).ToArray();
+        Assert.Equal(2, lambdas.Select(x => x.Id).Distinct().Count());
+        var first = Assert.Single(lambdas, x => x.ContainingCallable == Method("Shop.Sample.One()").Id);
+        var second = Assert.Single(lambdas, x => x.ContainingCallable == Method("Shop.Sample.Two()").Id);
+        Assert.Equal(Method("Shop.Sample.First()").Id, Assert.Single(snapshot.CallSites, x => x.Caller == first.Id).BoundTarget);
+        Assert.Equal(Method("Shop.Sample.Second()").Id, Assert.Single(snapshot.CallSites, x => x.Caller == second.Id).BoundTarget);
+        Assert.Equal("Fixture|M:Shop.Sample.One|lambda:0@Input.cs:4:47", first.Key);
+        Assert.Equal("Fixture|M:Shop.Sample.Two|lambda:0@Input.cs:5:47", second.Key);
+        Assert.Equal((4, 47), (first.Declarations[0].StartLine, first.Declarations[0].StartColumn));
+        Assert.Equal((5, 47), (second.Declarations[0].StartLine, second.Declarations[0].StartColumn));
+    }
+
+    [Fact]
+    public async Task Same_named_local_functions_in_different_methods_of_one_type_are_distinct_callables()
+    {
+        var snapshot = await Extract("""
+            namespace Shop {
+                public static class Sample {
+                    public static void One() { Helper(); void Helper() => LocalA(); }
+                    public static void Two() { Helper(); void Helper() => LocalB(); }
+                    public static void LocalA() { }
+                    public static void LocalB() { }
+                }
+            }
+            """);
+        CallableFact Method(string signature) => Assert.Single(snapshot.Callables, x => x.DisplaySignature == signature);
+        var locals = snapshot.Callables.Where(x => x.Kind == CallableKind.LocalFunction).ToArray();
+        Assert.Equal(2, locals.Select(x => x.Id).Distinct().Count());
+        var one = Assert.Single(locals, x => x.ContainingCallable == Method("Shop.Sample.One()").Id);
+        var two = Assert.Single(locals, x => x.ContainingCallable == Method("Shop.Sample.Two()").Id);
+        Assert.Equal(Method("Shop.Sample.LocalA()").Id, Assert.Single(snapshot.CallSites, x => x.Caller == one.Id).BoundTarget);
+        Assert.Equal(Method("Shop.Sample.LocalB()").Id, Assert.Single(snapshot.CallSites, x => x.Caller == two.Id).BoundTarget);
+        Assert.Equal(one.Id, Assert.Single(snapshot.CallSites, x => x.Caller == Method("Shop.Sample.One()").Id).BoundTarget);
+        Assert.Equal(two.Id, Assert.Single(snapshot.CallSites, x => x.Caller == Method("Shop.Sample.Two()").Id).BoundTarget);
+        Assert.Equal("Fixture|M:Shop.Sample.One|local:Helper@Input.cs:3:46", one.Key);
+        Assert.Equal("Fixture|M:Shop.Sample.Two|local:Helper@Input.cs:4:46", two.Key);
+        Assert.Equal(BodyStatus.Source, one.Body);
+        Assert.Equal(BodyStatus.Source, two.Body);
+    }
+
+    [Fact]
+    public async Task Lambdas_nested_in_local_functions_and_lambdas_are_keyed_by_the_enclosing_member()
+    {
+        var snapshot = await Extract("""
+            using System;
+            namespace Shop {
+                public static class Sample {
+                    public static void Outer() {
+                        void Local() { Action a = () => Leaf(1); Action b = () => Leaf(2); }
+                        Func<Action> c = () => () => Leaf(3);
+                    }
+                    public static void Leaf(int value) { }
+                }
+            }
+            """);
+        var local = Assert.Single(snapshot.Callables, x => x.Kind == CallableKind.LocalFunction);
+        var lambdas = snapshot.Callables.Where(x => x.Kind == CallableKind.Lambda).OrderBy(x => x.Declarations[0].SpanStart).ToArray();
+        Assert.Equal(
+            ["Fixture|M:Shop.Sample.Outer|lambda:0@Input.cs:5:39", "Fixture|M:Shop.Sample.Outer|lambda:1@Input.cs:5:65",
+             "Fixture|M:Shop.Sample.Outer|lambda:2@Input.cs:6:30", "Fixture|M:Shop.Sample.Outer|lambda:3@Input.cs:6:36"],
+            lambdas.Select(x => x.Key));
+        Assert.Equal(4, lambdas.Select(x => x.Id).Distinct().Count());
+        Assert.Equal(local.Id, lambdas[0].ContainingCallable);
+        Assert.Equal(local.Id, lambdas[1].ContainingCallable);
+        Assert.Equal(lambdas[2].Id, lambdas[3].ContainingCallable);
+        Assert.Equal("Fixture|M:Shop.Sample.Outer|local:Local@Input.cs:5:13", local.Key);
+        // Each lambda owns exactly its own Leaf(n) call; the outer lambda of c only returns the inner one.
+        Assert.Equal(new[] { (5, 45), (5, 71), (6, 42) }, new[] { lambdas[0], lambdas[1], lambdas[3] }
+            .Select(lambda => Assert.Single(snapshot.CallSites, x => x.Caller == lambda.Id).Evidence).Select(x => (x.StartLine, x.StartColumn)));
+        Assert.DoesNotContain(snapshot.CallSites, x => x.Caller == lambdas[2].Id);
     }
 
     [Fact]

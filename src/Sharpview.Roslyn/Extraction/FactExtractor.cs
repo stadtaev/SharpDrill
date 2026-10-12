@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
+using Microsoft.CodeAnalysis.Text;
 using Sharpview.Core;
 
 namespace Sharpview.Roslyn;
@@ -30,6 +31,7 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
     private readonly List<BoundaryHandlingFact> boundaries = [];
     private readonly Dictionary<SyntaxTree, bool> generatedTrees = [];
     private readonly Dictionary<SyntaxTree, string> checksums = [];
+    private readonly Dictionary<(SyntaxTree Tree, TextSpan Span), int[]> lambdaStarts = [];
     private readonly Dictionary<CompilationId, CompilationFact> sourceProjects = compilations.ToDictionary(x => x.Id);
     // Symbols in registration order; hierarchy links are resolved after extraction so baseline registration order is untouched.
     private readonly List<(TypeId Id, INamedTypeSymbol Symbol)> registeredTypes = [];
@@ -39,7 +41,9 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
     private static string Key(IMethodSymbol symbol)
     {
         var s = Canonical(symbol);
-        var doc = s.GetDocumentationCommentId();
+        // Roslyn's documentation IDs for lambdas ("M:Ns.Type." + parameters) and local functions ("M:Ns.Type.Name") are only
+        // unique per type, so same-shaped ones in different members would share one fact; identify them by position instead.
+        var doc = s.MethodKind is MethodKind.LocalFunction or MethodKind.AnonymousFunction ? null : s.GetDocumentationCommentId();
         if (doc is null)
         {
             var syntax = s.DeclaringSyntaxReferences.FirstOrDefault();
@@ -112,16 +116,23 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
     private string CallableKey(IMethodSymbol s, CompilationId compilation)
     {
         var project = ProjectName(compilation, s.ContainingAssembly);
-        var node = s.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
-        if (s.MethodKind is not (MethodKind.LocalFunction or MethodKind.AnonymousFunction) || node is null)
+        var node = s.MethodKind is MethodKind.LocalFunction or MethodKind.AnonymousFunction ? s.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() : null;
+        if (node is null)
             return project + "|" + (s.GetDocumentationCommentId() ?? Signature(s));
         ISymbol member = s;
         while (member is IMethodSymbol { MethodKind: MethodKind.LocalFunction or MethodKind.AnonymousFunction } && member.ContainingSymbol is { } parent) member = parent;
         var name = s.MethodKind == MethodKind.LocalFunction ? "local:" + s.Name
-            : "lambda:" + member.DeclaringSyntaxReferences.Where(x => x.SyntaxTree == node.SyntaxTree)
-                .Sum(x => x.GetSyntax().DescendantNodes().OfType<AnonymousFunctionExpressionSyntax>().Count(l => l.SpanStart < node.SpanStart));
+            : "lambda:" + member.DeclaringSyntaxReferences.Where(x => x.SyntaxTree == node.SyntaxTree).Sum(x => LambdasBefore(x, node.SpanStart));
         var position = node.SyntaxTree.GetLineSpan(node.Span).StartLinePosition;
         return $"{project}|{member.GetDocumentationCommentId() ?? member.ToDisplayString()}|{name}@{KeyPath(compilation, node.SyntaxTree.FilePath)}:{position.Line + 1}:{position.Character + 1}";
+    }
+    // Lambda ordinal within one member declaration: anonymous-function starts are scanned once per declaration (document order = ascending, distinct).
+    private int LambdasBefore(SyntaxReference declaration, int position)
+    {
+        if (!lambdaStarts.TryGetValue((declaration.SyntaxTree, declaration.Span), out var starts))
+            lambdaStarts[(declaration.SyntaxTree, declaration.Span)] = starts = declaration.GetSyntax().DescendantNodes().OfType<AnonymousFunctionExpressionSyntax>().Select(x => x.SpanStart).ToArray();
+        var index = Array.BinarySearch(starts, position);
+        return index >= 0 ? index : ~index;
     }
 
     public async Task RegisterAsync(Project project, Compilation compilation, CompilationFact fact, bool includeGenerated, CancellationToken token)
