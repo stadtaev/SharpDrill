@@ -41,6 +41,15 @@ internal static class Commands
                 incomplete |= chains.OutputLimitReached || chains.WorkLimitReached || depth > 0 || boundaries > 0;
                 Console.Error.WriteLine($"Policy: {options.Traversal.Dispatch}; roots: {roots.Length}; chains: {chains.Chains.Length}; examined sites: {chains.ExpandedSites}; uncertain boundaries: {boundaries}; depth limits: {depth}; output limit: {chains.OutputLimitReached}; work limit: {chains.WorkLimitReached}.");
                 break;
+            case "layers":
+                var graph = LayerGraph.Build(index, report.Layers, token);
+                var findings = LayerRules.AllowedDependencies(graph, report.Layers.Model);
+                report.LayerOverview(graph, findings);
+                var violations = findings.Count(x => x.Verdict == Verdict.Violation);
+                var undecided = findings.Count(x => x.Verdict == Verdict.Unknown);
+                incomplete |= violations > 0 || undecided > 0;
+                Console.Error.WriteLine($"Layers: {string.Join(", ", report.Layers.Model.Layers)}; edges: {graph.Edges.Length}; external references: {graph.ExternalReferences}; unresolved calls: {graph.UnresolvedCalls}; rule evaluated: {!options.Allowed.IsEmpty}; violations: {violations}; unknown: {undecided}.");
+                break;
             case "exceptions":
                 report.Landscape(token);
                 var exceptions = ExceptionQuery.Analyze(index, roots, options.Traversal, token);

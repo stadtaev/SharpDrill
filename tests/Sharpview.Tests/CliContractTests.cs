@@ -40,6 +40,20 @@ public sealed class CliContractTests
         Assert.NotEmpty(result.Error);
         Assert.DoesNotContain("Analysis input not found", result.Error);
     }
+    [Theory]
+    [InlineData("layers")]
+    [InlineData("layers", "--layer", "project:Orders=API", "--root", "X()")]
+    [InlineData("layers", "--layer", "project:Orders=API", "--max-depth", "3")]
+    [InlineData("layers", "--layer", "project:Orders=API", "--allow", "API")]
+    [InlineData("layers", "--layer", "project:Orders=API", "--allow", "API=")]
+    [InlineData("layers", "--layer", "project:Orders=API", "--allow", "API=Application,")]
+    [InlineData("chains", "--allow", "API=Application")]
+    public async Task Invalid_layer_requests_fail_before_loading(string command, params string[] options)
+    {
+        var result = await Run([command, "missing.slnx", .. options]);
+        Assert.Equal(2, result.Exit);
+        Assert.DoesNotContain("Analysis input not found", result.Error);
+    }
     [Fact]
     public async Task Traversal_limits_have_nonzero_status_and_visible_marker()
     {

@@ -5,6 +5,7 @@ namespace Sharpview.Cli;
 internal sealed class TextReport(ProgramIndex index, TextWriter output, Arguments options)
 {
     private readonly ProgramSnapshot snapshot = index.Snapshot;
+    internal LayerMap Layers { get; } = new(index, new LayerModel(options.Layers, options.Allowed));
     private readonly HashSet<string> ambiguous = index.Snapshot.Callables.GroupBy(x => x.DisplaySignature)
         .Where(x => x.Count() > 1).Select(x => x.Key).ToHashSet(StringComparer.Ordinal);
     internal string Name(CallableId id)
@@ -18,7 +19,7 @@ internal sealed class TextReport(ProgramIndex index, TextWriter output, Argument
     {
         if (!index.TryGetCallable(id, out var method)) return;
         var type = index.DeclaringType(id)?.DisplayName ?? "<no containing type>";
-        output.WriteLine($"  {Name(id)} | Project: {Project(method)} | Type: {type} | Layer: {LayerQuery.Resolve(index, method, options.Layers) ?? "unconfigured"} | Transitions: {transitions}");
+        output.WriteLine($"  {Name(id)} | Project: {Project(method)} | Type: {type} | Layer: {Layers.LayerOf(id) ?? "unconfigured"} | Transitions: {transitions}");
     }
     internal void Chain(CallChain chain, bool details)
     {
@@ -102,6 +103,13 @@ internal sealed class TextReport(ProgramIndex index, TextWriter output, Argument
             : "Boundary handling: registration evidence; action interception and middleware coverage unknown");
         foreach (var boundary in boundaries) output.WriteLine($"  {boundary.Registration}: {Location(boundary.Evidence)}");
         output.WriteLine();
+    }
+    internal void LayerOverview(LayerGraph graph, IEnumerable<Finding> findings)
+    {
+        foreach (var edge in graph.Edges)
+            output.WriteLine($"Layer edge: {edge.From} --> {edge.To} | {edge.Kind} | {edge.Count} | Evidence: {(edge.Evidence is null ? "none" : Location(edge.Evidence))} | Witness: {edge.WitnessSource} --> {edge.WitnessTarget}");
+        foreach (var finding in findings)
+            output.WriteLine($"Finding [{finding.RuleId}] {finding.Verdict}: {finding.Subject} | {finding.Message}" + (finding.Evidence.IsEmpty ? "" : $" | Evidence: {Location(finding.Evidence[0])}"));
     }
     private static string Status(ExceptionStatus status) => status switch
     {

@@ -66,6 +66,23 @@ public sealed class CliTests
         Assert.Contains("Transitions: 2", result.Out);
     }
     [Fact]
+    public async Task Layer_overview_aggregates_paths_and_evaluates_allowed_dependencies()
+    {
+        string[] layers = ["--layer", "project:Research.Api=API", "--layer", "project:Research.Application=Application", "--layer", "project:Research.Infrastructure=Infrastructure"];
+        var overview = await Run(["layers", ResearchFixture.Input, .. layers]);
+        Assert.Contains("Layer edge: API --> Application | DirectCall |", overview.Out);
+        Assert.Contains("Layer edge: Application --> Infrastructure | DirectCall |", overview.Out);
+        Assert.Contains("Layer edge: Application --> Infrastructure | DeclaredCall |", overview.Out);
+        Assert.DoesNotContain("Finding [", overview.Out);
+        Assert.Contains("rule evaluated: False", overview.Error);
+        var evaluated = await Run(["layers", ResearchFixture.Input, .. layers, "--allow", "API=Application", "--allow", "Application=Infrastructure"]);
+        Assert.Equal(1, evaluated.Exit);
+        // The fixture's IRepository parameter on a controller action is a real API --> Infrastructure type dependency.
+        Assert.Contains("Finding [layer-dependency] Violation: API --> Infrastructure (TypeDependency)", evaluated.Out);
+        Assert.DoesNotContain("Violation: API --> Application", evaluated.Out);
+        Assert.Contains("violations: 1", evaluated.Error);
+    }
+    [Fact]
     public async Task Absent_root_is_an_invalid_request()
     {
         var result = await Run("chains", ResearchFixture.Input, "--root", "Not.A.Method()");
