@@ -104,6 +104,30 @@ internal sealed class TextReport(ProgramIndex index, TextWriter output, Argument
         foreach (var boundary in boundaries) output.WriteLine($"  {boundary.Registration}: {Location(boundary.Evidence)}");
         output.WriteLine();
     }
+    internal void Reach(RootReach reach)
+    {
+        output.WriteLine($"Root: {Name(reach.Root)}");
+        foreach (var reached in reach.Reached)
+        {
+            var method = index.Callable(reached.Callable);
+            output.WriteLine($"  [{reached.Distance}] {Name(reached.Callable)} | Project: {Project(method)} | Layer: {Layers.LayerOf(reached.Callable) ?? "unconfigured"}{(reached.ViaCandidate ? " (candidate)" : "")}");
+            if (reached.Distance >= 2) output.WriteLine($"    Path: {string.Join(" --> ", reached.Witness.Select(x => Name(x.Target)).Prepend(Name(reach.Root)))}");
+            if (options.Locations)
+                foreach (var step in reached.Witness)
+                    output.WriteLine($"    Evidence: {Location(index.CallSite(step.Site).Evidence)} | {(step.Candidate ? "implementation candidate" : "direct call")}");
+        }
+        foreach (var boundary in reach.Boundaries)
+        {
+            var where = boundary.Site is { } site ? Location(index.CallSite(site).Evidence) : index.Callable(boundary.Caller).Declarations.FirstOrDefault() is { } declaration ? Location(declaration) : "no source";
+            output.WriteLine(boundary.Kind switch
+            {
+                ReachBoundaryKind.Dispatch => $"  Boundary: {boundary.Dispatch} dispatch --> {Name(boundary.DeclaredTarget!.Value)} | candidates followed: {boundary.CandidatesFollowed} | {where}",
+                ReachBoundaryKind.Unresolved => $"  Boundary: unresolved target in {Name(boundary.Caller)} | {where}",
+                ReachBoundaryKind.MissingBody => $"  Boundary: body unavailable for {Name(boundary.Caller)} | {where}",
+                _ => $"  Boundary: depth limit at {Name(boundary.Caller)} | {where}"
+            });
+        }
+    }
     internal void LayerOverview(LayerGraph graph, IEnumerable<Finding> findings)
     {
         foreach (var edge in graph.Edges)

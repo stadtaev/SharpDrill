@@ -83,6 +83,19 @@ public sealed class CliTests
         Assert.Contains("violations: 1", evaluated.Error);
     }
     [Fact]
+    public async Task Reach_lists_each_callable_once_with_a_shortest_witness()
+    {
+        var result = await Run("reach", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--layer", "project:Research.Infrastructure=Infrastructure", "--locations");
+        Assert.Equal(1, result.Exit);
+        Assert.Contains("Root: Research.Api.OrdersController.Get()", result.Out);
+        Assert.Contains("  [1] Research.Application.Service.Load() | Project: Research.Application | Layer: unconfigured", result.Out);
+        Assert.Contains("  [2] Research.Infrastructure.Repository.Read() | Project: Research.Infrastructure | Layer: Infrastructure", result.Out);
+        Assert.Contains("    Path: Research.Api.OrdersController.Get() --> Research.Application.Service.Load() --> Research.Infrastructure.Repository.Read()", result.Out);
+        Assert.Contains("| direct call", result.Out);
+        var dispatch = await Run("reach", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Interface(Research.Infrastructure.IRepository)");
+        Assert.Contains("Boundary: Interface dispatch --> Research.Infrastructure.IRepository.Read() | candidates followed: 0", dispatch.Out);
+    }
+    [Fact]
     public async Task Absent_root_is_an_invalid_request()
     {
         var result = await Run("chains", ResearchFixture.Input, "--root", "Not.A.Method()");

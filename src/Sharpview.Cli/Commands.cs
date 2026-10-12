@@ -11,7 +11,7 @@ internal static class Commands
     {
         var snapshot = await RoslynProgramLoader.LoadAsync(options.Request, token);
         var index = new ProgramIndex(snapshot);
-        var roots = options.Command is "chains" or "controllers" or "exceptions" ? SelectRoots(snapshot, options) : [];
+        var roots = options.Command is "chains" or "controllers" or "exceptions" or "reach" ? SelectRoots(snapshot, options) : [];
         using var file = options.Output is null ? null : new StreamWriter(new FileStream(options.Output, FileMode.CreateNew, FileAccess.Write));
         var output = (TextWriter?)file ?? Console.Out;
         var report = new TextReport(index, output, options);
@@ -41,6 +41,13 @@ internal static class Commands
                 incomplete |= chains.OutputLimitReached || chains.WorkLimitReached || depth > 0 || boundaries > 0;
                 Console.Error.WriteLine($"Policy: {options.Traversal.Dispatch}; roots: {roots.Length}; chains: {chains.Chains.Length}; examined sites: {chains.ExpandedSites}; uncertain boundaries: {boundaries}; depth limits: {depth}; output limit: {chains.OutputLimitReached}; work limit: {chains.WorkLimitReached}.");
                 break;
+            case "reach":
+                var reach = ReachabilityQuery.Analyze(index, roots, new(options.FollowCandidates, options.Traversal.MaxDepth, options.Traversal.MaxExpansions), token);
+                foreach (var root in reach.Roots) { token.ThrowIfCancellationRequested(); report.Reach(root); }
+                var stops = reach.Roots.Sum(x => x.Boundaries.Length);
+                incomplete |= reach.WorkLimitReached || stops > 0;
+                Console.Error.WriteLine($"Roots: {roots.Length} (reported: {reach.Roots.Length}); reached: {reach.Roots.Sum(x => x.Reached.Length)}; boundaries: {stops}; candidates followed: {options.FollowCandidates}; examined sites: {reach.ExpandedSites}; depth limit: {reach.Roots.Any(x => x.DepthLimitReached)}; work limit: {reach.WorkLimitReached}.");
+                break;
             case "layers":
                 var graph = LayerGraph.Build(index, report.Layers, token);
                 var findings = LayerRules.AllowedDependencies(graph, report.Layers.Model);
@@ -69,7 +76,7 @@ internal static class Commands
     private static ImmutableArray<CallableId> SelectRoots(ProgramSnapshot snapshot, Arguments options)
     {
         var source = snapshot.Callables.Where(x => x.Body != BodyStatus.MetadataOnly);
-        if (options.Command is "controllers" or "exceptions")
+        if (options.Command is "controllers" or "exceptions" or "reach")
         {
             var actions = snapshot.ControllerActions.Select(x => x.Method).ToHashSet();
             source = source.Where(x => actions.Contains(x.Id));

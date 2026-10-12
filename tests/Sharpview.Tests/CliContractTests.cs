@@ -48,6 +48,9 @@ public sealed class CliContractTests
     [InlineData("layers", "--layer", "project:Orders=API", "--allow", "API=")]
     [InlineData("layers", "--layer", "project:Orders=API", "--allow", "API=Application,")]
     [InlineData("chains", "--allow", "API=Application")]
+    [InlineData("chains", "--follow-candidates")]
+    [InlineData("reach", "--dispatch", "direct")]
+    [InlineData("reach", "--max-chains", "5")]
     public async Task Invalid_layer_requests_fail_before_loading(string command, params string[] options)
     {
         var result = await Run([command, "missing.slnx", .. options]);
