@@ -17,7 +17,9 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
     private readonly Dictionary<string, CompilationId> assemblyProjects = new(StringComparer.Ordinal);
     private readonly Dictionary<CallableId, CallableFact> methods = [];
     private readonly Dictionary<TypeId, TypeFact> types = [];
-    private readonly List<(IMethodSymbol Symbol, SyntaxNode Node, SemanticModel Model, CompilationFact Compilation, bool Generated)> bodies = [];
+    // Linked list keeps today's "remove then append" iteration order; the index makes key lookups O(1).
+    private readonly LinkedList<(IMethodSymbol Symbol, SyntaxNode Node, SemanticModel Model, CompilationFact Compilation, bool Generated)> bodies = [];
+    private readonly Dictionary<string, LinkedListNode<(IMethodSymbol Symbol, SyntaxNode Node, SemanticModel Model, CompilationFact Compilation, bool Generated)>> bodyByKey = new(StringComparer.Ordinal);
     private readonly List<INamedTypeSymbol> sourceTypes = [];
     private readonly List<CallSiteFact> calls = [];
     private readonly List<ThrowSiteFact> throws = [];
@@ -103,13 +105,15 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
                     _ => null
                 };
                 if (method is null) continue;
-                var id = new CallableId(fact.Id.Value + "|" + Key(method));
-                sourceIds[Key(method)] = id;
+                var methodKey = Key(method);
+                var id = new CallableId(fact.Id.Value + "|" + methodKey);
+                sourceIds[methodKey] = id;
                 // Partial definition and implementation share one fact; only extract the implementation body.
-                if (!bodies.Any(x => Key(x.Symbol) == Key(method)) || HasBody(node))
+                var known = bodyByKey.TryGetValue(methodKey, out var existing);
+                if (!known || HasBody(node))
                 {
-                    bodies.RemoveAll(x => Key(x.Symbol) == Key(method));
-                    bodies.Add((method, node, model, fact, isGenerated));
+                    if (known) bodies.Remove(existing!);
+                    bodyByKey[methodKey] = bodies.AddLast((method, node, model, fact, isGenerated));
                 }
             }
             foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
@@ -170,7 +174,7 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
         if (methods.ContainsKey(id)) return id;
         var compilation = assemblyProjects.GetValueOrDefault(s.ContainingAssembly.Identity.ToString(), new CompilationId("metadata|" + s.ContainingAssembly.Identity));
         var kind = s.MethodKind switch { MethodKind.Constructor or MethodKind.StaticConstructor => CallableKind.Constructor, MethodKind.PropertyGet => CallableKind.Getter, MethodKind.PropertySet => CallableKind.Setter, MethodKind.EventAdd => CallableKind.EventAdder, MethodKind.EventRemove => CallableKind.EventRemover, MethodKind.LocalFunction => CallableKind.LocalFunction, MethodKind.AnonymousFunction => CallableKind.Lambda, _ => CallableKind.Method };
-        var bodyNode = bodies.FirstOrDefault(x => Key(x.Symbol) == key).Node;
+        var bodyNode = bodyByKey.TryGetValue(key, out var bodyEntry) ? bodyEntry.Value.Node : null;
         var body = sourceIds.ContainsKey(key) ? bodyNode is not null && HasBody(bodyNode) ? BodyStatus.Source : BodyStatus.NoBody : BodyStatus.MetadataOnly;
         // Insert before recursively registering containing local functions.
         methods[id] = new(id, compilation, s.ContainingType is null ? null : RegisterType(s.ContainingType), null, kind, Signature(s), s.DeclaredAccessibility.ToString(), Use(s.ReturnType), s.Parameters.Select(x => new ParameterFact(x.Name, Use(x.Type), x.RefKind.ToString())).ToImmutableArray(), Attributes(s), body, Declarations(s), s.IsAsync,
