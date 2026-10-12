@@ -53,12 +53,31 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
         if (action == "Nested") Assert.Equal(ExceptionStatus.Intercepted, witness.SubsequentStatus);
     }
     [Theory]
-    [InlineData("Interface(Research.Infrastructure.IRepository)", "Interface")]
-    [InlineData("Recursive()", "Cycle")]
-    public void Uncertain_boundaries_are_visible(string action, string reason)
+    [InlineData("Interface(Research.Infrastructure.IRepository)", "Interface", ExceptionReason.DispatchBoundary)]
+    [InlineData("Recursive()", "Cycle", ExceptionReason.Cycle)]
+    public void Uncertain_boundaries_are_visible(string action, string reason, ExceptionReason code)
     {
         var report = ExceptionQuery.Analyze(S, [Method("Research.Api.OrdersController." + action).Id], new());
-        Assert.Contains(report.Results, x => x.Status == ExceptionStatus.Unknown && x.Reason.Contains(reason, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(report.Results, x => x.Status == ExceptionStatus.Unknown && x.Reason.Contains(reason, StringComparison.OrdinalIgnoreCase) && x.ReasonCode == code);
+        if (code == ExceptionReason.DispatchBoundary)
+            Assert.Contains(report.Results, x => x.ReasonCode == code && x.Dispatch == DispatchKind.Interface);
+    }
+    [Fact]
+    public void Every_fixture_witness_has_a_reason_code_consistent_with_its_final_status()
+    {
+        var report = ExceptionQuery.Analyze(S, [.. S.ControllerActions.Select(x => x.Method)], new());
+        Assert.NotEmpty(report.Results);
+        ExceptionReason[] outcomes = [ExceptionReason.InterceptedByHandler, ExceptionReason.MayEscape, ExceptionReason.ChangedMayEscape];
+        foreach (var witness in report.Results)
+        {
+            var final = witness.SubsequentStatus ?? witness.Status;
+            Assert.NotEqual(ExceptionReason.Unspecified, witness.ReasonCode);
+            if (final == ExceptionStatus.Intercepted) Assert.Equal(ExceptionReason.InterceptedByHandler, witness.ReasonCode);
+            else if (final == ExceptionStatus.MayEscape)
+                Assert.Equal(witness.Status == ExceptionStatus.RethrownOrReplaced ? ExceptionReason.ChangedMayEscape : ExceptionReason.MayEscape, witness.ReasonCode);
+            else Assert.DoesNotContain(witness.ReasonCode, outcomes);
+            Assert.Equal(witness.ReasonCode == ExceptionReason.DispatchBoundary, witness.Dispatch is not null);
+        }
     }
     [Fact]
     public void Interface_dispatch_has_a_declared_member_and_implementation_facts_are_candidates_only()

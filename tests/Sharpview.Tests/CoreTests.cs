@@ -148,7 +148,7 @@ public sealed class CoreTests
         Assert.Contains(result.Chains, x => x.End == ChainEnd.Cycle && x.Steps.Length == 2);
         Assert.Contains(result.Chains, x => x.End == ChainEnd.Leaf && x.Steps.Length == 1);
         Assert.Contains(ExceptionQuery.Analyze(snapshot, [new("Action")], new()).Results,
-            x => x.Status == ExceptionStatus.Unknown && x.Reason.Contains("Cycle"));
+            x => x.Status == ExceptionStatus.Unknown && x.Reason.Contains("Cycle") && x.ReasonCode == ExceptionReason.Cycle);
     }
 
     [Theory]
@@ -221,6 +221,7 @@ public sealed class CoreTests
         Assert.Equal(ExceptionStatus.RethrownOrReplaced, witness.Status);
         Assert.Equal(ExceptionStatus.Unknown, witness.SubsequentStatus);
         Assert.Contains("filter", witness.Reason);
+        Assert.Equal(ExceptionReason.CatchFilter, witness.ReasonCode);
     }
 
     [Fact]
@@ -232,6 +233,7 @@ public sealed class CoreTests
         Assert.Equal(ExceptionStatus.Unknown, witness.Status);
         Assert.Equal(new[] { new CatchId("catch") }, witness.HandlerIds);
         Assert.Contains("matching", witness.Reason);
+        Assert.Equal(ExceptionReason.HandlerTypeUncertain, witness.ReasonCode);
     }
 
     [Fact]
@@ -243,6 +245,7 @@ public sealed class CoreTests
         Assert.Equal(ExceptionStatus.Unknown, witness.Status);
         Assert.Equal(new ThrowSiteId("origin"), witness.Origin);
         Assert.Contains("inside a handler", witness.Reason);
+        Assert.Equal(ExceptionReason.OriginInHandler, witness.ReasonCode);
     }
 
     [Theory]
@@ -333,6 +336,7 @@ public sealed class CoreTests
         var witness = AnalyzeOrigin(snapshot);
         Assert.Equal(ExceptionStatus.Unknown, witness.Status);
         Assert.Contains("Finally", witness.Reason);
+        Assert.Equal(ExceptionReason.FinallyUnsupported, witness.ReasonCode);
     }
 
     [Theory]
