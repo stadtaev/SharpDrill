@@ -14,4 +14,22 @@ Empty handlers and bare return/empty statement handlers intercept within the mod
 
 Queries return IDs and structured endings; CLI formatting adds arrows and descriptions. The exception result budget bounds all witnesses, including Unknown boundaries. Work counts examined call sites; call-path relationship collapse still charges all supporting evidence. The depth limit counts transitions. Budget limits return explicit flags even when a partially explored path cannot be emitted.
 
-JSON exports a schema-version-2 envelope, producer version and the full snapshot. Absolute paths and local identities make snapshots local research evidence rather than relocatable persistent cache keys.
+JSON exports a schema-version-3 envelope (all IDs as plain strings), producer version and the full snapshot. Absolute paths and local identities make snapshot IDs local research evidence; use `Key` for portable identity.
+
+## Consumer model
+
+**Facts for rules.** Types record namespace, kind (class, record, struct, interface, enum, delegate), modifiers (abstract, sealed, static, generic), base class and containing type. Callables record modifiers (static, abstract, virtual, override, sealed, generic, extension, operator, explicit implementation, finalizer) and the directly overridden member. Attributes keep their rendered constructor and named arguments. Field and property types are `Field`/`Property` dependencies of their owning type.
+
+**Implementation candidates.** `ImplementationFact` pairs a declared interface or overridden member with a source implementation, one override step per fact. Candidates are not inferred runtime targets: receiver type, DI registration and further overrides decide what runs. Queries follow them only when a consumer opts in, and mark every step that does.
+
+**Identity.** `CallableId`/`TypeId` stay local (they contain project paths and assembly versions). `Key` is portable: `<project>|<documentation ID>`, or for lambdas and local functions the nearest documented member plus name/ordinal and project-relative position. Lambdas and local functions have position-based IDs so same-shaped bodies in one type never share a fact. `SourceRoot` with `SourceEvidence.RelativeTo` yields repository-relative paths. All IDs, including `ThrowSiteId`, `CatchId` and `ExceptionRegionId`, are typed.
+
+**Index.** `ProgramIndex` is built once per snapshot and gives ordered lookups: callables, types, projects, outgoing/incoming call sites, throws, catches, regions, gaps, members, ancestors and implementation candidates in both directions. Queries take it directly; snapshot overloads remain.
+
+**Conventions.** Controller actions are classified in Core (`AspNetConventions`) from facts, so the snapshot does not grow one array per framework concept. Boundary-handler registrations stay extracted because they need invocation binding.
+
+**Layers.** `LayerModel` holds explicit mappings (`project`, `namespace`, `type` scopes; longest prefix wins, project wins a tie) and allowed dependencies. `LayerMap` resolves each element once. `LayerGraph` aggregates `DirectCall`, `DeclaredCall`, `CandidateCall` and `TypeDependency` edges with counts and the witness at the smallest evidence location; unmapped source is `(unmapped)`, unmapped referenced assemblies are counted, not dropped. Namespace mappings match namespaces only (earlier releases also matched type-name prefixes; use `type:` for that).
+
+**Rules.** A rule is a plain function returning `Finding(RuleId, Verdict, Subject, Message, Evidence)`. `LayerRules.AllowedDependencies` reports disallowed cross-layer edges as `Violation` and edges touching unmapped source as `Unknown`; candidate edges are not evaluated.
+
+**Reachability vs paths.** `ReachabilityQuery` is breadth-first: each reachable callable once per root, with transition distance and one deterministic shortest witness, plus explicit dispatch, unresolved, missing-body and depth boundaries. `CallChainQuery` still enumerates every path for drill-down and is exponential in the worst case. Exception witnesses carry `ExceptionReason` codes (one per distinct reason) and, for dispatch boundaries, the dispatch kind.

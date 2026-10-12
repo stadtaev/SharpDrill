@@ -22,11 +22,13 @@ The fixture build explicitly restores repository-owned projects. Sharpview itsel
 dotnet run --project src/Sharpview.Cli -- --help
 dotnet run --project src/Sharpview.Cli -- controllers tests/Fixtures/ResearchSolution/ResearchSolution.slnx --root 'Research.Api.OrdersController.Get()' --layer project:Research.Api=API --layer project:Research.Application=Application --layer project:Research.Infrastructure=Infrastructure --locations
 dotnet run --project src/Sharpview.Cli -- exceptions tests/Fixtures/ResearchSolution/ResearchSolution.slnx --root 'Research.Api.OrdersController.Get()'
+dotnet run --project src/Sharpview.Cli -- reach tests/Fixtures/ResearchSolution/ResearchSolution.slnx --root 'Research.Api.OrdersController.Get()' --layer project:Research.Api=API --layer project:Research.Application=Application --layer project:Research.Infrastructure=Infrastructure
+dotnet run --project src/Sharpview.Cli -- layers tests/Fixtures/ResearchSolution/ResearchSolution.slnx --layer project:Research.Api=API --layer project:Research.Application=Application --layer project:Research.Infrastructure=Infrastructure --allow API=Application --allow Application=Infrastructure
 dotnet run --project src/Sharpview.Cli -- methods tests/Fixtures/ResearchSolution/ResearchSolution.slnx
 dotnet run --project src/Sharpview.Cli -- inspect tests/Fixtures/ResearchSolution/ResearchSolution.slnx --format json --output snapshot.json
 ```
 
-`--output` creates a new file and refuses to overwrite an existing file. JSON is schema version 3 and goes to stdout when no file is selected; diagnostics go to stderr. Input may be `.csproj`, `.sln` or `.slnx`. Select `--framework` for multi-target projects and `--configuration` when required.
+`--output` creates a new file and refuses to overwrite an existing file. JSON is schema version 3 (IDs are plain strings) and goes to stdout when no file is selected; diagnostics go to stderr. Input may be `.csproj`, `.sln` or `.slnx`. Select `--framework` for multi-target projects and `--configuration` when required.
 
 A path looks like:
 
@@ -36,7 +38,11 @@ Research.Api.OrdersController.Get() --> Research.Application.Service.Load() --> 
 
 Paths are static call relationships, not execution traces. Branch calls produce separate paths. Call transitions count graph edges, not runtime stack depth. Layers come only from explicit project/namespace mappings; the longest prefix wins, with project preference on a tie.
 
-`chains` defaults to every source callable; `controllers` and `exceptions` default to recognised controller actions. Use an exact signature from `methods`, or `--root-id` if signatures collide. Interface, virtual, delegate, dynamic and missing targets remain visible boundaries. `--dispatch direct` marks excluded dispatch while preserving its declared target evidence.
+`chains` defaults to every source callable; `controllers`, `exceptions` and `reach` default to recognised controller actions. Use an exact signature from `methods`, or `--root-id` if signatures collide. Interface, virtual, delegate, dynamic and missing targets remain visible boundaries. `--dispatch direct` marks excluded dispatch while preserving its declared target evidence.
+
+`reach` lists every callable reachable from each root once, with its transition distance and one shortest witness path; it stays linear where `chains` enumerates every path. Interface/virtual calls stop as boundaries unless `--follow-candidates` traverses implementation candidates, which are marked `(candidate)` and are never claimed as runtime targets.
+
+`layers` aggregates call sites and type dependencies (signatures, inheritance, construction, fields, properties) between configured layers into edges with a count and one source witness. Edge kinds: `DirectCall`, `DeclaredCall` (interface/virtual binding), `CandidateCall` (to an implementation candidate) and `TypeDependency`. Source outside every mapping is `(unmapped)`; unmapped referenced assemblies are counted as external references. Repeatable `--allow <from>=<to>[,<to>...]` evaluates the `layer-dependency` rule: disallowed cross-layer edges are `Violation`, edges touching unmapped source are `Unknown`, candidate edges are not evaluated. `--layer type:<prefix>=<name>` maps a type and its nested types; `namespace:` prefixes match namespaces only.
 
 Traversal defaults to 20 transitions, 1,000 results and 100,000 examined call sites. Adjust `--max-depth`, `--max-chains`, and `--max-expansions`. Cancellation propagates from Ctrl+C.
 
@@ -59,11 +65,21 @@ using Sharpview.Roslyn;
 // Call explicitly at process startup; LoadAsync also registers if needed.
 MSBuildBootstrap.RegisterSdk();
 var snapshot = await RoslynProgramLoader.LoadAsync(new AnalysisRequest("Example.slnx"), cancellationToken);
-var actions = snapshot.ControllerActions.Select(x => x.Method).ToImmutableArray();
-var paths = CallChainQuery.Enumerate(snapshot, actions, new ChainOptions(), cancellationToken);
-var exceptions = ExceptionQuery.Analyze(snapshot, actions, new ChainOptions(), cancellationToken);
+var index = new ProgramIndex(snapshot); // build once; all queries and rules share it
+var actions = AspNetConventions.ControllerActions(index, cancellationToken).Select(x => x.Method).ToImmutableArray();
+var paths = CallChainQuery.Enumerate(index, actions, new ChainOptions(), cancellationToken);
+var reach = ReachabilityQuery.Analyze(index, actions, new ReachOptions(), cancellationToken);
+var exceptions = ExceptionQuery.Analyze(index, actions, new ChainOptions(), cancellationToken);
+
+var model = new LayerModel(
+    [new(LayerScope.Project, "Orders.Api", "API"), new(LayerScope.Project, "Orders.Infrastructure", "Infrastructure")],
+    [new("API", "Infrastructure")]);
+var graph = LayerGraph.Build(index, new LayerMap(index, model), cancellationToken);
+var findings = LayerRules.AllowedDependencies(graph, model); // Finding(RuleId, Verdict, Subject, Message, Evidence)
 ```
+
+A rule is a plain function over `ProgramIndex` (and derived models such as `LayerMap`/`LayerGraph`) returning `Finding`s; `Verdict.Unknown` is never folded into `Pass`. Exception witnesses carry a machine-readable `ExceptionReason` beside the human `Reason`.
 
 Add `using System.Collections.Immutable;` for `ToImmutableArray`. Snapshots contain no Roslyn symbols and remain queryable after the workspace is disposed. MSBuild Locator discovers an installed SDK; host selection and input `global.json` are not promised to match every shell configuration.
 
-See [analysis coverage](docs/coverage.md), [model notes](docs/model.md), [test evidence](docs/validation.md), [sample reports](docs/samples/README.md), and the updated [implementation plan](docs/superpowers/plans/2026-10-12-csharp-call-chain-research-plan.md). Fixture validation is reproducible; an external Web API experiment remains pending until an input is selected.
+See [analysis coverage](docs/coverage.md), [model notes](docs/model.md), [test evidence](docs/validation.md), [sample reports](docs/samples/README.md), the [research plan](docs/superpowers/plans/2026-10-12-csharp-call-chain-research-plan.md) and the [consumer model plan](docs/superpowers/plans/2026-10-12-consumer-semantic-model-plan.md). Fixture validation is reproducible; an external Web API experiment remains pending until an input is selected.

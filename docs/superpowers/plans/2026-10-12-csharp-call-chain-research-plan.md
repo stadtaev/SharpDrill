@@ -688,3 +688,7 @@ Run the relevant tests before claiming a stage works.
 - [ ] No publication or user-input mutation included.
 
 Planning review: the document provides concrete API shapes, source fixtures, command contracts, file ownership and acceptance cases. Implementation-specific helper code belongs in the stage that owns it. The product repository is already available. The first external user-code experiment still requires an input solution selected by the user.
+
+## Consumer model increment
+
+Follow-up work (index, layer model and rule, reachability, richer facts, implementation candidates, Core conventions, reason codes) is planned and recorded in [2026-10-12-consumer-semantic-model-plan.md](2026-10-12-consumer-semantic-model-plan.md). Semantics in this plan (declared vs inferred bindings, honest Unknown, evidence, determinism, bounded traversal) remain binding.
