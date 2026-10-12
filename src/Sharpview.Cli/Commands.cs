@@ -11,7 +11,7 @@ internal static class Commands
     {
         var snapshot = await RoslynProgramLoader.LoadAsync(options.Request, token);
         var index = new ProgramIndex(snapshot);
-        var roots = options.Command is "chains" or "controllers" or "exceptions" or "reach" ? SelectRoots(snapshot, options) : [];
+        var roots = options.Command is "chains" or "controllers" or "exceptions" or "reach" ? SelectRoots(index, options, token) : [];
         using var file = options.Output is null ? null : new StreamWriter(new FileStream(options.Output, FileMode.CreateNew, FileAccess.Write));
         var output = (TextWriter?)file ?? Console.Out;
         var report = new TextReport(index, output, options);
@@ -73,12 +73,12 @@ internal static class Commands
         return incomplete ? 1 : 0;
     }
 
-    private static ImmutableArray<CallableId> SelectRoots(ProgramSnapshot snapshot, Arguments options)
+    private static ImmutableArray<CallableId> SelectRoots(ProgramIndex index, Arguments options, CancellationToken token)
     {
-        var source = snapshot.Callables.Where(x => x.Body != BodyStatus.MetadataOnly);
+        var source = index.Snapshot.Callables.Where(x => x.Body != BodyStatus.MetadataOnly);
         if (options.Command is "controllers" or "exceptions" or "reach")
         {
-            var actions = snapshot.ControllerActions.Select(x => x.Method).ToHashSet();
+            var actions = AspNetConventions.ControllerActions(index, token).Select(x => x.Method).ToHashSet();
             source = source.Where(x => actions.Contains(x.Id));
         }
         if (options.Root is not null || options.RootId is not null)

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Sharpview.Core;
 using Sharpview.Roslyn;
 using Xunit;
@@ -16,6 +17,7 @@ public sealed class ResearchFixture : IAsyncLifetime
 public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<ResearchFixture>
 {
     private ProgramSnapshot S => fixture.Snapshot;
+    private ImmutableArray<ControllerActionFact> Actions => AspNetConventions.ControllerActions(new ProgramIndex(S));
     private CallableFact Method(string name) => Assert.Single(S.Callables, x => x.DisplaySignature == name);
     [Fact]
     public void Source_bindings_link_projects_and_preserve_locations()
@@ -27,8 +29,8 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
         Assert.True(call.Evidence.StartLine > 0);
         Assert.True(File.Exists(call.Evidence.Path));
         Assert.Contains(S.BoundaryHandling, x => x.Registration == "UseExceptionHandler");
-        Assert.Equal(12, S.ControllerActions.Length);
-        Assert.DoesNotContain(S.ControllerActions, x => x.Method == Method("Research.Api.OrdersController.Helper()").Id);
+        Assert.Equal(12, Actions.Length);
+        Assert.DoesNotContain(Actions, x => x.Method == Method("Research.Api.OrdersController.Helper()").Id);
     }
     [Theory]
     [InlineData("Get", ExceptionStatus.MayEscape)]
@@ -65,7 +67,7 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
     [Fact]
     public void Every_fixture_witness_has_a_reason_code_consistent_with_its_final_status()
     {
-        var report = ExceptionQuery.Analyze(S, [.. S.ControllerActions.Select(x => x.Method)], new());
+        var report = ExceptionQuery.Analyze(S, [.. Actions.Select(x => x.Method)], new());
         Assert.NotEmpty(report.Results);
         ExceptionReason[] outcomes = [ExceptionReason.InterceptedByHandler, ExceptionReason.MayEscape, ExceptionReason.ChangedMayEscape];
         foreach (var witness in report.Results)

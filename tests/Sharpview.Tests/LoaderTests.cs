@@ -70,7 +70,7 @@ public sealed class LoaderTests
         Assert.Equal(BodyStatus.Source, repository.Body);
         Assert.NotEqual(action.Compilation, service.Compilation);
         Assert.NotEqual(service.Compilation, repository.Compilation);
-        Assert.Contains(snapshot.ControllerActions, x => x.Method == action.Id);
+        Assert.Contains(AspNetConventions.ControllerActions(new ProgramIndex(snapshot)), x => x.Method == action.Id);
         Assert.Contains(snapshot.ThrowSites, x => x.Owner == repository.Id && x.StaticExceptionType?.DisplayName == "Research.Infrastructure.StorageException");
     }
 }

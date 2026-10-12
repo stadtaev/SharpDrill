@@ -216,8 +216,40 @@ public sealed class ExtractionTests
             public class BaseController : Microsoft.AspNetCore.Mvc.ControllerBase { [Microsoft.AspNetCore.Mvc.NonAction] public virtual void Helper() { } }
             public class Controller : BaseController { public override void Helper() { } public void Action() { } }
             """);
-        var action = Assert.Single(snapshot.ControllerActions);
+        var action = Assert.Single(AspNetConventions.ControllerActions(new ProgramIndex(snapshot)));
         Assert.Equal("Controller.Action()", Assert.Single(snapshot.Callables, x => x.Id == action.Method).DisplaySignature);
+        Assert.Equal(AspNetConventions.ControllerActionConvention, action.Convention);
+    }
+    [Fact]
+    public async Task Core_controller_classification_matches_extraction_on_edge_cases()
+    {
+        var snapshot = await Extract("""
+            using System;
+            namespace Microsoft.AspNetCore.Mvc {
+                public class ControllerBase { }
+                [AttributeUsage(AttributeTargets.Class, Inherited = true)] public class ControllerAttribute : Attribute { }
+                [AttributeUsage(AttributeTargets.Class, Inherited = true)] public class NonControllerAttribute : Attribute { }
+                [AttributeUsage(AttributeTargets.Method, Inherited = true)] public class NonActionAttribute : Attribute { }
+            }
+            [Microsoft.AspNetCore.Mvc.Controller] public class Poco { public void Act() { } public static void Static() { } public void Generic<T>() { } internal void Internal() { } }
+            public class Outer<T> { public class NestedController : Microsoft.AspNetCore.Mvc.ControllerBase { public void InGeneric() { } } }
+            public interface IThing { void Do(); }
+            public class Api : Microsoft.AspNetCore.Mvc.ControllerBase, IThing, IDisposable
+            {
+                void IThing.Do() { }
+                public void Dispose() { }
+                public static Api operator +(Api a, Api b) => a;
+                ~Api() { }
+                public int Value { get; set; }
+                public Api() { }
+                public void Run() { void Local() { } Local(); Action a = () => { }; }
+            }
+            public class Plain { public void NotAnAction() { } }
+            """);
+        // Expected set was verified equal to the former extraction-time classification before it was removed.
+        var actions = AspNetConventions.ControllerActions(new ProgramIndex(snapshot));
+        Assert.Equal(new[] { "Api.Dispose()", "Api.Run()", "Poco.Act()" }, actions.Select(x => Assert.Single(snapshot.Callables, c => c.Id == x.Method).DisplaySignature).Order(StringComparer.Ordinal));
+        Assert.Equal(actions.Select(x => x.Method.Value).Order(StringComparer.Ordinal), actions.Select(x => x.Method.Value));
     }
 
     [Fact]

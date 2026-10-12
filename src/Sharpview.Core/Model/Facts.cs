@@ -90,7 +90,6 @@ public sealed record ProgramSnapshot
     public ImmutableArray<CatchFact> Catches { get; init; } = [];
     public ImmutableArray<ExceptionRegionFact> ExceptionRegions { get; init; } = [];
     public ImmutableArray<ImplementationFact> Implementations { get; init; } = [];
-    public ImmutableArray<ControllerActionFact> ControllerActions { get; init; } = [];
     public ImmutableArray<BoundaryHandlingFact> BoundaryHandling { get; init; } = [];
     // Full path of the analysed input's directory; consumers use it with SourceEvidence.RelativeTo.
     public string SourceRoot { get; init; } = "";

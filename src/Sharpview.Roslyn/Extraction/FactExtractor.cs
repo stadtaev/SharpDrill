@@ -27,7 +27,6 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
     private readonly List<CatchFact> catches = [];
     private readonly List<ExceptionRegionFact> regions = [];
     private readonly List<DependencyFact> dependencies = [];
-    private readonly List<ControllerActionFact> actions = [];
     private readonly List<ImplementationFact> implementations = [];
     private readonly List<BoundaryHandlingFact> boundaries = [];
     private readonly Dictionary<SyntaxTree, bool> generatedTrees = [];
@@ -260,7 +259,6 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
         {
             token.ThrowIfCancellationRequested();
             var id = RegisterMethod(entry.Symbol);
-            if (IsControllerAction(entry.Symbol)) actions.Add(new(id, "Declared public instance method on ControllerBase descendant or [Controller] type; excludes [NonAction]."));
             var walker = new BodyWalker(this, entry.Model, entry.Compilation, id, token);
             IOperation? operation = entry.Node switch
             {
@@ -327,19 +325,6 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
             }
         }
     }
-    private static bool IsControllerAction(IMethodSymbol method)
-    {
-        if (method.MethodKind != MethodKind.Ordinary || method.IsStatic || method.IsGenericMethod || method.DeclaredAccessibility != Accessibility.Public) return false;
-        for (var current = method; current is not null; current = current.OverriddenMethod)
-            if (HasAttribute(current, "Microsoft.AspNetCore.Mvc.NonActionAttribute")) return false;
-        var type = method.ContainingType;
-        if (type.IsAbstract || type.IsGenericType) return false;
-        for (var current = type; current is not null; current = current.BaseType)
-            if (HasAttribute(current, "Microsoft.AspNetCore.Mvc.NonControllerAttribute")) return false;
-        for (var t = type; t is not null; t = t.BaseType)
-            if (t.ToDisplayString() == "Microsoft.AspNetCore.Mvc.ControllerBase" || HasAttribute(t, "Microsoft.AspNetCore.Mvc.ControllerAttribute")) return true;
-        return false;
-    }
     public ProgramSnapshot Snapshot()
     {
         // Keys collide when two projects share a file name or two versions of one metadata assembly are referenced;
@@ -363,7 +348,6 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
             Catches = catches.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
             ExceptionRegions = regions.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
             Implementations = implementations.Distinct().OrderBy(x => x.Declared.Value, StringComparer.Ordinal).ThenBy(x => x.Implementation.Value, StringComparer.Ordinal).ThenBy(x => x.Kind).ToImmutableArray(),
-            ControllerActions = actions.Distinct().OrderBy(x => x.Method.Value, StringComparer.Ordinal).ToImmutableArray(),
             BoundaryHandling = boundaries.OrderBy(x => x.Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence.SpanStart).ToImmutableArray()
         };
     }

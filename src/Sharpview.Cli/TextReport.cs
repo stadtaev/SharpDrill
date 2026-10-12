@@ -56,7 +56,7 @@ internal sealed class TextReport(ProgramIndex index, TextWriter output, Argument
             token.ThrowIfCancellationRequested();
             output.WriteLine($"Project: {compilation.ProjectPath} | Framework: {compilation.TargetFramework} | Configuration: {compilation.Configuration}");
         }
-        output.WriteLine($"Types: {snapshot.Types.Length}; callables: {snapshot.Callables.Length}; calls: {snapshot.CallSites.Length}; dependencies: {snapshot.Dependencies.Length}; throws: {snapshot.ThrowSites.Length}; catches: {snapshot.Catches.Length}; actions: {snapshot.ControllerActions.Length}; gaps: {snapshot.Gaps.Length}");
+        output.WriteLine($"Types: {snapshot.Types.Length}; callables: {snapshot.Callables.Length}; calls: {snapshot.CallSites.Length}; dependencies: {snapshot.Dependencies.Length}; throws: {snapshot.ThrowSites.Length}; catches: {snapshot.Catches.Length}; actions: {AspNetConventions.ControllerActions(index).Length}; gaps: {snapshot.Gaps.Length}");
         foreach (var group in snapshot.CallSites.GroupBy(x => x.Dispatch).OrderBy(x => x.Key)) output.WriteLine($"Dispatch {group.Key}: {group.Count()}");
         Landscape(token);
     }
