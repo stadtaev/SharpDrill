@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 using Microsoft.CodeAnalysis.Text;
@@ -9,7 +8,7 @@ using Sharpview.Core;
 
 namespace Sharpview.Roslyn;
 
-internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations, List<AnalysisGap> initialGaps)
+internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> compilations, List<AnalysisGap> initialGaps)
 {
     private readonly List<AnalysisGap> gaps = initialGaps;
     internal static readonly SymbolDisplayFormat TypeFormat = SymbolDisplayFormat.FullyQualifiedFormat
@@ -36,32 +35,6 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
     // Symbols in registration order; hierarchy links are resolved after extraction so baseline registration order is untouched.
     private readonly List<(TypeId Id, INamedTypeSymbol Symbol)> registeredTypes = [];
     private readonly List<(CallableId Id, IMethodSymbol Symbol)> registeredMethods = [];
-
-    internal static IMethodSymbol Canonical(IMethodSymbol s) => (s.ReducedFrom ?? s).OriginalDefinition.PartialImplementationPart ?? (s.ReducedFrom ?? s).OriginalDefinition;
-    private static string Key(IMethodSymbol symbol)
-    {
-        var s = Canonical(symbol);
-        // Roslyn's documentation IDs for lambdas ("M:Ns.Type." + parameters) and local functions ("M:Ns.Type.Name") are only
-        // unique per type, so same-shaped ones in different members would share one fact; identify them by position instead.
-        var doc = s.MethodKind is MethodKind.LocalFunction or MethodKind.AnonymousFunction ? null : s.GetDocumentationCommentId();
-        if (doc is null)
-        {
-            var syntax = s.DeclaringSyntaxReferences.FirstOrDefault();
-            doc = $"{s.ContainingSymbol}|{syntax?.SyntaxTree.FilePath}:{syntax?.Span.Start}|{s.MetadataName}";
-        }
-        return $"{s.ContainingAssembly.Identity}|{doc}";
-    }
-    internal static string TypeName(ITypeSymbol type) => type.ToDisplayString(TypeFormat).Replace("global::", "", StringComparison.Ordinal);
-    private static string Signature(IMethodSymbol symbol)
-    {
-        var s = Canonical(symbol);
-        var name = s.MethodKind == MethodKind.Constructor ? ".ctor" : s.MethodKind == MethodKind.StaticConstructor ? ".cctor" : s.Name;
-        if (s.TypeParameters.Length > 0) name += "<" + string.Join(", ", s.TypeParameters.Select(x => x.Name)) + ">";
-        var prefix = s.ContainingType is null ? "" : TypeName(s.ContainingType) + ".";
-        if (s.MethodKind is MethodKind.LocalFunction or MethodKind.AnonymousFunction)
-            prefix = s.ContainingSymbol.ToDisplayString() + ".";
-        return prefix + name + "(" + string.Join(", ", s.Parameters.Select(x => (x.RefKind == RefKind.None ? "" : x.RefKind.ToString().ToLowerInvariant() + " ") + TypeName(x.Type))) + ")";
-    }
     internal SourceEvidence Evidence(SyntaxNode node)
     {
         var tree = node.SyntaxTree;
@@ -83,58 +56,6 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
         }
         return syntax.Select(x => Evidence(x.GetSyntax())).Distinct().OrderBy(x => x.Path, StringComparer.Ordinal).ThenBy(x => x.SpanStart).ToImmutableArray();
     }
-    private static ImmutableArray<AttributeFact> Attributes(ISymbol s) => s.GetAttributes()
-        .Select(x => new AttributeFact(x.AttributeClass?.ToDisplayString() ?? "<unresolved>", x.ConstructorArguments.Select(a => a.ToCSharpString()).ToImmutableArray(),
-            x.NamedArguments.Select(a => new NamedArgumentFact(a.Key, a.Value.ToCSharpString())).ToImmutableArray()))
-        .OrderBy(x => x.Name, StringComparer.Ordinal)
-        .ThenBy(x => string.Join(", ", x.Arguments.Concat(x.NamedArguments.Select(a => a.Name + " = " + a.Value))), StringComparer.Ordinal).ToImmutableArray();
-    private static bool HasAttribute(ISymbol s, string name) => Attributes(s).Any(x => x.Name == name);
-    private static DeclaredTypeKind KindOf(INamedTypeSymbol s) => s.TypeKind switch
-    {
-        TypeKind.Class => s.IsRecord ? DeclaredTypeKind.Record : DeclaredTypeKind.Class,
-        TypeKind.Struct => s.IsRecord ? DeclaredTypeKind.RecordStruct : DeclaredTypeKind.Struct,
-        TypeKind.Interface => DeclaredTypeKind.Interface,
-        TypeKind.Enum => DeclaredTypeKind.Enum,
-        TypeKind.Delegate => DeclaredTypeKind.Delegate,
-        _ => DeclaredTypeKind.Other
-    };
-    // Static classes are abstract+sealed in metadata; report them only as static. Generic means the type declares its own type parameters.
-    private static TypeModifiers ModifiersOf(INamedTypeSymbol s) => (s.IsStatic ? TypeModifiers.Static
-        : (s.IsAbstract ? TypeModifiers.Abstract : 0) | (s.IsSealed ? TypeModifiers.Sealed : 0)) | (s.Arity > 0 ? TypeModifiers.Generic : 0);
-    private static CallableModifiers ModifiersOf(IMethodSymbol s) =>
-        (s.IsStatic ? CallableModifiers.Static : 0) | (s.IsAbstract ? CallableModifiers.Abstract : 0) | (s.IsVirtual ? CallableModifiers.Virtual : 0)
-        | (s.IsOverride ? CallableModifiers.Override : 0) | (s.IsSealed ? CallableModifiers.Sealed : 0) | (s.IsGenericMethod ? CallableModifiers.Generic : 0)
-        | (s.IsExtensionMethod ? CallableModifiers.Extension : 0) | (s.MethodKind is MethodKind.UserDefinedOperator or MethodKind.Conversion ? CallableModifiers.Operator : 0)
-        | (s.ExplicitInterfaceImplementations.Length > 0 ? CallableModifiers.ExplicitImplementation : 0) | (s.MethodKind == MethodKind.Destructor ? CallableModifiers.Finalizer : 0);
-    // Portable keys: project file name (or assembly simple name for metadata) instead of paths, configuration or versions.
-    private string ProjectName(CompilationId compilation, IAssemblySymbol assembly) =>
-        sourceProjects.TryGetValue(compilation, out var project) ? Path.GetFileNameWithoutExtension(project.ProjectPath) : assembly.Identity.Name;
-    private string KeyPath(CompilationId compilation, string path) =>
-        sourceProjects.TryGetValue(compilation, out var project) && Path.GetDirectoryName(project.ProjectPath) is { } directory && Path.IsPathRooted(directory) && Path.IsPathRooted(path)
-            ? Path.GetRelativePath(directory, path).Replace('\\', '/') : path.Replace('\\', '/');
-    // Local functions and lambdas have no documentation ID: anchor them to the nearest member that has one, plus name/ordinal and position.
-    private string CallableKey(IMethodSymbol s, CompilationId compilation)
-    {
-        var project = ProjectName(compilation, s.ContainingAssembly);
-        var node = s.MethodKind is MethodKind.LocalFunction or MethodKind.AnonymousFunction ? s.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() : null;
-        if (node is null)
-            return project + "|" + (s.GetDocumentationCommentId() ?? Signature(s));
-        ISymbol member = s;
-        while (member is IMethodSymbol { MethodKind: MethodKind.LocalFunction or MethodKind.AnonymousFunction } && member.ContainingSymbol is { } parent) member = parent;
-        var name = s.MethodKind == MethodKind.LocalFunction ? "local:" + s.Name
-            : "lambda:" + member.DeclaringSyntaxReferences.Where(x => x.SyntaxTree == node.SyntaxTree).Sum(x => LambdasBefore(x, node.SpanStart));
-        var position = node.SyntaxTree.GetLineSpan(node.Span).StartLinePosition;
-        return $"{project}|{member.GetDocumentationCommentId() ?? member.ToDisplayString()}|{name}@{KeyPath(compilation, node.SyntaxTree.FilePath)}:{position.Line + 1}:{position.Character + 1}";
-    }
-    // Lambda ordinal within one member declaration: anonymous-function starts are scanned once per declaration (document order = ascending, distinct).
-    private int LambdasBefore(SyntaxReference declaration, int position)
-    {
-        if (!lambdaStarts.TryGetValue((declaration.SyntaxTree, declaration.Span), out var starts))
-            lambdaStarts[(declaration.SyntaxTree, declaration.Span)] = starts = declaration.GetSyntax().DescendantNodes().OfType<AnonymousFunctionExpressionSyntax>().Select(x => x.SpanStart).ToArray();
-        var index = Array.BinarySearch(starts, position);
-        return index >= 0 ? index : ~index;
-    }
-
     public async Task RegisterAsync(Project project, Compilation compilation, CompilationFact fact, bool includeGenerated, CancellationToken token)
     {
         if (assemblyProjects.TryGetValue(compilation.Assembly.Identity.ToString(), out var previous) && previous != fact.Id)
@@ -197,60 +118,6 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
         IndexerDeclarationSyntax x => x.ExpressionBody is not null,
         _ => false
     };
-    internal TypeUse Use(ITypeSymbol symbol)
-    {
-        var components = symbol switch
-        {
-            IArrayTypeSymbol a => ImmutableArray.Create(Use(a.ElementType)),
-            IPointerTypeSymbol p => ImmutableArray.Create(Use(p.PointedAtType)),
-            INamedTypeSymbol n => n.TypeArguments.Select(x => UseShallow(x)).ToImmutableArray(),
-            _ => []
-        };
-        return new(symbol is INamedTypeSymbol named ? RegisterType(named) : null, TypeName(symbol),
-            symbol.NullableAnnotation == NullableAnnotation.Annotated ? NullabilityKind.Annotated : symbol.NullableAnnotation == NullableAnnotation.NotAnnotated ? NullabilityKind.NotAnnotated : NullabilityKind.Oblivious, components);
-    }
-    private TypeUse UseShallow(ITypeSymbol s) => s is ITypeParameterSymbol ? new(null, TypeName(s), NullabilityKind.Oblivious, []) : Use(s);
-    private TypeId RegisterType(INamedTypeSymbol symbol)
-    {
-        var s = symbol.OriginalDefinition;
-        var assembly = s.ContainingAssembly.Identity.ToString();
-        var compilation = assemblyProjects.GetValueOrDefault(assembly, new CompilationId("metadata|" + assembly));
-        var id = new TypeId(compilation.Value + "|" + (s.GetDocumentationCommentId() ?? TypeName(s)));
-        if (types.ContainsKey(id)) return id;
-        types[id] = new(id, compilation, TypeName(s), s.DeclaredAccessibility.ToString(), [], Attributes(s), Declarations(s),
-            s.ContainingNamespace is { IsGlobalNamespace: false } ns ? ns.ToDisplayString() : "", KindOf(s), ModifiersOf(s),
-            Key: ProjectName(compilation, s.ContainingAssembly) + "|" + (s.GetDocumentationCommentId() ?? TypeName(s)));
-        registeredTypes.Add((id, s));
-        var bases = new List<TypeUse>();
-        if (s.BaseType is not null) bases.Add(Use(s.BaseType));
-        bases.AddRange(s.Interfaces.Select(Use));
-        types[id] = types[id] with { BaseTypes = bases.ToImmutableArray(), BaseClass = s.BaseType is null ? null : bases[0].Declaration };
-        return id;
-    }
-    internal CallableId RegisterMethod(IMethodSymbol symbol)
-    {
-        var s = Canonical(symbol);
-        var key = Key(s);
-        var id = sourceIds.GetValueOrDefault(key, new CallableId("metadata|" + key));
-        if (methods.ContainsKey(id)) return id;
-        var compilation = assemblyProjects.GetValueOrDefault(s.ContainingAssembly.Identity.ToString(), new CompilationId("metadata|" + s.ContainingAssembly.Identity));
-        var kind = s.MethodKind switch { MethodKind.Constructor or MethodKind.StaticConstructor => CallableKind.Constructor, MethodKind.PropertyGet => CallableKind.Getter, MethodKind.PropertySet => CallableKind.Setter, MethodKind.EventAdd => CallableKind.EventAdder, MethodKind.EventRemove => CallableKind.EventRemover, MethodKind.LocalFunction => CallableKind.LocalFunction, MethodKind.AnonymousFunction => CallableKind.Lambda, _ => CallableKind.Method };
-        var bodyNode = bodyByKey.TryGetValue(key, out var bodyEntry) ? bodyEntry.Value.Node : null;
-        var body = sourceIds.ContainsKey(key) ? bodyNode is not null && HasBody(bodyNode) ? BodyStatus.Source : BodyStatus.NoBody : BodyStatus.MetadataOnly;
-        // Insert before recursively registering containing local functions.
-        methods[id] = new(id, compilation, s.ContainingType is null ? null : RegisterType(s.ContainingType), null, kind, Signature(s), s.DeclaredAccessibility.ToString(), Use(s.ReturnType), s.Parameters.Select(x => new ParameterFact(x.Name, Use(x.Type), x.RefKind.ToString())).ToImmutableArray(), Attributes(s), body, Declarations(s), s.IsAsync,
-            s.ReturnType is INamedTypeSymbol returnType && returnType.ContainingNamespace.ToDisplayString() == "System.Threading.Tasks" && returnType.Name is "Task" or "ValueTask",
-            ModifiersOf(s), null, CallableKey(s, compilation));
-        registeredMethods.Add((id, s));
-        if (s.ContainingSymbol is IMethodSymbol parent) methods[id] = methods[id] with { ContainingCallable = RegisterMethod(parent) };
-        foreach (var use in new[] { methods[id].ReturnType }.Concat(methods[id].Parameters.Select(x => x.Type))) AddDependency(methods[id], use, DependencyKind.Signature, methods[id].Declarations.FirstOrDefault());
-        return id;
-    }
-    private void AddDependency(CallableFact owner, TypeUse type, DependencyKind kind, SourceEvidence? evidence)
-    {
-        dependencies.Add(new(owner.DeclaringType, owner.Id, type, kind, evidence));
-        foreach (var child in type.Components) AddDependency(owner, child, kind, evidence);
-    }
     public void Extract(CancellationToken token)
     {
         foreach (var type in sourceTypes) RegisterType(type);
@@ -280,51 +147,6 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
             implementations.Add(new(fact.Overrides!.Value, id, ImplementationKind.Override));
         foreach (var type in types.Values.ToArray()) foreach (var b in type.BaseTypes) dependencies.Add(new(type.Id, null, b, DependencyKind.Inheritance, type.Declarations.FirstOrDefault()));
     }
-    // Field/property dependencies and interface implementation candidates; runs before LinkHierarchy so everything it registers gets linked.
-    private void ExtractMembers(CancellationToken token)
-    {
-        foreach (var type in sourceTypes.Select(x => x.OriginalDefinition).Distinct(SymbolEqualityComparer.Default).Cast<INamedTypeSymbol>().ToArray())
-        {
-            token.ThrowIfCancellationRequested();
-            var owner = RegisterType(type);
-            foreach (var member in type.GetMembers())
-            {
-                if (member.IsImplicitlyDeclared || member.DeclaringSyntaxReferences.FirstOrDefault() is not { } syntax) continue;
-                // Enum constants would only depend on their own enum.
-                if (member is IFieldSymbol { ContainingType.TypeKind: not TypeKind.Enum } field) AddMemberDependency(owner, field.Type, DependencyKind.Field, syntax);
-                else if (member is IPropertySymbol property) AddMemberDependency(owner, property.Type, DependencyKind.Property, syntax);
-            }
-            if (type.TypeKind == TypeKind.Interface) continue;
-            foreach (var declared in type.AllInterfaces.SelectMany(x => x.GetMembers().OfType<IMethodSymbol>()))
-                if (type.FindImplementationForInterfaceMember(declared) is IMethodSymbol implementation && sourceIds.ContainsKey(Key(implementation))
-                    && !SymbolEqualityComparer.Default.Equals(Canonical(implementation), Canonical(declared)))
-                    implementations.Add(new(RegisterMethod(declared), RegisterMethod(implementation), ImplementationKind.Interface));
-        }
-    }
-    private void AddMemberDependency(TypeId owner, ITypeSymbol symbol, DependencyKind kind, SyntaxReference syntax)
-    {
-        var evidence = Evidence(syntax.GetSyntax());
-        void Add(TypeUse use) { dependencies.Add(new(owner, null, use, kind, evidence)); foreach (var child in use.Components) Add(child); }
-        Add(Use(symbol));
-    }
-    // Registers containing types and directly overridden members (transitively) after the baseline facts, appending to the worklists.
-    private void LinkHierarchy(CancellationToken token)
-    {
-        for (int t = 0, m = 0; t < registeredTypes.Count || m < registeredMethods.Count;)
-        {
-            token.ThrowIfCancellationRequested();
-            if (t < registeredTypes.Count)
-            {
-                var (id, symbol) = registeredTypes[t++];
-                if (symbol.ContainingType is { } container) { var containing = RegisterType(container); types[id] = types[id] with { ContainingType = containing }; }
-            }
-            else
-            {
-                var (id, symbol) = registeredMethods[m++];
-                if (symbol.OverriddenMethod is { } overridden) { var target = RegisterMethod(overridden); methods[id] = methods[id] with { Overrides = target }; }
-            }
-        }
-    }
     public ProgramSnapshot Snapshot()
     {
         // Keys collide when two projects share a file name or two versions of one metadata assembly are referenced;
@@ -350,155 +172,5 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
             Implementations = implementations.Distinct().OrderBy(x => x.Declared.Value, StringComparer.Ordinal).ThenBy(x => x.Implementation.Value, StringComparer.Ordinal).ThenBy(x => x.Kind).ToImmutableArray(),
             BoundaryHandling = boundaries.OrderBy(x => x.Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence.SpanStart).ToImmutableArray()
         };
-    }
-
-    private sealed class BodyWalker(FactExtractor facts, SemanticModel model, CompilationFact compilation, CallableId owner, CancellationToken token) : OperationWalker
-    {
-        private int ordinal;
-        private string NodeId(string kind, SyntaxNode n) => $"{owner.Value}|{kind}|{n.SyntaxTree.FilePath}:{n.SpanStart}";
-        private static bool IsDeclaration(SyntaxNode node) => node is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax or LocalFunctionStatementSyntax or AnonymousFunctionExpressionSyntax or PropertyDeclarationSyntax or IndexerDeclarationSyntax;
-        private ImmutableArray<ExceptionRegionId> Protected(SyntaxNode node) => node.Ancestors().TakeWhile(x => !IsDeclaration(x))
-            .OfType<TryStatementSyntax>().Where(x => x.Block.Span.Contains(node.Span)).Select(x => new ExceptionRegionId(NodeId("try", x))).ToImmutableArray();
-        private CatchId? CatchOwner(SyntaxNode node) => node.Ancestors().TakeWhile(x => !IsDeclaration(x)).OfType<CatchClauseSyntax>().Select(x => (CatchId?)new CatchId(NodeId("catch", x))).FirstOrDefault();
-        internal void Gap(string message, SyntaxNode node) => facts.gaps.Add(new(GapKind.Unsupported, compilation.Id, owner, message, facts.Evidence(node)));
-        public override void Visit(IOperation? operation) { token.ThrowIfCancellationRequested(); base.Visit(operation); }
-        public override void VisitAnonymousFunction(IAnonymousFunctionOperation operation) { }
-        public override void VisitLocalFunction(ILocalFunctionOperation operation) { }
-        private void Call(IMethodSymbol? target, SyntaxNode syntax, DispatchKind dispatch, bool implicitCall = false, bool awaited = false)
-        {
-            var id = target is null ? (CallableId?)null : facts.RegisterMethod(target);
-            facts.calls.Add(new(new(NodeId("call", syntax) + ":" + ordinal++), owner, id, target is null ? "<unresolved>" : Signature(target), dispatch,
-                target?.TypeArguments.Select(facts.Use).ToImmutableArray() ?? [], facts.Evidence(syntax), implicitCall, Protected(syntax), awaited));
-        }
-        private static DispatchKind Dispatch(IMethodSymbol target, SyntaxNode syntax)
-        {
-            if (target.MethodKind == MethodKind.DelegateInvoke) return DispatchKind.Delegate;
-            if (syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Expression: BaseExpressionSyntax } } or MemberAccessExpressionSyntax { Expression: BaseExpressionSyntax }) return DispatchKind.Direct;
-            if (target.ContainingType.TypeKind == TypeKind.Interface) return DispatchKind.Interface;
-            if (target.IsVirtual || target.IsOverride || target.IsAbstract) return DispatchKind.Virtual;
-            return DispatchKind.Direct;
-        }
-        private static bool Awaited(IOperation operation)
-        {
-            var parent = operation.Parent;
-            while (parent is IConversionOperation or IParenthesizedOperation) parent = parent.Parent;
-            return parent is IAwaitOperation;
-        }
-        public override void VisitInvocation(IInvocationOperation operation)
-        {
-            Call(operation.TargetMethod, operation.Syntax, Dispatch(operation.TargetMethod, operation.Syntax), operation.IsImplicit, Awaited(operation));
-            if (operation.Type is { } type) facts.AddDependency(facts.methods[owner], facts.Use(type), DependencyKind.BodyUse, facts.Evidence(operation.Syntax));
-            base.VisitInvocation(operation);
-        }
-        public override void VisitConversion(IConversionOperation operation)
-        {
-            if (operation.OperatorMethod is not null) Call(operation.OperatorMethod, operation.Syntax, DispatchKind.Direct, operation.IsImplicit);
-            base.VisitConversion(operation);
-        }
-        public override void VisitBinaryOperator(IBinaryOperation operation)
-        {
-            if (operation.OperatorMethod is not null) Call(operation.OperatorMethod, operation.Syntax, DispatchKind.Direct, operation.IsImplicit);
-            base.VisitBinaryOperator(operation);
-        }
-        public override void VisitUnaryOperator(IUnaryOperation operation)
-        {
-            if (operation.OperatorMethod is not null) Call(operation.OperatorMethod, operation.Syntax, DispatchKind.Direct, operation.IsImplicit);
-            base.VisitUnaryOperator(operation);
-        }
-        public override void VisitIncrementOrDecrement(IIncrementOrDecrementOperation operation)
-        {
-            if (operation.OperatorMethod is not null) Call(operation.OperatorMethod, operation.Syntax, DispatchKind.Direct, operation.IsImplicit);
-            base.VisitIncrementOrDecrement(operation);
-        }
-        public override void VisitCompoundAssignment(ICompoundAssignmentOperation operation)
-        {
-            if (operation.OperatorMethod is not null) Call(operation.OperatorMethod, operation.Syntax, DispatchKind.Direct, operation.IsImplicit);
-            if (operation.InConversion.MethodSymbol is not null || operation.OutConversion.MethodSymbol is not null) Gap("Compound assignment user-defined conversions are outside supported extraction.", operation.Syntax);
-            base.VisitCompoundAssignment(operation);
-        }
-        public override void VisitObjectCreation(IObjectCreationOperation operation)
-        {
-            Call(operation.Constructor, operation.Syntax, DispatchKind.Direct, operation.IsImplicit);
-            if (operation.Type is { } type) facts.AddDependency(facts.methods[owner], facts.Use(type), DependencyKind.Construction, facts.Evidence(operation.Syntax));
-            base.VisitObjectCreation(operation);
-        }
-        public override void VisitDynamicInvocation(IDynamicInvocationOperation operation) { Call(null, operation.Syntax, DispatchKind.Dynamic); base.VisitDynamicInvocation(operation); }
-        public override void VisitFunctionPointerInvocation(IFunctionPointerInvocationOperation operation) { Call(null, operation.Syntax, DispatchKind.Unknown); base.VisitFunctionPointerInvocation(operation); }
-        public override void VisitPropertyReference(IPropertyReferenceOperation operation)
-        {
-            var p = operation.Parent;
-            var writes = p is ISimpleAssignmentOperation assignment && assignment.Target == operation || p is ICompoundAssignmentOperation compound && compound.Target == operation || p is IIncrementOrDecrementOperation;
-            var reads = !writes || p is ICompoundAssignmentOperation or IIncrementOrDecrementOperation;
-            if (reads && operation.Property.GetMethod is { } get) Call(get, operation.Syntax, Dispatch(get, operation.Syntax), true);
-            if (writes && operation.Property.SetMethod is { } set) Call(set, operation.Syntax, Dispatch(set, operation.Syntax), true);
-            if (p is ICoalesceAssignmentOperation) Gap("Coalescing property assignment accessor semantics unsupported.", operation.Syntax);
-            base.VisitPropertyReference(operation);
-        }
-        public override void VisitEventAssignment(IEventAssignmentOperation operation)
-        {
-            if (operation.EventReference is IEventReferenceOperation ev)
-            {
-                var method = operation.Adds ? ev.Event.AddMethod : ev.Event.RemoveMethod;
-                if (method is not null) Call(method, operation.Syntax, Dispatch(method, operation.Syntax), true);
-            }
-            base.VisitEventAssignment(operation);
-        }
-        public override void VisitThrow(IThrowOperation operation)
-        {
-            var staticOperand = operation.Exception;
-            while (staticOperand is IConversionOperation { IsImplicit: true, OperatorMethod: null } or IParenthesizedOperation)
-                staticOperand = staticOperand is IConversionOperation staticConversion ? staticConversion.Operand : ((IParenthesizedOperation)staticOperand).Operand;
-            var exactOperand = operation.Exception;
-            while (exactOperand is IConversionOperation { OperatorMethod: null } or IParenthesizedOperation)
-                exactOperand = exactOperand is IConversionOperation exactConversion ? exactConversion.Operand : ((IParenthesizedOperation)exactOperand).Operand;
-            var staticType = staticOperand?.Type;
-            var exactType = exactOperand is IObjectCreationOperation { Type: { TypeKind: not TypeKind.Error } constructedType } ? constructedType : null;
-            if (staticOperand?.ConstantValue is { HasValue: true, Value: null })
-                Gap("Throwing null produces an implicit NullReferenceException; implicit exception origins are outside supported analysis.", operation.Syntax);
-            facts.throws.Add(new(new(NodeId("throw", operation.Syntax)), owner, operation.Exception is null ? ThrowKind.Rethrow : ThrowKind.Explicit,
-                staticType is null ? null : facts.Use(staticType), facts.Evidence(operation.Syntax), Protected(operation.Syntax), exactType is not null,
-                CatchOwner(operation.Syntax), exactType is null ? null : facts.Use(exactType)));
-            base.VisitThrow(operation);
-        }
-        public override void VisitAwait(IAwaitOperation operation)
-        {
-            IOperation operand = operation.Operation;
-            while (operand is IConversionOperation or IParenthesizedOperation) operand = operand.ChildOperations.First();
-            if (operand is not IInvocationOperation) Gap("Await of an aliased task/custom awaitable: exception origin tracking unsupported.", operation.Syntax);
-            base.VisitAwait(operation);
-        }
-        public override void VisitForEachLoop(IForEachLoopOperation operation)
-        {
-            Gap("Implicit enumeration/disposal calls are outside supported extraction.", operation.Syntax);
-            base.VisitForEachLoop(operation);
-        }
-        public override void VisitUsing(IUsingOperation operation) { Gap("Implicit disposal and using exception propagation unsupported.", operation.Syntax); base.VisitUsing(operation); }
-        public override void VisitUsingDeclaration(IUsingDeclarationOperation operation) { Gap("Implicit disposal and using exception propagation unsupported.", operation.Syntax); base.VisitUsingDeclaration(operation); }
-        public override void VisitInvalid(IInvalidOperation operation) { Gap("Invalid operation or unresolved binding.", operation.Syntax); Call(null, operation.Syntax, DispatchKind.Unknown); base.VisitInvalid(operation); }
-        public void ExtractRegions(SyntaxNode declaration)
-        {
-            foreach (var region in declaration.DescendantNodes(x => x == declaration || !IsDeclaration(x)).OfType<TryStatementSyntax>())
-            {
-                var ids = ImmutableArray.CreateBuilder<CatchId>();
-                foreach (var clause in region.Catches)
-                {
-                    var id = new CatchId(NodeId("catch", clause)); ids.Add(id);
-                    var statements = clause.Block.Statements;
-                    var outcome = HandlerOutcome.Unknown; ThrowSiteId? next = null;
-                    if (statements.Count == 0 || statements.All(x => x is ReturnStatementSyntax { Expression: null } or EmptyStatementSyntax)) outcome = HandlerOutcome.Intercepts;
-                    if (statements.Count == 1 && statements[0] is ThrowStatementSyntax t)
-                    {
-                        outcome = t.Expression is null ? HandlerOutcome.Rethrows : HandlerOutcome.Replaces;
-                        next = new ThrowSiteId(NodeId("throw", t));
-                    }
-                    var type = clause.Declaration is null ? null : model.GetTypeInfo(clause.Declaration.Type, token).Type;
-                    facts.catches.Add(new(id, owner, type is null ? null : facts.Use(type), clause.Filter?.FilterExpression.ToString(),
-                        facts.Evidence(clause), facts.Evidence(clause.Block), outcome, next));
-                }
-                facts.regions.Add(new(new(NodeId("try", region)), owner, facts.Evidence(region.Block), ids.ToImmutable(), region.Finally is not null));
-            }
-            foreach (var node in declaration.DescendantNodes(x => x == declaration || !IsDeclaration(x)).Where(x => x is YieldStatementSyntax or LockStatementSyntax))
-                Gap("Iterator/lock exception behaviour is outside the supported model.", node);
-        }
     }
 }
