@@ -25,17 +25,37 @@ public enum DependencyKind { Signature, Inheritance, Constraint, Attribute, Cons
 public enum ThrowKind { Explicit, Rethrow }
 public enum GapKind { ProjectLoad, Compilation, Binding, Unsupported, ExcludedSource }
 public enum HandlerOutcome { Intercepts, Rethrows, Replaces, Unknown }
+public enum DeclaredTypeKind { Class, Record, Struct, RecordStruct, Interface, Enum, Delegate, Other }
+[Flags] public enum TypeModifiers { None = 0, Abstract = 1, Sealed = 2, Static = 4, Generic = 8 }
+// Operator covers user-defined operators and conversions.
+[Flags] public enum CallableModifiers { None = 0, Static = 1, Abstract = 2, Virtual = 4, Override = 8, Sealed = 16, Generic = 32, Extension = 64, Operator = 128, ExplicitImplementation = 256, Finalizer = 512 }
 
 public sealed record SourceEvidence(string Path, string Checksum, int SpanStart, int SpanLength,
-    int StartLine, int StartColumn, bool IsGenerated);
+    int StartLine, int StartColumn, bool IsGenerated)
+{
+    // Portable display form; paths outside the root stay as recorded rather than becoming "../" chains.
+    public string RelativeTo(string root)
+    {
+        if (!System.IO.Path.IsPathRooted(root) || !System.IO.Path.IsPathRooted(Path)) return Path;
+        var relative = System.IO.Path.GetRelativePath(root, Path);
+        var outside = System.IO.Path.IsPathRooted(relative) || relative.StartsWith("..", StringComparison.Ordinal) && (relative.Length == 2 || relative[2] is '/' or '\\');
+        return outside ? Path : relative.Replace('\\', '/');
+    }
+}
+public sealed record NamedArgumentFact(string Name, string Value);
+// Name is the attribute class display name; argument values are rendered C# constants.
+public sealed record AttributeFact(string Name, ImmutableArray<string> Arguments, ImmutableArray<NamedArgumentFact> NamedArguments);
 public sealed record TypeUse(TypeId? Declaration, string DisplayName, NullabilityKind Nullability, ImmutableArray<TypeUse> Components);
 public sealed record ParameterFact(string Name, TypeUse Type, string RefKind);
 public sealed record TypeFact(TypeId Id, CompilationId Compilation, string DisplayName, string Accessibility,
-    ImmutableArray<TypeUse> BaseTypes, ImmutableArray<string> Attributes, ImmutableArray<SourceEvidence> Declarations);
+    ImmutableArray<TypeUse> BaseTypes, ImmutableArray<AttributeFact> Attributes, ImmutableArray<SourceEvidence> Declarations,
+    string Namespace = "", DeclaredTypeKind Kind = DeclaredTypeKind.Class, TypeModifiers Modifiers = TypeModifiers.None,
+    TypeId? BaseClass = null, TypeId? ContainingType = null, string Key = "");
 public sealed record CallableFact(CallableId Id, CompilationId Compilation, TypeId? DeclaringType,
     CallableId? ContainingCallable, CallableKind Kind, string DisplaySignature, string Accessibility, TypeUse ReturnType,
-    ImmutableArray<ParameterFact> Parameters, ImmutableArray<string> Attributes, BodyStatus Body,
-    ImmutableArray<SourceEvidence> Declarations, bool IsAsync = false, bool ReturnsTask = false);
+    ImmutableArray<ParameterFact> Parameters, ImmutableArray<AttributeFact> Attributes, BodyStatus Body,
+    ImmutableArray<SourceEvidence> Declarations, bool IsAsync = false, bool ReturnsTask = false,
+    CallableModifiers Modifiers = CallableModifiers.None, CallableId? Overrides = null, string Key = "");
 public sealed record CallSiteFact(CallSiteId Id, CallableId Caller, CallableId? BoundTarget, string TargetDisplay,
     DispatchKind Dispatch, ImmutableArray<TypeUse> TypeArguments, SourceEvidence Evidence, bool IsImplicit,
     ImmutableArray<ExceptionRegionId> ProtectedRegions, bool IsAwaited = false);
@@ -67,4 +87,6 @@ public sealed record ProgramSnapshot
     public ImmutableArray<ExceptionRegionFact> ExceptionRegions { get; init; } = [];
     public ImmutableArray<ControllerActionFact> ControllerActions { get; init; } = [];
     public ImmutableArray<BoundaryHandlingFact> BoundaryHandling { get; init; } = [];
+    // Full path of the analysed input's directory; consumers use it with SourceEvidence.RelativeTo.
+    public string SourceRoot { get; init; } = "";
 }

@@ -56,6 +56,6 @@ public static class RoslynProgramLoader
         var extractor = new FactExtractor(contexts.Select(x => x.Fact).ToImmutableArray(), loadGaps);
         foreach (var context in contexts) await extractor.RegisterAsync(context.Project, context.Compilation, context.Fact, request.IncludeGenerated, cancellationToken);
         extractor.Extract(cancellationToken);
-        return extractor.Snapshot();
+        return extractor.Snapshot() with { SourceRoot = Path.GetDirectoryName(input)! };
     }
 }

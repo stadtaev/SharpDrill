@@ -14,6 +14,7 @@ public sealed class LoaderTests
         AssertResearchBindings(snapshot);
         Assert.Equal(3, snapshot.Compilations.Length);
         Assert.All(snapshot.Compilations, x => Assert.Equal("net10.0", x.TargetFramework));
+        Assert.Equal(Path.GetDirectoryName(Path.GetFullPath(input)), snapshot.SourceRoot);
         Assert.DoesNotContain(snapshot.Gaps, x => x.Kind is GapKind.ProjectLoad or GapKind.Compilation);
     }
 

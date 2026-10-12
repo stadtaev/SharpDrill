@@ -73,6 +73,59 @@ public sealed class CoreTests
     }
 
     [Fact]
+    public void Attribute_arguments_and_hierarchy_links_serialize_as_objects_and_ids_and_round_trip()
+    {
+        var route = new AttributeFact("RouteAttribute", ["\"orders\""], [new("Name", "\"list\"")]);
+        var snapshot = new ProgramSnapshot
+        {
+            SourceRoot = "/repo",
+            Types = [new(new("Derived"), Project, "Derived", "Public", [], [route], [], "Shop", DeclaredTypeKind.Record,
+                TypeModifiers.Sealed | TypeModifiers.Generic, new TypeId("Base"), new TypeId("Outer"), "Project|T:Shop.Derived")],
+            Callables = [Method("Run") with { Modifiers = CallableModifiers.Override | CallableModifiers.Sealed, Overrides = new CallableId("BaseRun"), Key = "Project|M:Run" }]
+        };
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var json = JsonSerializer.Serialize(snapshot, options);
+        using (var doc = JsonDocument.Parse(json))
+        {
+            var type = doc.RootElement.GetProperty("types")[0];
+            var attribute = type.GetProperty("attributes")[0];
+            Assert.Equal("RouteAttribute", attribute.GetProperty("name").GetString());
+            Assert.Equal("\"orders\"", attribute.GetProperty("arguments")[0].GetString());
+            Assert.Equal("Name", attribute.GetProperty("namedArguments")[0].GetProperty("name").GetString());
+            Assert.Equal("\"list\"", attribute.GetProperty("namedArguments")[0].GetProperty("value").GetString());
+            Assert.Equal("Base", type.GetProperty("baseClass").GetString());
+            Assert.Equal("Outer", type.GetProperty("containingType").GetString());
+            Assert.Equal("BaseRun", doc.RootElement.GetProperty("callables")[0].GetProperty("overrides").GetString());
+            Assert.Equal("/repo", doc.RootElement.GetProperty("sourceRoot").GetString());
+        }
+        var back = JsonSerializer.Deserialize<ProgramSnapshot>(json, options)!;
+        var backType = Assert.Single(back.Types);
+        var backAttribute = Assert.Single(backType.Attributes);
+        Assert.Equal("RouteAttribute", backAttribute.Name);
+        Assert.Equal(new[] { "\"orders\"" }, backAttribute.Arguments);
+        Assert.Equal(new NamedArgumentFact("Name", "\"list\""), Assert.Single(backAttribute.NamedArguments));
+        Assert.Equal(("Shop", DeclaredTypeKind.Record, TypeModifiers.Sealed | TypeModifiers.Generic, "Project|T:Shop.Derived"), (backType.Namespace, backType.Kind, backType.Modifiers, backType.Key));
+        Assert.Equal((new TypeId("Base"), new TypeId("Outer")), (backType.BaseClass, backType.ContainingType));
+        var backRun = Assert.Single(back.Callables);
+        Assert.Equal((CallableModifiers.Override | CallableModifiers.Sealed, new CallableId("BaseRun"), "Project|M:Run"), (backRun.Modifiers, backRun.Overrides, backRun.Key));
+        Assert.Equal("/repo", back.SourceRoot);
+    }
+
+    [Fact]
+    public void Evidence_path_is_relative_to_root_with_forward_slashes_or_unchanged_outside_it()
+    {
+        var inside = Evidence with { Path = "/repo/src/App/Program.cs" };
+        Assert.Equal("src/App/Program.cs", inside.RelativeTo("/repo"));
+        Assert.Equal("src/App/Program.cs", inside.RelativeTo("/repo/"));
+        Assert.Equal("Program.cs", inside.RelativeTo("/repo/src/App"));
+        Assert.Equal("/other/Program.cs", (Evidence with { Path = "/other/Program.cs" }).RelativeTo("/repo"));
+        Assert.Equal("/repository/Program.cs", (Evidence with { Path = "/repository/Program.cs" }).RelativeTo("/repo"));
+        Assert.Equal("..data/Program.cs", (Evidence with { Path = "/repo/..data/Program.cs" }).RelativeTo("/repo"));
+        Assert.Equal("Example.cs", Evidence.RelativeTo("/repo"));
+        Assert.Equal("/repo/src/App/Program.cs", inside.RelativeTo(""));
+    }
+
+    [Fact]
     public void Diamond_preserves_each_witness_without_global_visited_pruning()
     {
         var snapshot = Snapshot([Method("Action"), Method("Left"), Method("Right"), Method("Shared")],

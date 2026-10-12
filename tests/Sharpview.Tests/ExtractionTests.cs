@@ -10,23 +10,28 @@ namespace Sharpview.Tests;
 
 public sealed class ExtractionTests
 {
-    private static async Task<ProgramSnapshot> Extract(string source, bool includeGenerated = true, string path = "/fixture/Input.cs")
+    private static async Task<ProgramSnapshot> Extract(string source, bool includeGenerated = true, string path = "/fixture/Input.cs", string projectPath = "/fixture/Fixture.csproj")
     {
         using var workspace = new AdhocWorkspace();
+        var (project, compilation) = await Compile(workspace, "ExtractionFixture", source, path);
+        var fact = new CompilationFact(new("fixture"), projectPath, compilation.Assembly.Identity.ToString(), "net10.0", "Debug", "Preview", "Disable", [], []);
+        var extractor = new FactExtractor([fact], []);
+        await extractor.RegisterAsync(project, compilation, fact, includeGenerated, CancellationToken.None);
+        extractor.Extract(CancellationToken.None);
+        return extractor.Snapshot();
+    }
+    private static async Task<(Project Project, Compilation Compilation)> Compile(AdhocWorkspace workspace, string name, string source, string path)
+    {
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
             .Select(x => MetadataReference.CreateFromFile(x));
-        var project = workspace.AddProject("ExtractionFixture", LanguageNames.CSharp)
+        var project = workspace.AddProject(name, LanguageNames.CSharp)
             .WithCompilationOptions(new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
             .WithParseOptions(new CSharpParseOptions(LanguageVersion.Preview))
             .AddMetadataReferences(references)
             .AddDocument("Input.cs", SourceText.From(source), filePath: path).Project;
         var compilation = (await project.GetCompilationAsync())!;
         Assert.DoesNotContain(compilation.GetDiagnostics(), x => x.Severity == DiagnosticSeverity.Error);
-        var fact = new CompilationFact(new("fixture"), "/fixture/Fixture.csproj", compilation.Assembly.Identity.ToString(), "net10.0", "Debug", "Preview", "Disable", [], []);
-        var extractor = new FactExtractor([fact], []);
-        await extractor.RegisterAsync(project, compilation, fact, includeGenerated, CancellationToken.None);
-        extractor.Extract(CancellationToken.None);
-        return extractor.Snapshot();
+        return (project, compilation);
     }
 
     [Fact]
@@ -213,6 +218,174 @@ public sealed class ExtractionTests
             """);
         var action = Assert.Single(snapshot.ControllerActions);
         Assert.Equal("Controller.Action()", Assert.Single(snapshot.Callables, x => x.Id == action.Method).DisplaySignature);
+    }
+
+    [Fact]
+    public async Task Type_facts_record_namespace_kind_modifiers_base_class_and_containing_type()
+    {
+        var snapshot = await Extract("""
+            namespace Shop.Orders {
+                public class Base { }
+                public abstract class Shape : Base, System.IDisposable { public void Dispose() { } public class Nested { } }
+                public static class Helpers { }
+                public sealed record Order(int Id);
+                public record struct Point(int X);
+                public interface IStore { }
+                public class Box<T> { }
+                public struct Value { }
+                public enum Color { Red }
+                public delegate void Handler();
+            }
+            public class Global { }
+            """);
+        TypeFact Type(string name) => Assert.Single(snapshot.Types, x => x.DisplayName == name);
+        void Expect(string name, DeclaredTypeKind kind, TypeModifiers modifiers)
+        {
+            var type = Type(name);
+            Assert.Equal((kind, modifiers, "Shop.Orders"), (type.Kind, type.Modifiers, type.Namespace));
+        }
+        Expect("Shop.Orders.Base", DeclaredTypeKind.Class, TypeModifiers.None);
+        Expect("Shop.Orders.Shape", DeclaredTypeKind.Class, TypeModifiers.Abstract);
+        Expect("Shop.Orders.Shape.Nested", DeclaredTypeKind.Class, TypeModifiers.None);
+        Expect("Shop.Orders.Helpers", DeclaredTypeKind.Class, TypeModifiers.Static);
+        Expect("Shop.Orders.Order", DeclaredTypeKind.Record, TypeModifiers.Sealed);
+        Expect("Shop.Orders.Point", DeclaredTypeKind.RecordStruct, TypeModifiers.Sealed);
+        Expect("Shop.Orders.IStore", DeclaredTypeKind.Interface, TypeModifiers.Abstract);
+        Expect("Shop.Orders.Box<T>", DeclaredTypeKind.Class, TypeModifiers.Generic);
+        Expect("Shop.Orders.Value", DeclaredTypeKind.Struct, TypeModifiers.Sealed);
+        Expect("Shop.Orders.Color", DeclaredTypeKind.Enum, TypeModifiers.Sealed);
+        Expect("Shop.Orders.Handler", DeclaredTypeKind.Delegate, TypeModifiers.Sealed);
+        Assert.Equal("", Type("Global").Namespace);
+        var shape = Type("Shop.Orders.Shape");
+        Assert.Equal(Type("Shop.Orders.Base").Id, shape.BaseClass);
+        Assert.Equal(["Shop.Orders.Base", "System.IDisposable"], shape.BaseTypes.Select(x => x.DisplayName));
+        Assert.Equal(Type("object").Id, Type("Shop.Orders.Base").BaseClass);
+        Assert.Null(Type("Shop.Orders.IStore").BaseClass);
+        Assert.Equal(shape.Id, Type("Shop.Orders.Shape.Nested").ContainingType);
+        Assert.Null(shape.ContainingType);
+        Assert.Equal("Fixture|T:Shop.Orders.Shape.Nested", Type("Shop.Orders.Shape.Nested").Key);
+    }
+
+    [Fact]
+    public async Task Callable_modifiers_and_overrides_link_to_the_directly_overridden_declaration()
+    {
+        var snapshot = await Extract("""
+            public abstract class Animal { public abstract string Sound(); public virtual void Eat() { } }
+            public class Dog : Animal { public override string Sound() => "woof"; public override void Eat() { } public override string ToString() => "dog"; }
+            public class Puppy : Dog { public sealed override void Eat() { } }
+            public interface IGreeter { void Greet(); }
+            public class Greeter : IGreeter { void IGreeter.Greet() { } ~Greeter() { } }
+            public static class Tools {
+                public static T Echo<T>(T value) => value;
+                public static int Twice(this int value) => value * 2;
+            }
+            public readonly struct Money {
+                public static Money operator +(Money left, Money right) => left;
+                public static explicit operator int(Money value) => 0;
+            }
+            """);
+        CallableFact Method(string signature) => Assert.Single(snapshot.Callables, x => x.DisplaySignature == signature);
+        Assert.Equal(CallableModifiers.Abstract, Method("Animal.Sound()").Modifiers);
+        Assert.Equal(CallableModifiers.Virtual, Method("Animal.Eat()").Modifiers);
+        Assert.Equal(CallableModifiers.Override, Method("Dog.Sound()").Modifiers);
+        Assert.Equal(Method("Animal.Sound()").Id, Method("Dog.Sound()").Overrides);
+        Assert.Equal(CallableModifiers.Override | CallableModifiers.Sealed, Method("Puppy.Eat()").Modifiers);
+        Assert.Equal(Method("Dog.Eat()").Id, Method("Puppy.Eat()").Overrides);
+        Assert.Equal(Method("Animal.Eat()").Id, Method("Dog.Eat()").Overrides);
+        Assert.Null(Method("Animal.Eat()").Overrides);
+        var objectToString = Assert.Single(snapshot.Callables, x => x.Id == Method("Dog.ToString()").Overrides);
+        Assert.Equal(("object.ToString()", BodyStatus.MetadataOnly, CallableModifiers.Virtual), (objectToString.DisplaySignature, objectToString.Body, objectToString.Modifiers));
+        Assert.Equal(CallableModifiers.ExplicitImplementation, Method("Greeter.IGreeter.Greet()").Modifiers);
+        Assert.Null(Method("Greeter.IGreeter.Greet()").Overrides);
+        Assert.True(Method("Greeter.Finalize()").Modifiers.HasFlag(CallableModifiers.Finalizer));
+        Assert.Equal(CallableModifiers.Static | CallableModifiers.Generic, Method("Tools.Echo<T>(T)").Modifiers);
+        Assert.Equal(CallableModifiers.Static | CallableModifiers.Extension, Method("Tools.Twice(int)").Modifiers);
+        Assert.Equal(CallableModifiers.Static | CallableModifiers.Operator, Method("Money.op_Addition(Money, Money)").Modifiers);
+        Assert.Equal(CallableModifiers.Static | CallableModifiers.Operator, Method("Money.op_Explicit(Money)").Modifiers);
+    }
+
+    [Fact]
+    public async Task Attributes_keep_names_and_render_positional_and_named_arguments_in_order()
+    {
+        var snapshot = await Extract("""
+            using System;
+            [AttributeUsage(AttributeTargets.All, AllowMultiple = true)]
+            public sealed class RouteAttribute : Attribute {
+                public RouteAttribute(string template) { }
+                public RouteAttribute(string template, int order) { }
+                public string Name { get; set; } = "";
+                public int Order { get; set; }
+            }
+            [Route("orders", Name = "list", Order = 2)]
+            [Obsolete]
+            [Route("archive", 3)]
+            public class OrdersController { [Route("get")] public void Get() { } }
+            """);
+        var controller = Assert.Single(snapshot.Types, x => x.DisplayName == "OrdersController");
+        Assert.Equal(["RouteAttribute", "RouteAttribute", "System.ObsoleteAttribute"], controller.Attributes.Select(x => x.Name));
+        Assert.Equal(new[] { "\"archive\"", "3" }, controller.Attributes[0].Arguments);
+        Assert.Empty(controller.Attributes[0].NamedArguments);
+        Assert.Equal(new[] { "\"orders\"" }, controller.Attributes[1].Arguments);
+        Assert.Equal(new[] { new NamedArgumentFact("Name", "\"list\""), new NamedArgumentFact("Order", "2") }, controller.Attributes[1].NamedArguments);
+        Assert.Empty(controller.Attributes[2].Arguments);
+        var get = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "OrdersController.Get()");
+        Assert.Equal(new[] { "\"get\"" }, Assert.Single(get.Attributes).Arguments);
+    }
+
+    [Fact]
+    public async Task Keys_are_portable_unique_and_stable_across_locations()
+    {
+        const string source = """
+            namespace Shop {
+                public static class Sample {
+                    public static void Parent() {
+                        void Local() { System.Console.WriteLine(); }
+                        System.Action first = () => Local(); System.Func<int, int> second = x => x;
+                    }
+                }
+            }
+            """;
+        var snapshot = await Extract(source);
+        var moved = await Extract(source, path: "/elsewhere/deep/src/Input.cs", projectPath: "/elsewhere/deep/Fixture.csproj");
+        CallableFact Single(CallableKind kind, int line = 0, int column = 0) => Assert.Single(snapshot.Callables,
+            x => x.Kind == kind && (line == 0 || x.Declarations[0].StartLine == line && x.Declarations[0].StartColumn == column));
+        Assert.Equal("Fixture|M:Shop.Sample.Parent", Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Shop.Sample.Parent()").Key);
+        Assert.Equal("Fixture|M:Shop.Sample.Parent|local:Local@Input.cs:4:13", Single(CallableKind.LocalFunction).Key);
+        Assert.Equal("Fixture|M:Shop.Sample.Parent|lambda:0@Input.cs:5:35", Single(CallableKind.Lambda, 5, 35).Key);
+        Assert.Equal("Fixture|M:Shop.Sample.Parent|lambda:1@Input.cs:5:81", Single(CallableKind.Lambda, 5, 81).Key);
+        Assert.Equal("System.Console|M:System.Console.WriteLine", Assert.Single(snapshot.Callables, x => x.DisplaySignature == "System.Console.WriteLine()").Key);
+        Assert.Equal("Fixture|T:Shop.Sample", Assert.Single(snapshot.Types, x => x.DisplayName == "Shop.Sample").Key);
+        var keys = snapshot.Types.Select(x => x.Key).Concat(snapshot.Callables.Select(x => x.Key)).ToArray();
+        Assert.Equal(keys.Length, keys.Distinct(StringComparer.Ordinal).Count());
+        Assert.All(keys, key =>
+        {
+            Assert.DoesNotContain("/fixture", key, StringComparison.Ordinal);
+            Assert.DoesNotContain("Version=", key, StringComparison.Ordinal);
+            Assert.DoesNotContain("net10.0", key, StringComparison.Ordinal);
+            Assert.DoesNotContain("|Debug", key, StringComparison.Ordinal);
+        });
+        Assert.Equal(keys.Order(StringComparer.Ordinal).Select(x => x.Replace("@Input.cs", "@src/Input.cs", StringComparison.Ordinal)),
+            moved.Types.Select(x => x.Key).Concat(moved.Callables.Select(x => x.Key)).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task Colliding_keys_from_projects_sharing_a_file_name_get_deterministic_suffixes()
+    {
+        using var workspace = new AdhocWorkspace();
+        var projects = new List<(Project Project, Compilation Compilation, CompilationFact Fact)>();
+        foreach (var (name, directory) in new[] { ("One", "/a"), ("Two", "/b") })
+        {
+            var (project, compilation) = await Compile(workspace, name, "public class Shared { public void Run() { } }", directory + "/Input.cs");
+            projects.Add((project, compilation, new CompilationFact(new(name), directory + "/Shared.csproj", compilation.Assembly.Identity.ToString(), "net10.0", "Debug", "Preview", "Disable", [], [])));
+        }
+        var extractor = new FactExtractor([.. projects.Select(x => x.Fact)], []);
+        foreach (var (project, compilation, fact) in projects) await extractor.RegisterAsync(project, compilation, fact, true, CancellationToken.None);
+        extractor.Extract(CancellationToken.None);
+        var snapshot = extractor.Snapshot();
+        Assert.Equal(["Shared|T:Shared", "Shared|T:Shared#2"], snapshot.Types.Where(x => x.DisplayName == "Shared").OrderBy(x => x.Compilation.Value, StringComparer.Ordinal).Select(x => x.Key));
+        Assert.Equal(["Shared|M:Shared.Run", "Shared|M:Shared.Run#2"], snapshot.Callables.Where(x => x.DisplaySignature == "Shared.Run()").OrderBy(x => x.Compilation.Value, StringComparer.Ordinal).Select(x => x.Key));
+        var keys = snapshot.Types.Select(x => x.Key).Concat(snapshot.Callables.Select(x => x.Key)).ToArray();
+        Assert.Equal(keys.Length, keys.Distinct(StringComparer.Ordinal).Count());
     }
 
     [Fact]

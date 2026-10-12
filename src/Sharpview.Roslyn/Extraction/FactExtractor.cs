@@ -30,6 +30,10 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
     private readonly List<BoundaryHandlingFact> boundaries = [];
     private readonly Dictionary<SyntaxTree, bool> generatedTrees = [];
     private readonly Dictionary<SyntaxTree, string> checksums = [];
+    private readonly Dictionary<CompilationId, CompilationFact> sourceProjects = compilations.ToDictionary(x => x.Id);
+    // Symbols in registration order; hierarchy links are resolved after extraction so baseline registration order is untouched.
+    private readonly List<(TypeId Id, INamedTypeSymbol Symbol)> registeredTypes = [];
+    private readonly List<(CallableId Id, IMethodSymbol Symbol)> registeredMethods = [];
 
     internal static IMethodSymbol Canonical(IMethodSymbol s) => (s.ReducedFrom ?? s).OriginalDefinition.PartialImplementationPart ?? (s.ReducedFrom ?? s).OriginalDefinition;
     private static string Key(IMethodSymbol symbol)
@@ -75,7 +79,50 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
         }
         return syntax.Select(x => Evidence(x.GetSyntax())).Distinct().OrderBy(x => x.Path, StringComparer.Ordinal).ThenBy(x => x.SpanStart).ToImmutableArray();
     }
-    private static ImmutableArray<string> Attributes(ISymbol s) => s.GetAttributes().Select(x => x.AttributeClass?.ToDisplayString() ?? "<unresolved>").Order(StringComparer.Ordinal).ToImmutableArray();
+    private static ImmutableArray<AttributeFact> Attributes(ISymbol s) => s.GetAttributes()
+        .Select(x => new AttributeFact(x.AttributeClass?.ToDisplayString() ?? "<unresolved>", x.ConstructorArguments.Select(a => a.ToCSharpString()).ToImmutableArray(),
+            x.NamedArguments.Select(a => new NamedArgumentFact(a.Key, a.Value.ToCSharpString())).ToImmutableArray()))
+        .OrderBy(x => x.Name, StringComparer.Ordinal)
+        .ThenBy(x => string.Join(", ", x.Arguments.Concat(x.NamedArguments.Select(a => a.Name + " = " + a.Value))), StringComparer.Ordinal).ToImmutableArray();
+    private static bool HasAttribute(ISymbol s, string name) => Attributes(s).Any(x => x.Name == name);
+    private static DeclaredTypeKind KindOf(INamedTypeSymbol s) => s.TypeKind switch
+    {
+        TypeKind.Class => s.IsRecord ? DeclaredTypeKind.Record : DeclaredTypeKind.Class,
+        TypeKind.Struct => s.IsRecord ? DeclaredTypeKind.RecordStruct : DeclaredTypeKind.Struct,
+        TypeKind.Interface => DeclaredTypeKind.Interface,
+        TypeKind.Enum => DeclaredTypeKind.Enum,
+        TypeKind.Delegate => DeclaredTypeKind.Delegate,
+        _ => DeclaredTypeKind.Other
+    };
+    // Static classes are abstract+sealed in metadata; report them only as static. Generic means the type declares its own type parameters.
+    private static TypeModifiers ModifiersOf(INamedTypeSymbol s) => (s.IsStatic ? TypeModifiers.Static
+        : (s.IsAbstract ? TypeModifiers.Abstract : 0) | (s.IsSealed ? TypeModifiers.Sealed : 0)) | (s.Arity > 0 ? TypeModifiers.Generic : 0);
+    private static CallableModifiers ModifiersOf(IMethodSymbol s) =>
+        (s.IsStatic ? CallableModifiers.Static : 0) | (s.IsAbstract ? CallableModifiers.Abstract : 0) | (s.IsVirtual ? CallableModifiers.Virtual : 0)
+        | (s.IsOverride ? CallableModifiers.Override : 0) | (s.IsSealed ? CallableModifiers.Sealed : 0) | (s.IsGenericMethod ? CallableModifiers.Generic : 0)
+        | (s.IsExtensionMethod ? CallableModifiers.Extension : 0) | (s.MethodKind is MethodKind.UserDefinedOperator or MethodKind.Conversion ? CallableModifiers.Operator : 0)
+        | (s.ExplicitInterfaceImplementations.Length > 0 ? CallableModifiers.ExplicitImplementation : 0) | (s.MethodKind == MethodKind.Destructor ? CallableModifiers.Finalizer : 0);
+    // Portable keys: project file name (or assembly simple name for metadata) instead of paths, configuration or versions.
+    private string ProjectName(CompilationId compilation, IAssemblySymbol assembly) =>
+        sourceProjects.TryGetValue(compilation, out var project) ? Path.GetFileNameWithoutExtension(project.ProjectPath) : assembly.Identity.Name;
+    private string KeyPath(CompilationId compilation, string path) =>
+        sourceProjects.TryGetValue(compilation, out var project) && Path.GetDirectoryName(project.ProjectPath) is { } directory && Path.IsPathRooted(directory) && Path.IsPathRooted(path)
+            ? Path.GetRelativePath(directory, path).Replace('\\', '/') : path.Replace('\\', '/');
+    // Local functions and lambdas have no documentation ID: anchor them to the nearest member that has one, plus name/ordinal and position.
+    private string CallableKey(IMethodSymbol s, CompilationId compilation)
+    {
+        var project = ProjectName(compilation, s.ContainingAssembly);
+        var node = s.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
+        if (s.MethodKind is not (MethodKind.LocalFunction or MethodKind.AnonymousFunction) || node is null)
+            return project + "|" + (s.GetDocumentationCommentId() ?? Signature(s));
+        ISymbol member = s;
+        while (member is IMethodSymbol { MethodKind: MethodKind.LocalFunction or MethodKind.AnonymousFunction } && member.ContainingSymbol is { } parent) member = parent;
+        var name = s.MethodKind == MethodKind.LocalFunction ? "local:" + s.Name
+            : "lambda:" + member.DeclaringSyntaxReferences.Where(x => x.SyntaxTree == node.SyntaxTree)
+                .Sum(x => x.GetSyntax().DescendantNodes().OfType<AnonymousFunctionExpressionSyntax>().Count(l => l.SpanStart < node.SpanStart));
+        var position = node.SyntaxTree.GetLineSpan(node.Span).StartLinePosition;
+        return $"{project}|{member.GetDocumentationCommentId() ?? member.ToDisplayString()}|{name}@{KeyPath(compilation, node.SyntaxTree.FilePath)}:{position.Line + 1}:{position.Character + 1}";
+    }
 
     public async Task RegisterAsync(Project project, Compilation compilation, CompilationFact fact, bool includeGenerated, CancellationToken token)
     {
@@ -159,11 +206,14 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
         var compilation = assemblyProjects.GetValueOrDefault(assembly, new CompilationId("metadata|" + assembly));
         var id = new TypeId(compilation.Value + "|" + (s.GetDocumentationCommentId() ?? TypeName(s)));
         if (types.ContainsKey(id)) return id;
-        types[id] = new(id, compilation, TypeName(s), s.DeclaredAccessibility.ToString(), [], Attributes(s), Declarations(s));
+        types[id] = new(id, compilation, TypeName(s), s.DeclaredAccessibility.ToString(), [], Attributes(s), Declarations(s),
+            s.ContainingNamespace is { IsGlobalNamespace: false } ns ? ns.ToDisplayString() : "", KindOf(s), ModifiersOf(s),
+            Key: ProjectName(compilation, s.ContainingAssembly) + "|" + (s.GetDocumentationCommentId() ?? TypeName(s)));
+        registeredTypes.Add((id, s));
         var bases = new List<TypeUse>();
         if (s.BaseType is not null) bases.Add(Use(s.BaseType));
         bases.AddRange(s.Interfaces.Select(Use));
-        types[id] = types[id] with { BaseTypes = bases.ToImmutableArray() };
+        types[id] = types[id] with { BaseTypes = bases.ToImmutableArray(), BaseClass = s.BaseType is null ? null : bases[0].Declaration };
         return id;
     }
     internal CallableId RegisterMethod(IMethodSymbol symbol)
@@ -178,7 +228,9 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
         var body = sourceIds.ContainsKey(key) ? bodyNode is not null && HasBody(bodyNode) ? BodyStatus.Source : BodyStatus.NoBody : BodyStatus.MetadataOnly;
         // Insert before recursively registering containing local functions.
         methods[id] = new(id, compilation, s.ContainingType is null ? null : RegisterType(s.ContainingType), null, kind, Signature(s), s.DeclaredAccessibility.ToString(), Use(s.ReturnType), s.Parameters.Select(x => new ParameterFact(x.Name, Use(x.Type), x.RefKind.ToString())).ToImmutableArray(), Attributes(s), body, Declarations(s), s.IsAsync,
-            s.ReturnType is INamedTypeSymbol returnType && returnType.ContainingNamespace.ToDisplayString() == "System.Threading.Tasks" && returnType.Name is "Task" or "ValueTask");
+            s.ReturnType is INamedTypeSymbol returnType && returnType.ContainingNamespace.ToDisplayString() == "System.Threading.Tasks" && returnType.Name is "Task" or "ValueTask",
+            ModifiersOf(s), null, CallableKey(s, compilation));
+        registeredMethods.Add((id, s));
         if (s.ContainingSymbol is IMethodSymbol parent) methods[id] = methods[id] with { ContainingCallable = RegisterMethod(parent) };
         foreach (var use in new[] { methods[id].ReturnType }.Concat(methods[id].Parameters.Select(x => x.Type))) AddDependency(methods[id], use, DependencyKind.Signature, methods[id].Declarations.FirstOrDefault());
         return id;
@@ -212,35 +264,66 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
             if (entry.Symbol.MethodKind == MethodKind.Constructor && entry.Node is ConstructorDeclarationSyntax { Initializer: null } && entry.Symbol.ContainingType.BaseType?.SpecialType != SpecialType.System_Object)
                 walker.Gap("Implicit base constructor invocation is outside supported extraction.", entry.Node);
         }
+        LinkHierarchy(token);
         foreach (var type in types.Values.ToArray()) foreach (var b in type.BaseTypes) dependencies.Add(new(type.Id, null, b, DependencyKind.Inheritance, type.Declarations.FirstOrDefault()));
+    }
+    // Registers containing types and directly overridden members (transitively) after the baseline facts, appending to the worklists.
+    private void LinkHierarchy(CancellationToken token)
+    {
+        for (int t = 0, m = 0; t < registeredTypes.Count || m < registeredMethods.Count;)
+        {
+            token.ThrowIfCancellationRequested();
+            if (t < registeredTypes.Count)
+            {
+                var (id, symbol) = registeredTypes[t++];
+                if (symbol.ContainingType is { } container) { var containing = RegisterType(container); types[id] = types[id] with { ContainingType = containing }; }
+            }
+            else
+            {
+                var (id, symbol) = registeredMethods[m++];
+                if (symbol.OverriddenMethod is { } overridden) { var target = RegisterMethod(overridden); methods[id] = methods[id] with { Overrides = target }; }
+            }
+        }
     }
     private static bool IsControllerAction(IMethodSymbol method)
     {
         if (method.MethodKind != MethodKind.Ordinary || method.IsStatic || method.IsGenericMethod || method.DeclaredAccessibility != Accessibility.Public) return false;
         for (var current = method; current is not null; current = current.OverriddenMethod)
-            if (Attributes(current).Contains("Microsoft.AspNetCore.Mvc.NonActionAttribute")) return false;
+            if (HasAttribute(current, "Microsoft.AspNetCore.Mvc.NonActionAttribute")) return false;
         var type = method.ContainingType;
         if (type.IsAbstract || type.IsGenericType) return false;
         for (var current = type; current is not null; current = current.BaseType)
-            if (Attributes(current).Contains("Microsoft.AspNetCore.Mvc.NonControllerAttribute")) return false;
+            if (HasAttribute(current, "Microsoft.AspNetCore.Mvc.NonControllerAttribute")) return false;
         for (var t = type; t is not null; t = t.BaseType)
-            if (t.ToDisplayString() == "Microsoft.AspNetCore.Mvc.ControllerBase" || Attributes(t).Contains("Microsoft.AspNetCore.Mvc.ControllerAttribute")) return true;
+            if (t.ToDisplayString() == "Microsoft.AspNetCore.Mvc.ControllerBase" || HasAttribute(t, "Microsoft.AspNetCore.Mvc.ControllerAttribute")) return true;
         return false;
     }
-    public ProgramSnapshot Snapshot() => new()
+    public ProgramSnapshot Snapshot()
     {
-        Compilations = compilations,
-        Types = types.Values.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
-        Callables = methods.Values.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
-        CallSites = calls.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
-        Dependencies = dependencies.Distinct().OrderBy(x => x.OwningCallable?.Value, StringComparer.Ordinal).ThenBy(x => x.ReferencedType.DisplayName, StringComparer.Ordinal).ToImmutableArray(),
-        ThrowSites = throws.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
-        Gaps = gaps.OrderBy(x => x.Compilation?.Value, StringComparer.Ordinal).ThenBy(x => x.Evidence?.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence?.SpanStart).ThenBy(x => x.Message, StringComparer.Ordinal).ToImmutableArray(),
-        Catches = catches.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
-        ExceptionRegions = regions.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
-        ControllerActions = actions.Distinct().OrderBy(x => x.Method.Value, StringComparer.Ordinal).ToImmutableArray(),
-        BoundaryHandling = boundaries.OrderBy(x => x.Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence.SpanStart).ToImmutableArray()
-    };
+        // Keys collide when two projects share a file name or two versions of one metadata assembly are referenced;
+        // later IDs (ordinal order) get "#2", "#3", ... skipping any key that occurs naturally.
+        var reserved = types.Values.Select(x => x.Key).Concat(methods.Values.Select(x => x.Key)).ToHashSet(StringComparer.Ordinal);
+        var assigned = new HashSet<string>(StringComparer.Ordinal);
+        string Unique(string key)
+        {
+            if (assigned.Add(key)) return key;
+            for (var n = 2; ; n++) if (!reserved.Contains($"{key}#{n}") && assigned.Add($"{key}#{n}")) return $"{key}#{n}";
+        }
+        return new()
+        {
+            Compilations = compilations,
+            Types = types.Values.OrderBy(x => x.Id.Value, StringComparer.Ordinal).Select(x => Unique(x.Key) is var key && key == x.Key ? x : x with { Key = key }).ToImmutableArray(),
+            Callables = methods.Values.OrderBy(x => x.Id.Value, StringComparer.Ordinal).Select(x => Unique(x.Key) is var key && key == x.Key ? x : x with { Key = key }).ToImmutableArray(),
+            CallSites = calls.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
+            Dependencies = dependencies.Distinct().OrderBy(x => x.OwningCallable?.Value, StringComparer.Ordinal).ThenBy(x => x.ReferencedType.DisplayName, StringComparer.Ordinal).ToImmutableArray(),
+            ThrowSites = throws.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
+            Gaps = gaps.OrderBy(x => x.Compilation?.Value, StringComparer.Ordinal).ThenBy(x => x.Evidence?.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence?.SpanStart).ThenBy(x => x.Message, StringComparer.Ordinal).ToImmutableArray(),
+            Catches = catches.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
+            ExceptionRegions = regions.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
+            ControllerActions = actions.Distinct().OrderBy(x => x.Method.Value, StringComparer.Ordinal).ToImmutableArray(),
+            BoundaryHandling = boundaries.OrderBy(x => x.Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence.SpanStart).ToImmutableArray()
+        };
+    }
 
     private sealed class BodyWalker(FactExtractor facts, SemanticModel model, CompilationFact compilation, CallableId owner, CancellationToken token) : OperationWalker
     {
