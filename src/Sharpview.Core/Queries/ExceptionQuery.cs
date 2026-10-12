@@ -13,21 +13,15 @@ public sealed record ExceptionSearchResult(ImmutableArray<ExceptionWitness> Resu
 public static class ExceptionQuery
 {
     public static ExceptionSearchResult Analyze(ProgramSnapshot snapshot, ImmutableArray<CallableId> actions,
+        ChainOptions options, CancellationToken cancellationToken = default) => Analyze(new ProgramIndex(snapshot), actions, options, cancellationToken);
+    public static ExceptionSearchResult Analyze(ProgramIndex program, ImmutableArray<CallableId> actions,
         ChainOptions options, CancellationToken cancellationToken = default)
     {
         options.Validate(); cancellationToken.ThrowIfCancellationRequested();
-        var methods = snapshot.Callables.ToDictionary(x => x.Id);
-        foreach (var action in actions) if (!methods.ContainsKey(action)) throw new ArgumentException($"Unknown root: {action.Value}");
-        var calls = snapshot.CallSites.GroupBy(x => x.Caller).ToDictionary(g => g.Key, g => g.OrderBy(x => x.TargetDisplay, StringComparer.Ordinal).ThenBy(x => x.Id.Value, StringComparer.Ordinal).ToArray());
-        var origins = snapshot.ThrowSites.Where(x => x.Kind == ThrowKind.Explicit).GroupBy(x => x.Owner).ToDictionary(g => g.Key, g => g.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToArray());
-        var regions = snapshot.ExceptionRegions.ToDictionary(x => x.Id);
-        var catches = snapshot.Catches.ToDictionary(x => x.Id);
-        var throws = snapshot.ThrowSites.ToDictionary(x => x.Id);
-        var types = snapshot.Types.ToDictionary(x => x.Id);
-        var gaps = snapshot.Gaps.Where(x => x.Owner is not null).GroupBy(x => x.Owner!.Value).ToDictionary(g => g.Key, g => g.ToArray());
+        foreach (var action in actions) if (!program.ContainsCallable(action)) throw new ArgumentException($"Unknown root: {action.Value}");
         var results = ImmutableArray.CreateBuilder<ExceptionWitness>();
         var stack = new Stack<(CallableId Root, ImmutableArray<CallableId> Path, ImmutableArray<CallSiteFact> Sites)>();
-        foreach (var action in actions.Distinct().OrderByDescending(x => methods[x].DisplaySignature, StringComparer.Ordinal).ThenByDescending(x => x.Value, StringComparer.Ordinal)) stack.Push((action, [action], []));
+        foreach (var action in actions.Distinct().OrderByDescending(x => program.Callable(x).DisplaySignature, StringComparer.Ordinal).ThenByDescending(x => x.Value, StringComparer.Ordinal)) stack.Push((action, [action], []));
         var work = 0; var outputLimit = false; var workLimit = false; var depthLimit = false;
         bool Add(ExceptionWitness witness)
         {
@@ -41,24 +35,24 @@ public static class ExceptionQuery
         {
             cancellationToken.ThrowIfCancellationRequested();
             var current = frame.Path[^1];
-            if (methods[current].Body != BodyStatus.Source)
+            if (program.Callable(current).Body != BodyStatus.Source)
             {
-                if (!Add(Unknown(frame.Root, frame.Path, "Missing body: explicit origins unknown.", methods[current].Declarations.FirstOrDefault()))) break;
+                if (!Add(Unknown(frame.Root, frame.Path, "Missing body: explicit origins unknown.", program.Callable(current).Declarations.FirstOrDefault()))) break;
                 continue;
             }
-            foreach (var origin in origins.GetValueOrDefault(current, []))
+            foreach (var origin in program.ThrowSites(current).Where(x => x.Kind == ThrowKind.Explicit))
             {
-                if (!Add(Unwind(frame.Root, frame.Path, frame.Sites, origin, methods, regions, catches, throws, types, cancellationToken))) break;
+                if (!Add(Unwind(frame.Root, frame.Path, frame.Sites, origin, program, cancellationToken))) break;
             }
             if (outputLimit) break;
-            foreach (var gap in gaps.GetValueOrDefault(current, []))
+            foreach (var gap in program.Gaps(current))
                 if (!Add(Unknown(frame.Root, frame.Path, gap.Message, gap.Evidence))) break;
             if (outputLimit) break;
-            var outgoing = calls.GetValueOrDefault(current, []);
+            var outgoing = program.Outgoing(current);
             if (frame.Sites.Length >= options.MaxDepth && outgoing.Length > 0)
             {
                 depthLimit = true;
-                if (!Add(Unknown(frame.Root, frame.Path, "Search depth limit; further origins unknown.", methods[current].Declarations.FirstOrDefault()))) break;
+                if (!Add(Unknown(frame.Root, frame.Path, "Search depth limit; further origins unknown.", program.Callable(current).Declarations.FirstOrDefault()))) break;
                 continue;
             }
             var descend = new List<(CallableId Root, ImmutableArray<CallableId> Path, ImmutableArray<CallSiteFact> Sites)>();
@@ -69,8 +63,8 @@ public static class ExceptionQuery
                 work++;
                 var path = site.BoundTarget is { } target ? frame.Path.Add(target) : frame.Path;
                 string? reason = site.Dispatch != DispatchKind.Direct ? $"{site.Dispatch} dispatch: declared binding only; runtime origins unknown."
-                    : site.BoundTarget is null || !methods.TryGetValue(site.BoundTarget.Value, out _) ? "Unresolved call target."
-                    : methods[site.BoundTarget.Value].Body != BodyStatus.Source ? "Missing body: explicit origins unknown."
+                    : site.BoundTarget is null || !program.ContainsCallable(site.BoundTarget.Value) ? "Unresolved call target."
+                    : program.Callable(site.BoundTarget.Value).Body != BodyStatus.Source ? "Missing body: explicit origins unknown."
                     : frame.Path.Contains(site.BoundTarget.Value) ? "Cycle: recursive propagation unknown." : null;
                 if (reason is not null)
                 {
@@ -85,9 +79,7 @@ public static class ExceptionQuery
     }
 
     private static ExceptionWitness Unwind(CallableId root, ImmutableArray<CallableId> path,
-        ImmutableArray<CallSiteFact> sites, ThrowSiteFact origin, Dictionary<CallableId, CallableFact> methods,
-        Dictionary<ExceptionRegionId, ExceptionRegionFact> regions, Dictionary<CatchId, CatchFact> catches,
-        Dictionary<ThrowSiteId, ThrowSiteFact> throws, Dictionary<TypeId, TypeFact> types, CancellationToken token)
+        ImmutableArray<CallSiteFact> sites, ThrowSiteFact origin, ProgramIndex program, CancellationToken token)
     {
         var staticType = origin.StaticExceptionType;
         var exactType = origin.ExactExceptionType ?? (origin.IsExactType ? origin.StaticExceptionType : null);
@@ -99,19 +91,19 @@ public static class ExceptionQuery
             changed ? ExceptionStatus.RethrownOrReplaced : status, reason, evidence.ToImmutable(), handlers.ToImmutable(), changed ? status : null, staticType?.DisplayName, exactType?.DisplayName);
         if (origin.CatchId is not null)
             return Finish(ExceptionStatus.Unknown, "Origin is inside a handler; reaching it depends on the caught exception and handler control flow.");
-        if (methods[origin.Owner].IsAsync && !methods[origin.Owner].ReturnsTask)
+        if (program.Callable(origin.Owner).IsAsync && !program.Callable(origin.Owner).ReturnsTask)
             return Finish(ExceptionStatus.Unknown, "Async void or custom awaitable propagation is outside the supported model.");
         ExceptionWitness? Apply(ImmutableArray<ExceptionRegionId> protectedRegions)
         {
             foreach (var regionId in protectedRegions)
             {
                 token.ThrowIfCancellationRequested();
-                var region = regions[regionId];
+                var region = program.Region(regionId);
                 if (region.HasFinally) return Finish(ExceptionStatus.Unknown, "Finally may change propagation; its execution is outside the supported model.");
                 foreach (var catchId in region.Catches)
                 {
-                    var handler = catches[catchId];
-                    var match = Matches(types, type, exact, handler.CaughtType, token);
+                    var handler = program.Catch(catchId);
+                    var match = Matches(program.Types, type, exact, handler.CaughtType, token);
                     if (match == false) continue;
                     evidence.Add(handler.Evidence); handlers.Add(handler.Id);
                     if (match is null) return Finish(ExceptionStatus.Unknown, "Static exception type does not determine runtime handler matching.");
@@ -124,11 +116,11 @@ public static class ExceptionQuery
                             return Finish(ExceptionStatus.Unknown, "Matching handler has unsupported control flow or calls; propagation/recovery unknown.");
                         case HandlerOutcome.Rethrows:
                             changed = true;
-                            if (handler.SubsequentThrow is { } rethrow) { subsequent = rethrow; evidence.Add(throws[rethrow].Evidence); }
+                            if (handler.SubsequentThrow is { } rethrow) { subsequent = rethrow; evidence.Add(program.ThrowSite(rethrow).Evidence); }
                             break;
                         case HandlerOutcome.Replaces:
                             if (handler.SubsequentThrow is null) return Finish(ExceptionStatus.Unknown, "Replacement origin unavailable.");
-                            var replacement = throws[handler.SubsequentThrow.Value];
+                            var replacement = program.ThrowSite(handler.SubsequentThrow.Value);
                             subsequent = replacement.Id;
                             staticType = replacement.StaticExceptionType;
                             exactType = replacement.ExactExceptionType ?? (replacement.IsExactType ? replacement.StaticExceptionType : null);
@@ -148,11 +140,11 @@ public static class ExceptionQuery
         {
             token.ThrowIfCancellationRequested();
             var site = sites[i]; evidence.Add(site.Evidence);
-            if (methods[path[i]].IsAsync && !methods[path[i]].ReturnsTask)
+            if (program.Callable(path[i]).IsAsync && !program.Callable(path[i]).ReturnsTask)
                 return Finish(ExceptionStatus.Unknown, "Async void or custom awaitable propagation is outside the supported model.");
-            if ((methods[path[i + 1]].IsAsync || site.IsAwaited) && !methods[path[i + 1]].ReturnsTask)
+            if ((program.Callable(path[i + 1]).IsAsync || site.IsAwaited) && !program.Callable(path[i + 1]).ReturnsTask)
                 return Finish(ExceptionStatus.Unknown, "Async void or custom awaitable propagation is outside the supported model.");
-            if (methods[path[i + 1]].ReturnsTask && !site.IsAwaited)
+            if (program.Callable(path[i + 1]).ReturnsTask && !site.IsAwaited)
                 return Finish(ExceptionStatus.Unknown, "Task-producing call is not directly awaited; exception observation/propagation unsupported.");
             var intercepted = Apply(site.ProtectedRegions);
             if (intercepted is not null) return intercepted;
@@ -164,7 +156,7 @@ public static class ExceptionQuery
     }
 
     // A base-typed thrown expression may hold a subtype: an incompatible narrow catch is then uncertain.
-    private static bool? Matches(Dictionary<TypeId, TypeFact> types, TypeUse? thrown, bool exact, TypeUse? caught, CancellationToken token)
+    private static bool? Matches(IReadOnlyDictionary<TypeId, TypeFact> types, TypeUse? thrown, bool exact, TypeUse? caught, CancellationToken token)
     {
         if (caught is null) return true;
         if (thrown is null || thrown.Declaration is null || caught.Declaration is null) return null;

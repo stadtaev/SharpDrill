@@ -22,10 +22,12 @@ public sealed class CallIndex
 {
     public IReadOnlyDictionary<CallableId, CallableFact> Methods { get; }
     public IReadOnlyDictionary<CallableId, ImmutableArray<ChainStep>> Outgoing { get; }
-    public CallIndex(ProgramSnapshot snapshot)
+    public CallIndex(ProgramSnapshot snapshot) : this(new ProgramIndex(snapshot)) { }
+    public CallIndex(ProgramIndex index)
     {
-        Methods = snapshot.Callables.ToDictionary(x => x.Id);
-        Outgoing = snapshot.CallSites.GroupBy(x => x.Caller).ToDictionary(g => g.Key, g => g
+        Methods = index.Snapshot.Callables.ToDictionary(x => x.Id);
+        // Grouping collapses repeated relationships; the explicit order below makes the result independent of input order.
+        Outgoing = index.Snapshot.Callables.Select(x => x.Id).Where(x => !index.Outgoing(x).IsEmpty).ToDictionary(x => x, x => index.Outgoing(x)
             .GroupBy(x => (x.BoundTarget, x.Dispatch, Unresolved: x.BoundTarget is null ? x.Id.Value : ""))
             .Select(e => new ChainStep(e.First().Caller, e.First().BoundTarget, e.First().TargetDisplay, e.First().Dispatch,
                 e.OrderBy(x => x.Id.Value, StringComparer.Ordinal).Select(x => x.Id).ToImmutableArray()))
@@ -36,10 +38,12 @@ public static class CallChainQuery
 {
     // Frames carry independent path state. The explicit stack avoids recursion at user-supplied depths.
     public static ChainSearchResult Enumerate(ProgramSnapshot snapshot, ImmutableArray<CallableId> roots,
+        ChainOptions options, CancellationToken cancellationToken = default) => Enumerate(new ProgramIndex(snapshot), roots, options, cancellationToken);
+    public static ChainSearchResult Enumerate(ProgramIndex program, ImmutableArray<CallableId> roots,
         ChainOptions options, CancellationToken cancellationToken = default)
     {
         options.Validate(); cancellationToken.ThrowIfCancellationRequested();
-        var index = new CallIndex(snapshot);
+        var index = new CallIndex(program);
         foreach (var root in roots) if (!index.Methods.ContainsKey(root)) throw new ArgumentException($"Unknown root ID: {root.Value}");
         var output = ImmutableArray.CreateBuilder<CallChain>();
         var work = 0; var outputLimited = false; var workLimited = false;

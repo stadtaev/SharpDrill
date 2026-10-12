@@ -10,10 +10,11 @@ internal static class Commands
     internal static async Task<int> RunAsync(Arguments options, CancellationToken token)
     {
         var snapshot = await RoslynProgramLoader.LoadAsync(options.Request, token);
+        var index = new ProgramIndex(snapshot);
         var roots = options.Command is "chains" or "controllers" or "exceptions" ? SelectRoots(snapshot, options) : [];
         using var file = options.Output is null ? null : new StreamWriter(new FileStream(options.Output, FileMode.CreateNew, FileAccess.Write));
         var output = (TextWriter?)file ?? Console.Out;
-        var report = new TextReport(snapshot, output, options);
+        var report = new TextReport(index, output, options);
         var incomplete = !snapshot.Gaps.IsEmpty;
         switch (options.Command)
         {
@@ -33,7 +34,7 @@ internal static class Commands
                 break;
             case "chains":
             case "controllers":
-                var chains = CallChainQuery.Enumerate(snapshot, roots, options.Traversal, token);
+                var chains = CallChainQuery.Enumerate(index, roots, options.Traversal, token);
                 foreach (var chain in chains.Chains) { token.ThrowIfCancellationRequested(); report.Chain(chain, options.Command == "controllers"); }
                 var boundaries = chains.Chains.Count(x => x.End is ChainEnd.DispatchBoundary or ChainEnd.UnknownTarget or ChainEnd.NoBody);
                 var depth = chains.Chains.Count(x => x.End == ChainEnd.DepthLimit);
@@ -42,7 +43,7 @@ internal static class Commands
                 break;
             case "exceptions":
                 report.Landscape(token);
-                var exceptions = ExceptionQuery.Analyze(snapshot, roots, options.Traversal, token);
+                var exceptions = ExceptionQuery.Analyze(index, roots, options.Traversal, token);
                 foreach (var witness in exceptions.Results) { token.ThrowIfCancellationRequested(); report.Witness(witness); }
                 var unknown = exceptions.Results.Count(x => x.Status == ExceptionStatus.Unknown || x.SubsequentStatus == ExceptionStatus.Unknown);
                 incomplete |= exceptions.OutputLimitReached || exceptions.WorkLimitReached || exceptions.DepthLimitReached || unknown > 0;
