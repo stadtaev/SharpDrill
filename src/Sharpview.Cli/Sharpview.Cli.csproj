@@ -1,6 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+<PackageReference Include="Microsoft.Build" ExcludeAssets="runtime" PrivateAssets="all" />
+<PackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" PrivateAssets="all" />
     <ProjectReference Include="../Sharpview.Core/Sharpview.Core.csproj" />
     <ProjectReference Include="../Sharpview.Roslyn/Sharpview.Roslyn.csproj" />
   </ItemGroup>

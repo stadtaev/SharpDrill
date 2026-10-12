@@ -9,4 +9,5 @@
     <Project Path="src/Sharpview.Core/Sharpview.Core.csproj" />
     <Project Path="src/Sharpview.Roslyn/Sharpview.Roslyn.csproj" />
   </Folder>
+  <Folder Name="/tests/"><Project Path="tests/Sharpview.Tests/Sharpview.Tests.csproj" /></Folder>
 </Solution>

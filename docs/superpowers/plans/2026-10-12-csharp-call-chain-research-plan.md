@@ -4,11 +4,41 @@
 
 **Goal:** Create a small .NET semantic library and console application that load existing C# code and print method call chains using ` --> `, with source evidence and visible analysis limitations.
 
-**Architecture:** Three production projects: a Roslyn-independent model/query library, a Roslyn loading/extraction library, and a thin CLI. Extract immutable source-backed facts once, then run typed queries over them. Keep facts separate from future runtime-target and exception-propagation analyses.
+**Architecture:** Three production projects: a Roslyn-independent model/query library, a Roslyn loading/extraction library, and a thin CLI. Extract immutable source-backed facts once, then run typed queries over them. Keep extraction, bounded analysis and formatting separate; include explicit-origin exception propagation in the first increment.
 
 **Tech stack:** C#, .NET 10 host, Roslyn CSharp.Workspaces and Workspaces.MSBuild, Microsoft.Build.Locator, System.Collections.Immutable, System.Text.Json, xUnit. Pin compatible stable versions during scaffold creation after inspecting the available SDK and package documentation.
 
 **Spec:** The design and acceptance contract in this document. This supersedes the initial `2026-10-12-semantic-analysis-foundation.md` plan for the first implementation.
+
+## Updated acceptance contract — 2026-10-12
+
+This section takes precedence over older stage details below. The user has requested implementation and autonomous routine decisions; execute inline in the existing checkout without further design gates or delegation.
+
+**Purpose:** investigate ASP.NET Core controller actions, their static calls through user-configured layers, and explicit exceptions that might reach those actions. Escaping an action is never called globally unhandled.
+
+**Increment order:**
+1. Immutable semantic model and small three-project ASP.NET fixture; test infrastructure.
+2. SDK workspace loading and semantic extraction, including controller identification, throws, catches, protected regions, await observation and boundary registrations.
+3. Bounded deterministic call paths and explicit-origin exception analysis, tested against real fixture extraction.
+4. CLI commands, integration checks and documented assumptions/sample reports.
+
+**Model additions:** call/throw IDs reference ordered enclosing protected-region IDs. Catch facts retain caught static type, filter text, body evidence and conservative handler outcome (intercepts, rethrows, replaces, unknown). Regions retain try evidence, ordered catches and finally uncertainty. Throw facts distinguish static type from known exact construction type. Task-producing calls retain direct-await evidence. Boundary evidence records semantically bound UseExceptionHandler, AddExceptionHandler and UseDeveloperExceptionPage registrations separately. It does not prove registration order or runtime coverage.
+
+**Controller convention:** public instance ordinary methods declared on source classes semantically deriving from ASP.NET Core ControllerBase or carrying the Controller attribute; exclude NonController, NonAction, static, generic and nonpublic methods. ASP.NET route/HTTP attribute evidence is retained. Inherited action enumeration and minimal APIs are outside this initial supported set and reported as coverage limits.
+
+**Exception algorithm:** traverse declared call relationships from actions within depth/output/work budgets. Analyse explicit throw origins along each witness by unwinding lexical protected regions in the origin and at each caller site. Never borrow catches from unrelated calls. Match catch types using semantic type ancestry. Nonexact thrown values, conditional filters, uncertain dispatch, unavailable bodies, unsupported regions and asynchronous observations yield scoped Unknown when they prevent a decision. A rethrow retains the original exception and handler evidence; a simple unconditional replacement continues with the replacement origin/type. Conditional/complex handler flow is Unknown. Direct awaited calls can propagate explicit origins; calling without observing a task is Unknown. This structural may-analysis does not prove branch feasibility or model implicit exceptions.
+
+**CLI additions:** `controllers` prints paths from action roots; `exceptions` prints the complete throw/catch landscape plus per-action origin witnesses. Both accept ordinary traversal options. Repeatable `--layer project:<prefix>=<name>` or `--layer namespace:<prefix>=<name>` maps layers explicitly, using longest prefix and project preference on ties. No naming heuristic defines architectural truth. `inspect --format json` serialises all facts in schema version 2.
+
+**Fixture acceptance:** controller → application → infrastructure; caught caller exception, unrelated protected call, incompatible catch, rethrow, replacement, conditional filter, interface dispatch, recursion, directly awaited/caught operation, unobserved task, throw expression, static-type throw and action escape with separate boundary evidence.
+
+**Validation:** meaningful extraction, graph-budget, exception and fresh-process CLI tests; SDK build and full test run; restore only repository-owned fixtures explicitly. Preserve source evidence and all call sites. User-code experiment remains pending unless an input is supplied; analysing Sharpview itself is a loader smoke check only.
+
+**Scope decisions:** reuse existing projects and retain the public model/query naming from section 5 where useful. Consolidate test projects and related small fact files to keep the research increment small. Defer optional local-tool packaging and editor tasks until the research behaviour is established. Do not commit/push/publish automatically; leave a reviewable workspace diff.
+
+**Execution update:** the initial checkout already contains partial model, extraction, query and fixture work. Preserve and complete that work. The user subsequently authorised .NET skills and subagents for quality: assign disjoint extraction/loading, core analysis/tests, and review tasks while completing CLI formatting and integration in the primary agent. This overrides the earlier no-delegation guidance. Validate exception replacement followed by an outer handler, unsupported async observations and declared dispatch boundaries before claiming the research increment complete.
+
+**Implementation record:** the four updated increments above are implemented in the existing three production projects, with one shared test project. The repository fixture builds with the SDK; host build has zero warnings/errors; the expanded suite has 74 passing tests. CLI sample reports, model/coverage notes and requirement-to-test evidence are in `docs/samples`, `docs/model.md`, `docs/coverage.md` and `docs/validation.md`. Loading `.csproj`, `.sln` and `.slnx`, output safeguards and no implicit restore are tested. Missing assets currently fail the whole selected input rather than returning partial compilations; requested frameworks apply across selected projects. Optional packaging, editor tasks and a separate generator fixture remain deferred. Sharpview self-analysis is only a smoke check; the external Web API experiment is pending input selection. Changes remain uncommitted for review.
 
 ## 1. What success looks like
 
@@ -611,13 +641,13 @@ Research.Api.Controller.Get() --> Research.Application.Service.Load() --> Resear
 ## 12. Research deliberately postponed
 
 - Resolving interface/virtual targets using hierarchy, points-to analysis or DI configuration.
-- Exception propagation through protected regions, filters, rethrows, finally and awaited tasks.
+- General exception/data-flow analysis, implicit exception origins, task alias tracking, finally execution modelling and complete middleware coverage. Explicit origins, lexical protected regions, rethrow/replacement witnesses and directly awaited calls are in scope now.
 - Interprocedural nullable state or contract inference.
 - Persisted snapshot import, graph databases and incremental caching.
 - General rule execution infrastructure, SARIF publishing and VS Code extension.
 - Cross-platform CI matrix: a useful follow-up, not required to start inspecting chains on the user's machine.
 
-Existing throw-site/source facts prepare the next exception study without pretending a call graph solves exception handling. Add a body/region representation when that study establishes its needs.
+The first increment adds small lexical exception-region facts rather than a second AST. Unsupported behaviours produce scoped unknown results.
 
 ## 13. Codex execution guidance
 
