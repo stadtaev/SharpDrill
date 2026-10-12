@@ -21,7 +21,8 @@ public enum CallableKind { Method, Constructor, Getter, Setter, EventAdder, Even
 public enum DispatchKind { Direct, Interface, Virtual, Delegate, Dynamic, Unknown }
 public enum BodyStatus { Source, MetadataOnly, NoBody, Unsupported }
 public enum NullabilityKind { NotAnnotated, Annotated, Oblivious }
-public enum DependencyKind { Signature, Inheritance, Constraint, Attribute, Construction, BodyUse }
+public enum DependencyKind { Signature, Inheritance, Constraint, Attribute, Construction, BodyUse, Field, Property }
+public enum ImplementationKind { Interface, Override }
 public enum ThrowKind { Explicit, Rethrow }
 public enum GapKind { ProjectLoad, Compilation, Binding, Unsupported, ExcludedSource }
 public enum HandlerOutcome { Intercepts, Rethrows, Replaces, Unknown }
@@ -67,6 +68,9 @@ public sealed record CatchFact(CatchId Id, CallableId Owner, TypeUse? CaughtType
     SourceEvidence Evidence, SourceEvidence BodyEvidence, HandlerOutcome Outcome, ThrowSiteId? SubsequentThrow);
 public sealed record ExceptionRegionFact(ExceptionRegionId Id, CallableId Owner, SourceEvidence ProtectedBlock,
     ImmutableArray<CatchId> Catches, bool HasFinally);
+// A candidate: Declared may be implemented/overridden by Implementation. These are not inferred runtime targets;
+// consumers opt in to following them and own the resulting uncertainty (receiver type, DI registration, further overrides).
+public sealed record ImplementationFact(CallableId Declared, CallableId Implementation, ImplementationKind Kind);
 public sealed record ControllerActionFact(CallableId Method, string Convention);
 public sealed record BoundaryHandlingFact(CompilationId Compilation, string Registration, string BoundMethod, SourceEvidence Evidence);
 public sealed record AnalysisGap(GapKind Kind, CompilationId? Compilation, CallableId? Owner, string Message, SourceEvidence? Evidence);
@@ -85,6 +89,7 @@ public sealed record ProgramSnapshot
     public ImmutableArray<AnalysisGap> Gaps { get; init; } = [];
     public ImmutableArray<CatchFact> Catches { get; init; } = [];
     public ImmutableArray<ExceptionRegionFact> ExceptionRegions { get; init; } = [];
+    public ImmutableArray<ImplementationFact> Implementations { get; init; } = [];
     public ImmutableArray<ControllerActionFact> ControllerActions { get; init; } = [];
     public ImmutableArray<BoundaryHandlingFact> BoundaryHandling { get; init; } = [];
     // Full path of the analysed input's directory; consumers use it with SourceEvidence.RelativeTo.

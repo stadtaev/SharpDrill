@@ -61,6 +61,16 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
         Assert.Contains(report.Results, x => x.Status == ExceptionStatus.Unknown && x.Reason.Contains(reason, StringComparison.OrdinalIgnoreCase));
     }
     [Fact]
+    public void Interface_dispatch_has_a_declared_member_and_implementation_facts_are_candidates_only()
+    {
+        // The fixture's IRepository has no implementer, so the interface-dispatched call has a declared member but no candidates.
+        var call = Assert.Single(S.CallSites, x => x.Caller == Method("Research.Application.Service.Interface(Research.Infrastructure.IRepository)").Id);
+        Assert.Equal(DispatchKind.Interface, call.Dispatch);
+        Assert.Equal(Method("Research.Infrastructure.IRepository.Read()").Id, call.BoundTarget);
+        Assert.DoesNotContain(S.Implementations, x => x.Declared == call.BoundTarget);
+        Assert.All(S.Implementations, x => Assert.Contains(S.Callables, c => c.Id == x.Implementation && c.Body != BodyStatus.MetadataOnly));
+    }
+    [Fact]
     public void Throw_expression_rethrow_and_filter_facts_are_retained()
     {
         Assert.Contains(S.ThrowSites, x => x.Owner == Method("Research.Infrastructure.Repository.Expression()").Id && x.IsExactType);

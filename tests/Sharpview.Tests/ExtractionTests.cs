@@ -507,4 +507,59 @@ public sealed class ExtractionTests
         await Assert.ThrowsAsync<FileNotFoundException>(() => RoslynProgramLoader.LoadAsync(new("/fixture/missing.csproj")));
         await Assert.ThrowsAsync<OperationCanceledException>(() => RoslynProgramLoader.LoadAsync(new("/fixture/missing.csproj"), new CancellationToken(true)));
     }
+
+    [Fact]
+    public async Task Implementation_candidates_cover_interfaces_overrides_and_accessors()
+    {
+        var snapshot = await Extract("""
+            public interface IShape { double Area(); int Sides { get; } }
+            public class Square : IShape { public double Area() => 1; public int Sides => 4; }
+            public class Circle : IShape { public double Area() => 3; public int Sides { get { return 0; } } }
+            public interface IGreeter { void Greet(); }
+            public class Explicit : IGreeter { void IGreeter.Greet() { } }
+            public abstract class Animal { public abstract void Sound(); public virtual void Eat() { } }
+            public class Dog : Animal { public override void Sound() { } public override void Eat() { } }
+            public class Puppy : Dog { public override void Eat() { } }
+            """);
+        string Name(CallableId id) => Assert.Single(snapshot.Callables, x => x.Id == id).DisplaySignature;
+        var pairs = snapshot.Implementations.Select(x => (Name(x.Declared), Name(x.Implementation), x.Kind)).ToList();
+        Assert.Equal(8, pairs.Count);
+        Assert.Contains(("IShape.Area()", "Square.Area()", ImplementationKind.Interface), pairs);
+        Assert.Contains(("IShape.Area()", "Circle.Area()", ImplementationKind.Interface), pairs);
+        Assert.Contains(("IShape.get_Sides()", "Square.get_Sides()", ImplementationKind.Interface), pairs);
+        Assert.Contains(("IShape.get_Sides()", "Circle.get_Sides()", ImplementationKind.Interface), pairs);
+        Assert.Contains(("IGreeter.Greet()", "Explicit.IGreeter.Greet()", ImplementationKind.Interface), pairs);
+        Assert.Contains(("Animal.Sound()", "Dog.Sound()", ImplementationKind.Override), pairs);
+        // Each override step is its own fact; Animal.Eat() -> Puppy.Eat() is not flattened.
+        Assert.Contains(("Animal.Eat()", "Dog.Eat()", ImplementationKind.Override), pairs);
+        Assert.Contains(("Dog.Eat()", "Puppy.Eat()", ImplementationKind.Override), pairs);
+        Assert.Equal(snapshot.Implementations.OrderBy(x => x.Declared.Value, StringComparer.Ordinal).ThenBy(x => x.Implementation.Value, StringComparer.Ordinal), snapshot.Implementations);
+    }
+
+    [Fact]
+    public async Task Field_and_property_dependencies_carry_kind_and_declaration_evidence_without_backing_fields()
+    {
+        var snapshot = await Extract("""
+            public class Holder
+            {
+                private System.Collections.Generic.List<string> items = new();
+                public int Count { get; set; }
+                public string Name => "x";
+            }
+            """);
+        var holder = Assert.Single(snapshot.Types, x => x.DisplayName == "Holder");
+        var own = snapshot.Dependencies.Where(x => x.OwningType == holder.Id && x.OwningCallable is null && x.Kind is DependencyKind.Field or DependencyKind.Property).ToList();
+        var field = Assert.Single(own, x => x.Kind == DependencyKind.Field && x.ReferencedType.DisplayName == "System.Collections.Generic.List<string>");
+        Assert.Contains(own, x => x.Kind == DependencyKind.Field && x.ReferencedType.DisplayName == "string");
+        Assert.Equal(2, own.Count(x => x.Kind == DependencyKind.Field));
+        Assert.Equal(1, own.Count(x => x.Kind == DependencyKind.Property && x.ReferencedType.DisplayName == "int"));
+        Assert.Equal(1, own.Count(x => x.Kind == DependencyKind.Property && x.ReferencedType.DisplayName == "string"));
+        Assert.Equal((3, "items = new()".Length), (field.Evidence!.StartLine, field.Evidence.SpanLength));
+        var count = Assert.Single(own, x => x.Kind == DependencyKind.Property && x.ReferencedType.DisplayName == "int");
+        Assert.Equal((4, "public int Count { get; set; }".Length), (count.Evidence!.StartLine, count.Evidence.SpanLength));
+        // The expression-bodied property keeps its getter Signature dependency in addition to the property-level one.
+        var getter = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Holder.get_Name()");
+        Assert.Contains(snapshot.Dependencies, x => x.OwningCallable == getter.Id && x.Kind == DependencyKind.Signature && x.ReferencedType.DisplayName == "string");
+        Assert.DoesNotContain(snapshot.Dependencies, x => x.Evidence is { } e && e.StartLine == 5 && x.Kind == DependencyKind.Field);
+    }
 }

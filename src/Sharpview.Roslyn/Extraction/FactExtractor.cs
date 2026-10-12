@@ -28,6 +28,7 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
     private readonly List<ExceptionRegionFact> regions = [];
     private readonly List<DependencyFact> dependencies = [];
     private readonly List<ControllerActionFact> actions = [];
+    private readonly List<ImplementationFact> implementations = [];
     private readonly List<BoundaryHandlingFact> boundaries = [];
     private readonly Dictionary<SyntaxTree, bool> generatedTrees = [];
     private readonly Dictionary<SyntaxTree, string> checksums = [];
@@ -275,8 +276,38 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
             if (entry.Symbol.MethodKind == MethodKind.Constructor && entry.Node is ConstructorDeclarationSyntax { Initializer: null } && entry.Symbol.ContainingType.BaseType?.SpecialType != SpecialType.System_Object)
                 walker.Gap("Implicit base constructor invocation is outside supported extraction.", entry.Node);
         }
+        ExtractMembers(token);
         LinkHierarchy(token);
+        foreach (var (id, fact) in methods.Where(x => x.Value.Overrides is not null && x.Value.Body != BodyStatus.MetadataOnly).Select(x => (x.Key, x.Value)))
+            implementations.Add(new(fact.Overrides!.Value, id, ImplementationKind.Override));
         foreach (var type in types.Values.ToArray()) foreach (var b in type.BaseTypes) dependencies.Add(new(type.Id, null, b, DependencyKind.Inheritance, type.Declarations.FirstOrDefault()));
+    }
+    // Field/property dependencies and interface implementation candidates; runs before LinkHierarchy so everything it registers gets linked.
+    private void ExtractMembers(CancellationToken token)
+    {
+        foreach (var type in sourceTypes.Select(x => x.OriginalDefinition).Distinct(SymbolEqualityComparer.Default).Cast<INamedTypeSymbol>().ToArray())
+        {
+            token.ThrowIfCancellationRequested();
+            var owner = RegisterType(type);
+            foreach (var member in type.GetMembers())
+            {
+                if (member.IsImplicitlyDeclared || member.DeclaringSyntaxReferences.FirstOrDefault() is not { } syntax) continue;
+                // Enum constants would only depend on their own enum.
+                if (member is IFieldSymbol { ContainingType.TypeKind: not TypeKind.Enum } field) AddMemberDependency(owner, field.Type, DependencyKind.Field, syntax);
+                else if (member is IPropertySymbol property) AddMemberDependency(owner, property.Type, DependencyKind.Property, syntax);
+            }
+            if (type.TypeKind == TypeKind.Interface) continue;
+            foreach (var declared in type.AllInterfaces.SelectMany(x => x.GetMembers().OfType<IMethodSymbol>()))
+                if (type.FindImplementationForInterfaceMember(declared) is IMethodSymbol implementation && sourceIds.ContainsKey(Key(implementation))
+                    && !SymbolEqualityComparer.Default.Equals(Canonical(implementation), Canonical(declared)))
+                    implementations.Add(new(RegisterMethod(declared), RegisterMethod(implementation), ImplementationKind.Interface));
+        }
+    }
+    private void AddMemberDependency(TypeId owner, ITypeSymbol symbol, DependencyKind kind, SyntaxReference syntax)
+    {
+        var evidence = Evidence(syntax.GetSyntax());
+        void Add(TypeUse use) { dependencies.Add(new(owner, null, use, kind, evidence)); foreach (var child in use.Components) Add(child); }
+        Add(Use(symbol));
     }
     // Registers containing types and directly overridden members (transitively) after the baseline facts, appending to the worklists.
     private void LinkHierarchy(CancellationToken token)
@@ -331,6 +362,7 @@ internal sealed class FactExtractor(ImmutableArray<CompilationFact> compilations
             Gaps = gaps.OrderBy(x => x.Compilation?.Value, StringComparer.Ordinal).ThenBy(x => x.Evidence?.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence?.SpanStart).ThenBy(x => x.Message, StringComparer.Ordinal).ToImmutableArray(),
             Catches = catches.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
             ExceptionRegions = regions.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
+            Implementations = implementations.Distinct().OrderBy(x => x.Declared.Value, StringComparer.Ordinal).ThenBy(x => x.Implementation.Value, StringComparer.Ordinal).ThenBy(x => x.Kind).ToImmutableArray(),
             ControllerActions = actions.Distinct().OrderBy(x => x.Method.Value, StringComparer.Ordinal).ToImmutableArray(),
             BoundaryHandling = boundaries.OrderBy(x => x.Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence.SpanStart).ToImmutableArray()
         };
