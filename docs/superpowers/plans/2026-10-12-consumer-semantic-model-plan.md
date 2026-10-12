@@ -219,3 +219,19 @@ Core:
 - Regenerate `docs/samples/*` with the commands in `docs/samples/README.md` (must be identical to the committed ones apart from anything listed in earlier tasks) and add `layers.txt` and `reach.txt` samples (plus `.stderr.txt`), documenting the commands in `docs/samples/README.md`.
 
 **Tests:** full suite; final capture compared with baseline; only differences accumulated from earlier tasks' "Expected output changes".
+
+---
+
+### Task 11: Fix lambda / local-function callable ID collisions (executed after Task 3)
+
+**Files:** `src/Sharpview.Roslyn/Extraction/FactExtractor.cs`, tests.
+
+Pre-existing bug found during Task 3 review: `Key(IMethodSymbol)` uses `GetDocumentationCommentId()`, which Roslyn also returns for lambdas (`M:Ns.Type.` — empty member name) and local functions (`M:Ns.Type.Helper`). Two same-signature lambdas anywhere in one type, or two same-named/same-signature local functions in one type, therefore share one `CallableId`; `RegisterAsync` keeps only the last body, so the other body's calls/throws are **silently dropped** and call sites bind to the wrong fact.
+
+- For `MethodKind.LocalFunction` and `MethodKind.AnonymousFunction`, always use the position-based identity (the existing fallback form: containing symbol, file path + span start, metadata name) instead of the documentation ID. Ordinary members keep their IDs unchanged.
+- Make `CallableFact.Key` for these callables consistent with the surviving, now-distinct facts (each fact's key describes its own declaration).
+- While here (Task 3 review minors): compute the lambda ordinal for keys without re-scanning the member syntax per lambda (cache per member), and in `CallableKey` check `MethodKind` before calling `GetSyntax()`.
+
+**Tests:** in-memory extraction: two parameterless lambdas in different methods of one type → two Lambda facts with distinct IDs and keys, each with its own call site (`First()` / `Second()`); two same-named local functions `Helper` in different methods → two facts, each with its own callee; the invoking call sites bind to the right fact. Strengthen the finalizer modifier assertion to equality (`Override | Finalizer`, `Overrides` → `object.Finalize()`), and add a nested lambda-in-local-function key test.
+
+**Expected output changes:** IDs of lambda/local-function callables change (visible in `methods*` `ID:` lines and JSON). Any additional bodies that are now extracted may add calls/throws/gaps/dependencies (count line in `inspect`/`self-inspect`) and new paths in `chains`/`self-chains`/`exceptions`. Every difference must be explained as a previously-dropped body or an ID change; ordinary member IDs must be unchanged (verify by diffing the set of non-lambda/non-local IDs in `self-json.txt`).
