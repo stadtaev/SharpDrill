@@ -1,4 +1,6 @@
-# Semantic facts and queries
+# Model reference
+
+Detailed semantics of facts, identities and queries. For the big picture start with [How Sharpview works](overview.md).
 
 Core records contain immutable arrays, declaration IDs, typed uses and source evidence. Compilation identity contains project path, configuration and selected framework. Method identity uses assembly identity and canonical documentation identity, normalising generic definitions, reduced extensions and partial methods. Local/lambda identities include source position; arbitrary-edit stability is not promised. Duplicate display signatures retain distinct IDs.
 

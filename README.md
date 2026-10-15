@@ -1,74 +1,111 @@
 # Sharpview
 
-Sharpview is an initial C# research tool for understanding ASP.NET Core controller call paths and explicit exceptions. It loads restored SDK projects using the .NET SDK, preserves source evidence, and reports where static analysis stops. Visual Studio is not required.
+Sharpview is a C# research tool for understanding ASP.NET Core Web APIs from source:
 
-`Sharpview.Core` contains immutable facts and bounded queries, `Sharpview.Roslyn` loads and extracts semantic facts, and `Sharpview.Cli` parses arguments and formats reports. All three existing projects remain in `sharpview.slnx`.
+- **Call paths** from controller actions down through your architectural layers.
+- **Explicit exceptions** that may escape an action, and the handlers in between.
+- **Layer dependencies**, checked against the architecture you declare.
 
-## Build and validate
+Results carry source evidence (file:line:column), and anything the analysis cannot decide is reported as *Unknown* instead of being hidden. It uses the .NET SDK and Roslyn; Visual Studio is not required.
 
-Use a .NET 10 SDK compatible with `global.json`:
+**New here? Read [How Sharpview works](docs/overview.md)** — pipeline, principles, what each command answers, and how to write your own rule.
+
+## Quick start
+
+Requires a .NET 10 SDK compatible with `global.json`.
 
 ```sh
 dotnet restore sharpview.slnx
-dotnet build tests/Fixtures/ResearchSolution/ResearchSolution.slnx
+dotnet build tests/Fixtures/ResearchSolution/ResearchSolution.slnx   # sample Web API used below
 dotnet test sharpview.slnx
 ```
 
-The fixture build explicitly restores repository-owned projects. Sharpview itself never runs restore on analysed inputs. Restore your own input dependencies before analysis. SDK project evaluation and source generators can execute project-supplied tooling; loading is not a sandbox or simple text parsing.
-
-## Research commands
+Try it on the sample (`F` is the input, `L` the layer mapping; works in bash and zsh):
 
 ```sh
-dotnet run --project src/Sharpview.Cli -- --help
-dotnet run --project src/Sharpview.Cli -- controllers tests/Fixtures/ResearchSolution/ResearchSolution.slnx --root 'Research.Api.OrdersController.Get()' --layer project:Research.Api=API --layer project:Research.Application=Application --layer project:Research.Infrastructure=Infrastructure --locations
-dotnet run --project src/Sharpview.Cli -- exceptions tests/Fixtures/ResearchSolution/ResearchSolution.slnx --root 'Research.Api.OrdersController.Get()'
-dotnet run --project src/Sharpview.Cli -- reach tests/Fixtures/ResearchSolution/ResearchSolution.slnx --root 'Research.Api.OrdersController.Get()' --layer project:Research.Api=API --layer project:Research.Application=Application --layer project:Research.Infrastructure=Infrastructure
-dotnet run --project src/Sharpview.Cli -- layers tests/Fixtures/ResearchSolution/ResearchSolution.slnx --layer project:Research.Api=API --layer project:Research.Application=Application --layer project:Research.Infrastructure=Infrastructure --allow API=Application --allow Application=Infrastructure
-dotnet run --project src/Sharpview.Cli -- methods tests/Fixtures/ResearchSolution/ResearchSolution.slnx
-dotnet run --project src/Sharpview.Cli -- inspect tests/Fixtures/ResearchSolution/ResearchSolution.slnx --format json --output snapshot.json
+F=tests/Fixtures/ResearchSolution/ResearchSolution.slnx
+L=(--layer project:Research.Api=API --layer project:Research.Application=Application --layer project:Research.Infrastructure=Infrastructure)
+
+dotnet run --project src/Sharpview.Cli -- reach $F --root 'Research.Api.OrdersController.Get()' "${L[@]}"
+dotnet run --project src/Sharpview.Cli -- exceptions $F --root 'Research.Api.OrdersController.Get()'
+dotnet run --project src/Sharpview.Cli -- layers $F "${L[@]}" --allow API=Application --allow Application=Infrastructure
 ```
 
-`--output` creates a new file and refuses to overwrite an existing file. JSON is schema version 3 (IDs are plain strings) and goes to stdout when no file is selected; diagnostics go to stderr. Input may be `.csproj`, `.sln` or `.slnx`. Select `--framework` for multi-target projects and `--configuration` when required.
+Analysing your own solution: restore it first (Sharpview never restores, builds or edits analysed code). Loading evaluates MSBuild projects and may run project tooling and source generators, so it is not a sandbox.
 
-A path looks like:
+## Commands
 
-```text
-Research.Api.OrdersController.Get() --> Research.Application.Service.Load() --> Research.Infrastructure.Repository.Read()
-```
+| Command | Question it answers | Default roots |
+| --- | --- | --- |
+| `reach` | What can each action reach — once per method, with distance, layer and shortest path? | controller actions (or any `--root`) |
+| `controllers` | What are all call paths from each action, with project, layer and transitions? | controller actions |
+| `chains` | All call paths from any method. | every source method |
+| `exceptions` | Where does each explicit throw end up: intercepted, rethrown/replaced, may escape, or unknown? | controller actions |
+| `layers` | Which layers depend on which; with `--allow`, which dependencies break the rules? | — |
+| `methods` | List extracted callables with their IDs (to pick a `--root`). | — |
+| `inspect` | Summary, or the full fact snapshot with `--format json`. | — |
 
-Paths are static call relationships, not execution traces. Branch calls produce separate paths. Call transitions count graph edges, not runtime stack depth. Layers come only from explicit project/namespace mappings; the longest prefix wins, with project preference on a tie.
+Sample outputs for each are in [docs/samples](docs/samples/README.md). Run `--help` for the complete option list.
 
-`chains` defaults to every source callable; `controllers`, `exceptions` and `reach` default to recognised controller actions. Use an exact signature from `methods`, or `--root-id` if signatures collide. Interface, virtual, delegate, dynamic and missing targets remain visible boundaries. `--dispatch direct` marks excluded dispatch while preserving its declared target evidence.
+### Common options
 
-`reach` lists every callable reachable from each root once, with its transition distance and one shortest witness path; it stays linear where `chains` enumerates every path. Interface/virtual calls stop as boundaries unless `--follow-candidates` traverses implementation candidates, which are marked `(candidate)` and are never claimed as runtime targets.
+- **Input:** `.csproj`, `.sln` or `.slnx`. Use `--framework` for multi-target projects and `--configuration` (default `Debug`) when needed.
+- **Roots:** `--root '<exact signature>'` (copy it from `methods`) or `--root-id <id>` when signatures collide.
+- **Layers:** repeatable `--layer project:<prefix>=<name>`, `--layer namespace:<prefix>=<name>` (namespaces and nested namespaces) or `--layer type:<prefix>=<name>` (a type and its nested types). Longest prefix wins; a project mapping wins a tie. Layers come only from these mappings.
+- **Layer rules:** repeatable `--allow <from>=<to>[,<to>...]` (with `layers`). Same-layer dependencies are always allowed.
+- **Dispatch:** interface, virtual, delegate, dynamic and unresolved calls are visible boundaries. `reach --follow-candidates` also follows implementation candidates, marked `(candidate)`; `chains --dispatch direct` marks excluded dispatch while keeping its declared target.
+- **Limits:** `--max-depth` (default 20 transitions), `--max-chains` (1,000 results), `--max-expansions` (100,000 examined call sites). Reaching a limit is always reported.
+- **Evidence:** `--locations` prints call-site locations for paths and reach witnesses.
+- **Output:** `inspect --format json` writes schema version 3 (IDs are plain strings) to stdout or `--output <new file>` (never overwrites). Diagnostics go to stderr. Ctrl+C cancels cleanly.
 
-`layers` aggregates call sites and type dependencies (signatures, inheritance, construction, fields, properties) between configured layers into edges with a count and one source witness. Edge kinds: `DirectCall`, `DeclaredCall` (interface/virtual binding), `CandidateCall` (to an implementation candidate) and `TypeDependency`. Source outside every mapping is `(unmapped)`; unmapped referenced assemblies are counted as external references. Repeatable `--allow <from>=<to>[,<to>...]` evaluates the `layer-dependency` rule: disallowed cross-layer edges are `Violation`, edges touching unmapped source are `Unknown`, candidate edges are not evaluated. `--layer type:<prefix>=<name>` maps a type and its nested types; `namespace:` prefixes match namespaces only.
+### Exit codes
 
-Traversal defaults to 20 transitions, 1,000 results and 100,000 examined call sites. Adjust `--max-depth`, `--max-chains`, and `--max-expansions`. Cancellation propagates from Ctrl+C.
+| Code | Meaning |
+| --- | --- |
+| 0 | Completed within the model, with no gaps, boundaries, limits or findings. |
+| 1 | Usable output, but with gaps, Unknown results, boundaries, limits or rule violations. The sample fixture returns 1 on purpose (top-level statements and external bodies are out of scope). |
+| 2 | Invalid request or fatal load error. |
+| 130 | Cancelled. |
 
-Exit codes: **0** completed within the model with no extraction gaps/limits; **1** usable output with gaps, uncertain boundaries or limits; **2** invalid request/fatal load; **130** cancelled. The Web API fixture intentionally returns **1** because top-level ownership and external bodies remain outside scope. An intercepted explicit origin can appear beside Unknown results for other calls.
+## Reading the results
 
-## Exception meaning
-
-Reports contain all explicit throws, throw expressions, rethrows and catches, with static exception types, exact construction evidence, catch filters, protected spans and source locations. Per-action witnesses unwind the origin's lexical regions and each caller's protected call site; unrelated catches cannot intercept an origin.
-
-The result categories are matching-handler interception, rethrow/replacement with its subsequent origin and status, possible escape from the controller action under the supported model, and Unknown. Interception does not prove successful recovery. Escape from an action does not establish global absence of handlers. `UseExceptionHandler`, `AddExceptionHandler`, and `UseDeveloperExceptionPage` registrations are reported separately as boundary evidence, without proving execution order or coverage. See Microsoft's [exception-handling documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling?view=aspnetcore-10.0) for the runtime pipeline.
-
-Directly awaiting a task-producing call supports explicit-origin propagation. Unobserved tasks, task aliases, custom awaitables, async void, filters, complex handler flow, finally behavior, missing bodies and uncertain dispatch can produce scoped Unknown. The analysis does not model implicit exceptions or branch feasibility.
+- **Paths are static.** `A() --> B() --> C()` is a call relationship in source, not an execution trace. Branches produce separate paths; transitions count edges, not stack depth.
+- **Declared vs candidate vs runtime.** A call is recorded at its declared target (e.g. an interface method). Implementations of it are *candidates*, shown only on request and always marked; the actual runtime target is never claimed.
+- **Exceptions.**
+  - Reports cover explicit `throw`s, throw expressions, rethrows and catches: static type vs exact constructed type, filters, protected regions and locations.
+  - Each witness unwinds the origin through its own `try` blocks and every caller's protected call site. An unrelated catch can never intercept it.
+  - Statuses:
+    - **Intercepted** by a matching handler. This does not prove recovery.
+    - **Rethrown or replaced**, followed by the subsequent status.
+    - **May escape** the controller action. It is never called "unhandled": middleware may still handle it.
+    - **Unknown**, with a reason. Causes include dispatch, missing bodies, filters, `finally`, async void, unobserved or aliased tasks, and depth limits.
+  - Directly awaited task-producing calls propagate.
+  - One action can show an intercepted origin next to Unknown results for other calls; each witness stands alone.
+  - Implicit exceptions and branch feasibility are not modelled.
+  - `UseExceptionHandler`, `AddExceptionHandler` and `UseDeveloperExceptionPage` registrations are listed separately as *boundary evidence*. They do not prove middleware order or coverage; see Microsoft's [exception-handling documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling?view=aspnetcore-10.0).
+- **Layer edges.**
+  - Edge kinds:
+    - `DirectCall`.
+    - `DeclaredCall`: an interface or virtual call, counted at its declared target.
+    - `CandidateCall`: a call to an implementation candidate.
+    - `TypeDependency`: signatures, base types and their type arguments, fields, properties and construction.
+  - Code outside every mapping shows as `(unmapped)`. Unmapped referenced assemblies are counted as external references.
+  - The `layer-dependency` rule reports a disallowed cross-layer edge as **Violation** and an edge touching unmapped code as **Unknown**. Candidate edges are not judged.
 
 ## Library use
 
 ```csharp
+using System.Collections.Immutable;
 using Sharpview.Core;
 using Sharpview.Roslyn;
 
-// Call explicitly at process startup; LoadAsync also registers if needed.
-MSBuildBootstrap.RegisterSdk();
+MSBuildBootstrap.RegisterSdk(); // call at process startup; LoadAsync also registers if needed
 var snapshot = await RoslynProgramLoader.LoadAsync(new AnalysisRequest("Example.slnx"), cancellationToken);
-var index = new ProgramIndex(snapshot); // build once; all queries and rules share it
+var index = new ProgramIndex(snapshot); // build once; queries and rules share it
+
 var actions = AspNetConventions.ControllerActions(index, cancellationToken).Select(x => x.Method).ToImmutableArray();
-var paths = CallChainQuery.Enumerate(index, actions, new ChainOptions(), cancellationToken);
 var reach = ReachabilityQuery.Analyze(index, actions, new ReachOptions(), cancellationToken);
+var paths = CallChainQuery.Enumerate(index, actions, new ChainOptions(), cancellationToken);
 var exceptions = ExceptionQuery.Analyze(index, actions, new ChainOptions(), cancellationToken);
 
 var model = new LayerModel(
@@ -78,8 +115,20 @@ var graph = LayerGraph.Build(index, new LayerMap(index, model), cancellationToke
 var findings = LayerRules.AllowedDependencies(graph, model); // Finding(RuleId, Verdict, Subject, Message, Evidence)
 ```
 
-A rule is a plain function over `ProgramIndex` (and derived models such as `LayerMap`/`LayerGraph`) returning `Finding`s; `Verdict.Unknown` is never folded into `Pass`. Exception witnesses carry a machine-readable `ExceptionReason` beside the human `Reason`.
+- Snapshots contain no Roslyn symbols and stay usable after the workspace is disposed.
+- A rule is a plain function returning `Finding`s. Keep `Verdict.Unknown` separate from `Pass`. See the worked example in the [overview](docs/overview.md#writing-your-own-rule).
+- Exception witnesses carry a machine-readable `ExceptionReason` next to the human-readable `Reason`.
+- MSBuild Locator finds an installed SDK. Host selection and the input's `global.json` are not guaranteed to match every shell configuration.
 
-Add `using System.Collections.Immutable;` for `ToImmutableArray`. Snapshots contain no Roslyn symbols and remain queryable after the workspace is disposed. MSBuild Locator discovers an installed SDK; host selection and input `global.json` are not promised to match every shell configuration.
+## Documentation
 
-See [analysis coverage](docs/coverage.md), [model notes](docs/model.md), [test evidence](docs/validation.md), [sample reports](docs/samples/README.md), the [research plan](docs/superpowers/plans/2026-10-12-csharp-call-chain-research-plan.md) and the [consumer model plan](docs/superpowers/plans/2026-10-12-consumer-semantic-model-plan.md). Fixture validation is reproducible; an external Web API experiment remains pending until an input is selected.
+| Document | Read it for |
+| --- | --- |
+| [How Sharpview works](docs/overview.md) | The approach: pipeline, principles, commands, custom rules, glossary. |
+| [Coverage and limits](docs/coverage.md) | What is and is not modelled. |
+| [Model reference](docs/model.md) | Facts, identities, keys and query semantics in detail. |
+| [Validation](docs/validation.md) | Which tests prove which behaviour; regression comparison. |
+| [Sample reports](docs/samples/README.md) | Full outputs on the sample Web API. |
+| [Research plan](docs/superpowers/plans/2026-10-12-csharp-call-chain-research-plan.md), [consumer model plan](docs/superpowers/plans/2026-10-12-consumer-semantic-model-plan.md) | Design history and decisions. |
+
+Status: validated on the repository's sample Web API (reproducible). An experiment on an external Web API is still pending.

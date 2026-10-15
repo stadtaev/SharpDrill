@@ -64,6 +64,27 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
         if (code == ExceptionReason.DispatchBoundary)
             Assert.Contains(report.Results, x => x.ReasonCode == code && x.Dispatch == DispatchKind.Interface);
     }
+    // Same code as the "Writing your own rule" example in docs/overview.md; keeps the documentation honest.
+    private static IEnumerable<Finding> NoDirectInfrastructure(ProgramIndex index, LayerMap layers)
+    {
+        var actions = AspNetConventions.ControllerActions(index).Select(x => x.Method).ToImmutableArray();
+        foreach (var root in ReachabilityQuery.Analyze(index, actions, new ReachOptions()).Roots)
+            foreach (var hit in root.Reached.Where(x => x.Distance == 1 && layers.LayerOf(x.Callable) == "Infrastructure"))
+                yield return new("no-direct-infrastructure", hit.ViaCandidate ? Verdict.Unknown : Verdict.Violation,
+                    index.Callable(root.Root).DisplaySignature, $"Calls {index.Callable(hit.Callable).DisplaySignature} directly.",
+                    [index.CallSite(hit.Witness[0].Site).Evidence]);
+    }
+    [Fact]
+    public void Documented_custom_rule_example_runs_on_the_fixture()
+    {
+        var index = new ProgramIndex(S);
+        var layers = new LayerMap(index, new([new(LayerScope.Project, "Research.Infrastructure", "Infrastructure")]));
+        var findings = NoDirectInfrastructure(index, layers).ToArray();
+        // Controllers only call the application layer directly; mapping the application project as Infrastructure flips that.
+        Assert.Empty(findings);
+        var strict = new LayerMap(index, new([new(LayerScope.Project, "Research.Application", "Infrastructure")]));
+        Assert.Contains(NoDirectInfrastructure(index, strict), x => x.Verdict == Verdict.Violation && x.Subject == "Research.Api.OrdersController.Get()");
+    }
     [Fact]
     public void Every_fixture_witness_has_a_reason_code_consistent_with_its_final_status()
     {
