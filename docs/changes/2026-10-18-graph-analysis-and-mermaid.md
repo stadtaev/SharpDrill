@@ -236,3 +236,36 @@ Validation for this follow-up:
   candidate label. Parser validation remains an external verification step, not a repository .NET integration test.
 - `git diff --check` passed. The sample Markdown was regenerated from an actual fresh-process CLI export; the command still
   prints its absolute saved path. User-facing selection, limits, evidence and overwrite behavior remain covered by the suite.
+
+## Follow-up: extract the export adapter without DI
+
+The Mermaid/Markdown formatter moves to a dedicated **`Sharpview.Export.Mermaid`** project. The NuGet reference moves with it;
+`Sharpview.Core` now depends only on `Sharpview.Graph`. Core retains the format-independent `CallDiagram` records,
+`DiagramOptions` and `CallDiagramQuery` analysis/projection. CLI and tests explicitly reference the new exporter project, which
+is included in `sharpview.slnx`.
+
+The static entry point is now `Sharpview.Export.Mermaid.MermaidExporter.Markdown(CallDiagram)`. Source consumers must reference
+the new project and import `Sharpview.Export.Mermaid`; the README example is updated. The exporter implementation is moved
+unchanged apart from its namespace and Core import, so formatting, escaping, evidence, limits, file selection and absolute-path
+reporting retain their prior behavior. The call remains static: no DI container, exporter interface, registration extension,
+hosting package or new service abstraction is introduced.
+
+Dependency direction:
+
+```text
+Sharpview.Cli -> Sharpview.Core -> Sharpview.Graph
+Sharpview.Cli -> Sharpview.Export.Mermaid -> Sharpview.Core
+Sharpview.Export.Mermaid -> Mermaid.NET.Flowcharts
+```
+
+Validation for the extraction:
+
+- `dotnet build sharpview.slnx` succeeded with **0 warnings and 0 errors**, restoring/building the new project as part of the solution.
+- `dotnet test sharpview.slnx --no-build --no-restore --logger 'trx;LogFileName=export-extraction.trx' --results-directory /tmp/sharpview-test-results`
+  passed the same **195/195** tests, with **0 failures and 0 skipped**, in 1 minute 13 seconds. TRX counters were inspected.
+  Existing exporter tests and fresh-process CLI integration tests now reference/use the new assembly.
+- A source comparison verified that exporter code differs from its previous implementation only by namespace and the Core
+  import. No new behavior tests were necessary for this mechanical extraction.
+- Core's restored assets contain only the `Sharpview.Graph` project dependency, confirming that the Mermaid package no longer
+  appears in Core's dependency closure. All CLI/test source references and README usage imports were updated.
+- `git diff --check` passed. No DI or service-registration dependency was added.

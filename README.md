@@ -130,6 +130,7 @@ A saved file can return exit code 1 because it contains useful but partial resul
 ```csharp
 using System.Collections.Immutable;
 using Sharpview.Core;
+using Sharpview.Export.Mermaid;
 using Sharpview.Roslyn;
 
 MSBuildBootstrap.RegisterSdk(); // call at process startup; LoadAsync also registers if needed
@@ -154,6 +155,7 @@ var graph = LayerGraph.Build(index, new LayerMap(index, model), cancellationToke
 var findings = LayerRules.AllowedDependencies(graph, model); // Finding(RuleId, Verdict, Subject, Message, Evidence)
 ```
 
+- Mermaid/Markdown exports live in `Sharpview.Export.Mermaid`; reference it and import `Sharpview.Export.Mermaid` when calling `MermaidExporter`. Core retains the diagram model/query and depends only on `Sharpview.Graph`.
 - `index.GetCallGraph(cancellationToken)` and `index.GetDependencyGraph(cancellationToken)` lazily publish complete cached graphs; the tokenless properties remain available. They expose the whole program as graphs (`Sharpview.Graph`: out/in edges, BFS shortest paths, reachability, quotient by group, strongly connected components).
 - `CallEdge.Id` identifies a specific site/kind/target relationship. Quotients retain every group, original node membership and supporting edge, including isolated groups. Quotients are presentation/aggregation models; collapsing groups can invent apparent paths, so method exception analysis uses the original graph.
 - `Where` and `Subgraph` materialize new graphs; they share payload objects. Generic graph consumers must keep node equality/hash codes and edge endpoints stable.

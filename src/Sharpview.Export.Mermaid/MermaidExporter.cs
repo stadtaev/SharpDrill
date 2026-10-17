@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Sharpview.Core;
 using Mermaid.Flowcharts;
 using Mermaid.Flowcharts.Links;
 using Mermaid.Flowcharts.Nodes;
@@ -9,7 +10,7 @@ using Mermaid.Flowcharts.Styling.Attributes;
 using Mermaid.Flowcharts.Styling.Attributes.Enums;
 using Mermaid.Flowcharts.Subgraphs;
 
-namespace Sharpview.Core;
+namespace Sharpview.Export.Mermaid;
 
 // Pure presentation over a projection: never walks the program graph or infers architectural layers.
 public static class MermaidExporter

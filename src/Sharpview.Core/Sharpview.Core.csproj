@@ -7,7 +7,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Mermaid.NET.Flowcharts" />
     <ProjectReference Include="../Sharpview.Graph/Sharpview.Graph.csproj" />
   </ItemGroup>
 

@@ -1,4 +1,5 @@
 using Sharpview.Core;
+using Sharpview.Export.Mermaid;
 using Xunit;
 
 namespace Sharpview.Tests;

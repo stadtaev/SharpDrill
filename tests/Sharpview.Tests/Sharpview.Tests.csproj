@@ -3,4 +3,5 @@
 <PackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" PrivateAssets="all" />
 <PackageReference Include="Microsoft.NET.Test.Sdk" /><PackageReference Include="xunit" /><PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
 <ProjectReference Include="../../src/Sharpview.Core/Sharpview.Core.csproj" /><ProjectReference Include="../../src/Sharpview.Graph/Sharpview.Graph.csproj" /><ProjectReference Include="../../src/Sharpview.Roslyn/Sharpview.Roslyn.csproj" /><ProjectReference Include="../../src/Sharpview.Cli/Sharpview.Cli.csproj" />
+<ProjectReference Include="../../src/Sharpview.Export.Mermaid/Sharpview.Export.Mermaid.csproj" />
 </ItemGroup></Project>

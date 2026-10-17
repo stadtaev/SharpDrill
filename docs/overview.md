@@ -28,9 +28,10 @@ flowchart LR
 | Index | `Sharpview.Core` | `ProgramIndex` builds lookups once (callers, callees, members, ancestors, candidates…) and, on first use, the whole-program `CallGraph` and type `DependencyGraph`. |
 | Analyses & models | `Sharpview.Core` | Queries over the index: call paths, reachability, exception propagation, layer graph. |
 | Rules | `Sharpview.Core` | Plain C# functions that turn analysis results into `Finding`s. |
+| Diagram export | `Sharpview.Export.Mermaid` | Formats Core diagram projections as Mermaid/Markdown; owns the Mermaid NuGet dependency. |
 | Reports | `Sharpview.Cli` | Formats text/JSON. No analysis logic lives here. |
 
-`Sharpview.Core` has no Roslyn dependency: once a snapshot exists (or is loaded from JSON), all analysis runs on plain records.
+`Sharpview.Core` depends only on `Sharpview.Graph`, with no Roslyn or Mermaid dependency: once a snapshot exists (or is loaded from JSON), all analysis runs on plain records.
 
 `Sharpview.Graph` is a small generic graph library underneath Core (it knows nothing about C#): an immutable directed multigraph (`DiGraph`) with NetworkX-style operations — out/in edges, successors/predecessors, `Where` and `Subgraph` (materialized copies sharing payload), breadth-first search with shortest paths, `ReachableFrom`, `Quotient` (collapse nodes into groups such as layers) and `StronglyConnectedComponents` (cycles). Everything keeps insertion order, so results are deterministic. Reachability searches the call graph with shared parent links; witnesses materialize on demand. The layer graph is a quotient of the call and dependency graphs, with isolated groups and original node membership retained. Node identities and edge endpoints must remain stable. Cached graph accessors accept cancellation tokens and publish complete graphs only.
 
@@ -137,7 +138,7 @@ flow use the same transfer code as detailed exception witnesses. Per-call-site c
 site from hiding effects at another. Budgets bound retained facts and transfer work; uncertainty remains explicit. Complexity
 depends on the number of distinct effects, call sites and fixed-point transfers, rather than just the node/edge count.
 
-`CallDiagramQuery` projects a bounded action subgraph without enumerating all paths. `MermaidExporter` formats that projection;
+`CallDiagramQuery` projects a bounded action subgraph without enumerating all paths. `MermaidExporter` in `Sharpview.Export.Mermaid` formats that projection;
 it does not infer layers or analyze exception behavior. The CLI `diagram` command supplies selection and safe file output.
 Project groups are labels for source ownership; collapsed project/layer graphs must never replace the method graph for
 reachability or exception propagation. See [the implementation change document](changes/2026-10-18-graph-analysis-and-mermaid.md)

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using Sharpview.Core;
+using Sharpview.Export.Mermaid;
 
 namespace Sharpview.Cli;
 
