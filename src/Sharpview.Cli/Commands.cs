@@ -10,6 +10,7 @@ internal static class Commands
     {
         var snapshot = await RoslynProgramLoader.LoadAsync(options.Request, token);
         var index = new ProgramIndex(snapshot);
+        if (options.Command == "diagram") return await DiagramCommand.RunAsync(index, options, Console.In, Console.Out, token);
         var roots = options.Command is "chains" or "controllers" or "exceptions" or "reach" ? SelectRoots(index, options, token) : [];
         using var file = options.Output is null ? null : new StreamWriter(new FileStream(options.Output, FileMode.CreateNew, FileAccess.Write));
         var output = (TextWriter?)file ?? Console.Out;
@@ -57,6 +58,35 @@ internal static class Commands
                 Console.Error.WriteLine($"Layers: {string.Join(", ", report.Layers.Model.Layers)}; edges: {graph.Edges.Length}; external references: {graph.ExternalReferences}; unresolved calls: {graph.UnresolvedCalls}; rule evaluated: {!options.Allowed.IsEmpty}; violations: {violations}; unknown: {undecided}.");
                 break;
             case "exceptions":
+                if (options.Summary)
+                {
+                    var summaries = ExceptionSummaryQuery.Analyze(index, roots, new(options.Traversal.MaxExpansions, options.MaxFacts), token);
+                    foreach (var root in roots.OrderBy(x => index.Callable(x).DisplaySignature, StringComparer.Ordinal).ThenBy(x => x.Value, StringComparer.Ordinal))
+                    {
+                        token.ThrowIfCancellationRequested();
+                        var summary = summaries.Roots[root];
+                        output.WriteLine($"Exception summary: {report.Name(root)}");
+                        output.WriteLine($"  Explicit escapes: {summary.Escapes.Length}; unknown effects: {summary.Unknowns.Length}; complete within model: {summary.IsComplete}.");
+                        foreach (var escape in summary.Escapes)
+                        {
+                            output.WriteLine($"  May escape: {escape.ExceptionType ?? "unknown type"} | origin: {escape.Origin.Value} | {escape.ReasonCode}");
+                            var witness = summaries.GetWitness(root, escape);
+                            output.WriteLine($"    Path: {string.Join(" --> ", witness.Path.Select(report.Name))}");
+                            if (index.TryGetThrowSite(escape.Origin, out var origin)) output.WriteLine($"    Origin evidence: {TextReport.Location(origin.Evidence)}");
+                            if (escape.SubsequentOrigin is { } subsequent && index.TryGetThrowSite(subsequent, out var replacement))
+                                output.WriteLine($"    Subsequent origin: {subsequent.Value} | {TextReport.Location(replacement.Evidence)}");
+                            if (options.Locations) foreach (var site in witness.Sites) output.WriteLine($"    Call-site evidence: {TextReport.Location(index.CallSite(site).Evidence)}");
+                        }
+                        foreach (var uncertainty in summary.Unknowns)
+                            output.WriteLine($"  Unknown [{uncertainty.ReasonCode}]: {uncertainty.Message}" +
+                                (uncertainty.Site is { } site ? $" | {TextReport.Location(index.CallSite(site).Evidence)}" : uncertainty.Evidence is { } evidence ? $" | {TextReport.Location(evidence)}" : ""));
+                        foreach (var boundary in snapshot.BoundaryHandling.Where(x => x.Compilation == index.Callable(root).Compilation))
+                            output.WriteLine($"  Boundary registration evidence (runtime coverage unknown): {boundary.Registration} | {TextReport.Location(boundary.Evidence)}");
+                    }
+                    incomplete |= summaries.WorkLimitReached || summaries.FactLimitReached || summaries.Roots.Values.Any(x => !x.IsComplete);
+                    Console.Error.WriteLine($"Summary roots: {summaries.Roots.Count}; methods: {summaries.Methods.Count}; facts: {summaries.FactsAdded}; transfer work: {summaries.WorkItemsProcessed}; work limit: {summaries.WorkLimitReached}; fact limit: {summaries.FactLimitReached}.");
+                    break;
+                }
                 report.Landscape(token);
                 var exceptions = ExceptionQuery.Analyze(index, roots, options.Traversal, token);
                 foreach (var witness in exceptions.Results) { token.ThrowIfCancellationRequested(); report.Witness(witness); }

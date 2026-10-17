@@ -9,7 +9,8 @@ public enum ExceptionReason
     Unspecified, InterceptedByHandler, MayEscape, ChangedMayEscape,
     MissingBody, UnresolvedTarget, DispatchBoundary, Cycle, DepthLimit, ExtractionGap,
     OriginInHandler, AsyncUnsupported, UnobservedTask, FinallyUnsupported, HandlerTypeUncertain,
-    CatchFilter, HandlerFlowUnsupported, ReplacementUnavailable, UnboundExceptionType
+    CatchFilter, HandlerFlowUnsupported, ReplacementUnavailable, UnboundExceptionType,
+    WorkLimit, FactLimit
 }
 public sealed record ExceptionWitness(CallableId Action, ThrowSiteId? Origin, ThrowSiteId? SubsequentOrigin,
     string? ExceptionType, bool IsExactType, ImmutableArray<CallableId> Path,
@@ -41,7 +42,13 @@ public static class ExceptionQuery
         ExceptionWitness Unknown(CallableId root, ImmutableArray<CallableId> path, ExceptionReason code, string reason, SourceEvidence? evidence, DispatchKind? dispatch = null) =>
             new(root, null, null, null, false, path, ExceptionStatus.Unknown, reason,
                 evidence is null ? [] : [evidence], [], ReasonCode: code, Dispatch: dispatch);
-        while (stack.TryPop(out var frame))
+        foreach (var root in actions.Distinct())
+        {
+            foreach (var gap in program.Snapshot.Gaps.Where(x => x.Owner is null))
+                if (!Add(Unknown(root, [root], ExceptionReason.ExtractionGap, gap.Message, gap.Evidence))) break;
+            if (outputLimit) break;
+        }
+        while (!outputLimit && stack.TryPop(out var frame))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var current = frame.Path[^1];
@@ -91,107 +98,24 @@ public static class ExceptionQuery
     private static ExceptionWitness Unwind(CallableId root, ImmutableArray<CallableId> path,
         ImmutableArray<CallSiteFact> sites, ThrowSiteFact origin, ProgramIndex program, CancellationToken token)
     {
-        var staticType = origin.StaticExceptionType;
-        var exactType = origin.ExactExceptionType ?? (origin.IsExactType ? origin.StaticExceptionType : null);
-        var type = exactType ?? staticType; var exact = origin.IsExactType || origin.ExactExceptionType is not null; ThrowSiteId? subsequent = null;
-        var evidence = ImmutableArray.CreateBuilder<SourceEvidence>(); evidence.Add(origin.Evidence);
-        var handlers = ImmutableArray.CreateBuilder<CatchId>();
-        bool changed = false;
-        ExceptionWitness Finish(ExceptionStatus status, ExceptionReason code, string reason) => new(root, origin.Id, subsequent, type?.DisplayName, exact, path,
-            changed ? ExceptionStatus.RethrownOrReplaced : status, reason, evidence.ToImmutable(), handlers.ToImmutable(), changed ? status : null, staticType?.DisplayName, exactType?.DisplayName, code);
-        if (origin.CatchId is not null)
-            return Finish(ExceptionStatus.Unknown, ExceptionReason.OriginInHandler, "Origin is inside a handler; reaching it depends on the caught exception and handler control flow.");
-        if (program.Callable(origin.Owner).IsAsync && !program.Callable(origin.Owner).ReturnsTask)
-            return Finish(ExceptionStatus.Unknown, ExceptionReason.AsyncUnsupported, "Async void or custom awaitable propagation is outside the supported model.");
-        ExceptionWitness? Apply(ImmutableArray<ExceptionRegionId> protectedRegions)
-        {
-            foreach (var regionId in protectedRegions)
-            {
-                token.ThrowIfCancellationRequested();
-                var region = program.Region(regionId);
-                if (region.HasFinally) return Finish(ExceptionStatus.Unknown, ExceptionReason.FinallyUnsupported, "Finally may change propagation; its execution is outside the supported model.");
-                foreach (var catchId in region.Catches)
-                {
-                    var handler = program.Catch(catchId);
-                    var match = Matches(program.Types, type, exact, handler.CaughtType, token);
-                    if (match == false) continue;
-                    evidence.Add(handler.Evidence); handlers.Add(handler.Id);
-                    if (match is null) return Finish(ExceptionStatus.Unknown, ExceptionReason.HandlerTypeUncertain, "Static exception type does not determine runtime handler matching.");
-                    if (handler.Filter is not null) return Finish(ExceptionStatus.Unknown, ExceptionReason.CatchFilter, "Conditional catch filter may accept, reject or throw.");
-                    switch (handler.Outcome)
-                    {
-                        case HandlerOutcome.Intercepts:
-                            return Finish(ExceptionStatus.Intercepted, ExceptionReason.InterceptedByHandler, "Intercepted by a matching handler; successful recovery is not proven.");
-                        case HandlerOutcome.Unknown:
-                            return Finish(ExceptionStatus.Unknown, ExceptionReason.HandlerFlowUnsupported, "Matching handler has unsupported control flow or calls; propagation/recovery unknown.");
-                        case HandlerOutcome.Rethrows:
-                            changed = true;
-                            if (handler.SubsequentThrow is { } rethrow) { subsequent = rethrow; evidence.Add(program.ThrowSite(rethrow).Evidence); }
-                            break;
-                        case HandlerOutcome.Replaces:
-                            if (handler.SubsequentThrow is null) return Finish(ExceptionStatus.Unknown, ExceptionReason.ReplacementUnavailable, "Replacement origin unavailable.");
-                            var replacement = program.ThrowSite(handler.SubsequentThrow.Value);
-                            subsequent = replacement.Id;
-                            staticType = replacement.StaticExceptionType;
-                            exactType = replacement.ExactExceptionType ?? (replacement.IsExactType ? replacement.StaticExceptionType : null);
-                            type = exactType ?? staticType; exact = replacement.IsExactType || replacement.ExactExceptionType is not null;
-                            evidence.Add(replacement.Evidence); changed = true;
-                            break;
-                    }
-                    // A selected catch is outside the same try's protected block: move to the next outer region.
-                    break;
-                }
-            }
-            return null;
-        }
-        var local = Apply(origin.ProtectedRegions);
-        if (local is not null) return local;
-        for (var i = sites.Length - 1; i >= 0; i--)
+        var current = ExceptionTransfer.Start(program, origin, token);
+        for (var i = sites.Length - 1; current.Status is null && i >= 0; i--)
         {
             token.ThrowIfCancellationRequested();
-            var site = sites[i]; evidence.Add(site.Evidence);
-            if (program.Callable(path[i]).IsAsync && !program.Callable(path[i]).ReturnsTask)
-                return Finish(ExceptionStatus.Unknown, ExceptionReason.AsyncUnsupported, "Async void or custom awaitable propagation is outside the supported model.");
-            if ((program.Callable(path[i + 1]).IsAsync || site.IsAwaited) && !program.Callable(path[i + 1]).ReturnsTask)
-                return Finish(ExceptionStatus.Unknown, ExceptionReason.AsyncUnsupported, "Async void or custom awaitable propagation is outside the supported model.");
-            if (program.Callable(path[i + 1]).ReturnsTask && !site.IsAwaited)
-                return Finish(ExceptionStatus.Unknown, ExceptionReason.UnobservedTask, "Task-producing call is not directly awaited; exception observation/propagation unsupported.");
-            var intercepted = Apply(site.ProtectedRegions);
-            if (intercepted is not null) return intercepted;
+            current = ExceptionTransfer.Cross(program, current.Flow, sites[i], token);
         }
-        if (type is null) return Finish(ExceptionStatus.Unknown, ExceptionReason.UnboundExceptionType, "Exception type could not be bound.");
-        return Finish(ExceptionStatus.MayEscape, changed ? ExceptionReason.ChangedMayEscape : ExceptionReason.MayEscape, changed
-            ? "Rethrown or replaced; subsequent exception may escape the controller action under the supported model."
-            : "May escape the controller action under the supported analysis model.");
-    }
-
-    // A base-typed thrown expression may hold a subtype: an incompatible narrow catch is then uncertain.
-    private static bool? Matches(IReadOnlyDictionary<TypeId, TypeFact> types, TypeUse? thrown, bool exact, TypeUse? caught, CancellationToken token)
-    {
-        if (caught is null) return true;
-        if (thrown is null || thrown.Declaration is null || caught.Declaration is null) return null;
-        bool? IsA(TypeUse value, TypeUse target)
-        {
-            var incomplete = false;
-            var pending = new Stack<TypeUse>(); pending.Push(value); var seen = new HashSet<TypeId>();
-            while (pending.TryPop(out var t))
-            {
-                token.ThrowIfCancellationRequested();
-                if (t.Declaration is not null && t.Declaration == target.Declaration)
-                    return t.DisplayName == target.DisplayName
-                        && t.Components.Select(x => x.DisplayName).SequenceEqual(target.Components.Select(x => x.DisplayName), StringComparer.Ordinal)
-                        ? true : null;
-                if (t.Declaration is not { } id) { incomplete = true; continue; }
-                if (!seen.Add(id)) continue;
-                var fact = types.GetValueOrDefault(id);
-                if (fact is null) incomplete = true;
-                else foreach (var b in fact.BaseTypes) pending.Push(b);
-            }
-            return incomplete ? null : false;
-        }
-        var assignable = IsA(thrown, caught);
-        if (assignable != false) return assignable;
-        if (!exact && IsA(caught, thrown) != false) return null;
-        return false;
+        var flow = current.Flow;
+        var status = current.Status ?? (flow.Type is null ? ExceptionStatus.Unknown : ExceptionStatus.MayEscape);
+        var reason = current.Status is not null ? current.Reason
+            : flow.Type is null ? ExceptionReason.UnboundExceptionType
+            : flow.Changed ? ExceptionReason.ChangedMayEscape : ExceptionReason.MayEscape;
+        var message = current.Status is not null ? current.Message
+            : flow.Type is null ? "Exception type could not be bound."
+            : flow.Changed ? "Rethrown or replaced; subsequent exception may escape the controller action under the supported model."
+            : "May escape the controller action under the supported analysis model.";
+        return new(root, flow.Origin, flow.SubsequentOrigin, flow.Type?.DisplayName, flow.Exact, path,
+            flow.Changed ? ExceptionStatus.RethrownOrReplaced : status, message,
+            flow.Evidence.ToImmutableArray(), flow.Handlers.ToImmutableArray(),
+            flow.Changed ? status : null, flow.StaticType?.DisplayName, flow.ExactType?.DisplayName, reason);
     }
 }

@@ -11,6 +11,8 @@ public interface IEdge<out TNode>
 
 // Immutable directed multigraph with adjacency lists in both directions. Nodes, edges and every adjacency list keep
 // insertion order, so algorithms over it are deterministic whenever the builder was fed in a deterministic order.
+// Structure is immutable; generic node/edge payloads are not cloned or frozen. Node equality/hash codes and edge
+// endpoints must remain stable for the lifetime of every graph containing them. Other mutable payload is shared.
 public sealed class DiGraph<TNode, TEdge> where TNode : notnull where TEdge : IEdge<TNode>
 {
     private readonly Dictionary<TNode, int> positions;
@@ -52,10 +54,10 @@ public sealed class DiGraph<TNode, TEdge> where TNode : notnull where TEdge : IE
     public IEnumerable<TNode> Successors(TNode node) => OutEdges(node).Select(x => x.Target).Distinct(Comparer);
     public IEnumerable<TNode> Predecessors(TNode node) => InEdges(node).Select(x => x.Source).Distinct(Comparer);
 
-    // Same nodes, only the edges that match.
+    // Materializes a new graph with the same nodes and matching edges, sharing payload objects.
     public DiGraph<TNode, TEdge> Where(Func<TEdge, bool> keep) => new(Nodes, [.. Edges.Where(keep)], Comparer);
 
-    // The given nodes (kept in this graph's order) and the edges between them.
+    // Materializes the given nodes (in this graph's order) and their edges, sharing payload objects.
     public DiGraph<TNode, TEdge> Subgraph(IEnumerable<TNode> nodes)
     {
         var keep = new HashSet<TNode>(nodes, Comparer);

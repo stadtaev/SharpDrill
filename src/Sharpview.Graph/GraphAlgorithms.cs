@@ -5,7 +5,14 @@ namespace Sharpview.Graph;
 // Edges between two groups that share a key, in edge order.
 public sealed record QuotientEdge<TGroup, TKey, TEdge>(TGroup From, TGroup To, TKey Key, ImmutableArray<TEdge> Edges);
 // Unassigned holds edges with at least one endpoint outside every group, so callers can count rather than lose them.
-public sealed record Quotient<TGroup, TKey, TEdge>(ImmutableArray<QuotientEdge<TGroup, TKey, TEdge>> Edges, ImmutableArray<TEdge> Unassigned);
+public record Quotient<TGroup, TKey, TEdge>(ImmutableArray<QuotientEdge<TGroup, TKey, TEdge>> Edges, ImmutableArray<TEdge> Unassigned);
+
+// Every assigned group is retained, including groups containing only isolated nodes. Members keep graph order.
+public sealed record QuotientNode<TNode, TGroup>(TGroup Group, ImmutableArray<TNode> Members);
+public sealed record Quotient<TNode, TGroup, TKey, TEdge>(
+    ImmutableArray<QuotientEdge<TGroup, TKey, TEdge>> Edges, ImmutableArray<TEdge> Unassigned,
+    ImmutableArray<QuotientNode<TNode, TGroup>> Nodes, ImmutableArray<TNode> UnassignedNodes)
+    : Quotient<TGroup, TKey, TEdge>(Edges, Unassigned);
 
 public static class GraphAlgorithms
 {
@@ -21,24 +28,36 @@ public static class GraphAlgorithms
 
     // Collapses nodes into groups (e.g. layers or projects) and buckets edges by (from group, to group, key).
     // Buckets appear in first-edge order; a null group means "not in any group" and sends the edge to Unassigned.
-    public static Quotient<TGroup, TKey, TEdge> Quotient<TNode, TEdge, TGroup, TKey>(this DiGraph<TNode, TEdge> graph,
+    public static Quotient<TNode, TGroup, TKey, TEdge> Quotient<TNode, TEdge, TGroup, TKey>(this DiGraph<TNode, TEdge> graph,
         Func<TNode, TGroup?> groupOf, Func<TEdge, TKey> keyOf, CancellationToken cancellationToken = default)
         where TNode : notnull where TEdge : IEdge<TNode> where TGroup : class where TKey : notnull
     {
         var groups = new Dictionary<TNode, TGroup?>(graph.Comparer);
-        TGroup? Group(TNode node) => groups.TryGetValue(node, out var group) ? group : groups[node] = groupOf(node);
+        var memberships = new Dictionary<TGroup, ImmutableArray<TNode>.Builder>();
+        var groupOrder = new List<TGroup>();
+        var unassignedNodes = ImmutableArray.CreateBuilder<TNode>();
+        foreach (var node in graph.Nodes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var group = groups[node] = groupOf(node);
+            if (group is null) { unassignedNodes.Add(node); continue; }
+            if (!memberships.TryGetValue(group, out var members))
+            { memberships[group] = members = ImmutableArray.CreateBuilder<TNode>(); groupOrder.Add(group); }
+            members.Add(node);
+        }
         var buckets = new Dictionary<(TGroup, TGroup, TKey), ImmutableArray<TEdge>.Builder>();
         var order = new List<(TGroup From, TGroup To, TKey Key)>();
         var unassigned = ImmutableArray.CreateBuilder<TEdge>();
         foreach (var edge in graph.Edges)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (Group(edge.Source) is not { } from || Group(edge.Target) is not { } to) { unassigned.Add(edge); continue; }
+            if (groups[edge.Source] is not { } from || groups[edge.Target] is not { } to) { unassigned.Add(edge); continue; }
             var key = (from, to, keyOf(edge));
             if (!buckets.TryGetValue(key, out var bucket)) { buckets[key] = bucket = ImmutableArray.CreateBuilder<TEdge>(); order.Add(key); }
             bucket.Add(edge);
         }
-        return new([.. order.Select(x => new QuotientEdge<TGroup, TKey, TEdge>(x.From, x.To, x.Key, buckets[x].ToImmutable()))], unassigned.ToImmutable());
+        return new([.. order.Select(x => new QuotientEdge<TGroup, TKey, TEdge>(x.From, x.To, x.Key, buckets[x].ToImmutable()))], unassigned.ToImmutable(),
+            [.. groupOrder.Select(group => new QuotientNode<TNode, TGroup>(group, memberships[group].ToImmutable()))], unassignedNodes.ToImmutable());
     }
 
     // Strongly connected components (Tarjan, iterative). Components come in reverse topological order of the

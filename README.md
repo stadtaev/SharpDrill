@@ -4,6 +4,7 @@ Sharpview is a C# research tool for understanding ASP.NET Core Web APIs from sou
 
 - **Call paths** from controller actions down through your architectural layers.
 - **Explicit exceptions** that may escape an action, and the handlers in between.
+- **Mermaid diagrams** for a selected controller action, grouped by project.
 - **Layer dependencies**, checked against the architecture you declare.
 
 Results carry source evidence (file:line:column), and anything the analysis cannot decide is reported as *Unknown* instead of being hidden. It uses the .NET SDK and Roslyn; Visual Studio is not required.
@@ -27,7 +28,8 @@ F=tests/Fixtures/ResearchSolution/ResearchSolution.slnx
 L=(--layer project:Research.Api=API --layer project:Research.Application=Application --layer project:Research.Infrastructure=Infrastructure)
 
 dotnet run --project src/Sharpview.Cli -- reach $F --root 'Research.Api.OrdersController.Get()' "${L[@]}"
-dotnet run --project src/Sharpview.Cli -- exceptions $F --root 'Research.Api.OrdersController.Get()'
+dotnet run --project src/Sharpview.Cli -- exceptions $F --root 'Research.Api.OrdersController.Get()' --summary
+dotnet run --project src/Sharpview.Cli -- diagram $F
 dotnet run --project src/Sharpview.Cli -- layers $F "${L[@]}" --allow API=Application --allow Application=Infrastructure
 ```
 
@@ -40,7 +42,8 @@ Analysing your own solution: restore it first (Sharpview never restores, builds 
 | `reach` | What can each action reach — once per method, with distance, layer and shortest path? | controller actions (or any `--root`) |
 | `controllers` | What are all call paths from each action, with project, layer and transitions? | controller actions |
 | `chains` | All call paths from any method. | every source method |
-| `exceptions` | Where does each explicit throw end up: intercepted, rethrown/replaced, may escape, or unknown? | controller actions |
+| `exceptions` | Where does each explicit throw end up? `--summary` computes possible escapes and uncertainty without enumerating paths. | controller actions |
+| `diagram` | Export a Mermaid call graph in Markdown, grouped by project. | pick one controller action by number |
 | `layers` | Which layers depend on which; with `--allow`, which dependencies break the rules? | — |
 | `methods` | List extracted callables with their IDs (to pick a `--root`). | — |
 | `inspect` | Summary, or the full fact snapshot with `--format json`. | — |
@@ -53,16 +56,42 @@ Sample outputs for each are in [docs/samples](docs/samples/README.md). Run `--he
 - **Roots:** `--root '<exact signature>'` (copy it from `methods`) or `--root-id <id>` when signatures collide.
 - **Layers:** repeatable `--layer project:<prefix>=<name>`, `--layer namespace:<prefix>=<name>` (namespaces and nested namespaces) or `--layer type:<prefix>=<name>` (a type and its nested types). Longest prefix wins; a project mapping wins a tie. Layers come only from these mappings.
 - **Layer rules:** repeatable `--allow <from>=<to>[,<to>...]` (with `layers`). Same-layer dependencies are always allowed.
-- **Dispatch:** interface, virtual, delegate, dynamic and unresolved calls are visible boundaries. `reach --follow-candidates` also follows implementation candidates, marked `(candidate)`; `chains --dispatch direct` marks excluded dispatch while keeping its declared target.
+- **Dispatch:** interface, virtual, delegate, dynamic and unresolved calls are visible boundaries. `reach --follow-candidates` and `diagram --follow-candidates` also follows implementation candidates, marked `(candidate)`; `chains --dispatch direct` marks excluded dispatch while keeping its declared target.
 - **Limits:** `--max-depth` (default 20 transitions), `--max-chains` (1,000 results), `--max-expansions` (100,000 examined call sites). Reaching a limit is always reported.
+- **Summary budgets:** `exceptions --summary --max-expansions 100000 --max-facts 100000` bounds summary work and retained effects. Summary mode has no path-depth or chain-output option.
 - **Evidence:** `--locations` prints call-site locations for paths and reach witnesses.
 - **Output:** `inspect --format json` writes schema version 3 (IDs are plain strings) to stdout or `--output <new file>` (never overwrites). Diagnostics go to stderr. Ctrl+C cancels cleanly.
+
+### Export a diagram
+
+```sh
+# Lists numbered controller actions; enter a number, or q to cancel.
+dotnet run --project src/Sharpview.Cli -- diagram tests/Fixtures/ResearchSolution/ResearchSolution.slnx
+
+# Select directly for scripts. --root-id also accepts an action ID from inspect/methods.
+dotnet run --project src/Sharpview.Cli -- diagram tests/Fixtures/ResearchSolution/ResearchSolution.slnx \
+  --root 'Research.Api.OrdersController.Get()' --output /tmp/orders-get.md
+```
+
+Default exports go to `diagrams_exports` beside `Sharpview.Cli.dll` (or the published binary), independently of the
+terminal's working directory. After the write succeeds, stdout contains `Saved diagram: /full/absolute/path.md`.
+Existing files are never overwritten. EOF or `q` exits without exporting. Custom output paths require an existing parent directory.
+
+The Markdown contains a Mermaid `flowchart TB`, project groups, call-site evidence, and analysis boundaries. Direct calls
+use solid arrows; declared dispatch, unresolved calls and optional implementation candidates use dotted arrows with explicit
+labels. Branches, shared callees, parallel call sites and recursive edges survive the projection. Project groups do not imply
+architectural layers or exact runtime ordering. Display names are escaped before being used as diagram labels.
+
+Defaults are 20 call transitions, 200 nodes, 1,000 edges and 100,000 examined sites. Adjust `--max-depth`, `--max-nodes`,
+`--max-edges` or `--max-expansions`; truncation is visible in both Markdown and stdout. Boundary nodes count toward the node
+budget. These limits apply to the export projection; Roslyn loading and whole-program graph construction occur first.
+A saved file can return exit code 1 because it contains useful but partial results.
 
 ### Exit codes
 
 | Code | Meaning |
 | --- | --- |
-| 0 | Completed within the model, with no gaps, boundaries, limits or findings. |
+| 0 | Completed within the model, with no gaps, boundaries, limits or findings; also a cancelled diagram selection or no recognised actions. |
 | 1 | Usable output, but with gaps, Unknown results, boundaries, limits or rule violations. The sample fixture returns 1 on purpose (top-level statements and external bodies are out of scope). |
 | 2 | Invalid request or fatal load error. |
 | 130 | Cancelled. |
@@ -81,6 +110,9 @@ Sample outputs for each are in [docs/samples](docs/samples/README.md). Run `--he
     - **Unknown**, with a reason. Causes include dispatch, missing bodies, filters, `finally`, async void, unobserved or aliased tasks, and depth limits.
   - Directly awaited task-producing calls propagate.
   - One action can show an intercepted origin next to Unknown results for other calls; each witness stands alone.
+  - `--summary` computes a finite fixed point over direct-call strongly connected components. Recursion alone does not make a summary unknown. Origins remain distinct even when their exception types match; call-site catches transform each incoming effect separately.
+  - Summary effects and uncertainty coexist. Unknown effects propagate conservatively, including through catch-all handlers, because a missing body or extraction gap may represent more than a normally thrown exception. A summary does not prove the absence of runtime exceptions.
+  - A summary witness is one example for an escaping effect, reconstructed on demand. Detailed mode still reports intercepted origins and individual paths under its own bounds.
   - Implicit exceptions and branch feasibility are not modelled.
   - `UseExceptionHandler`, `AddExceptionHandler` and `UseDeveloperExceptionPage` registrations are listed separately as *boundary evidence*. They do not prove middleware order or coverage; see Microsoft's [exception-handling documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling?view=aspnetcore-10.0).
 - **Layer edges.**
@@ -107,6 +139,12 @@ var actions = AspNetConventions.ControllerActions(index, cancellationToken).Sele
 var reach = ReachabilityQuery.Analyze(index, actions, new ReachOptions(), cancellationToken);
 var paths = CallChainQuery.Enumerate(index, actions, new ChainOptions(), cancellationToken);
 var exceptions = ExceptionQuery.Analyze(index, actions, new ChainOptions(), cancellationToken);
+var summaries = ExceptionSummaryQuery.Analyze(index, actions, new ExceptionSummaryOptions(), cancellationToken);
+if (!actions.IsEmpty)
+{
+    var diagram = CallDiagramQuery.Build(index, actions[0], new DiagramOptions(), cancellationToken);
+    var markdown = MermaidExporter.Markdown(diagram);
+}
 
 var model = new LayerModel(
     [new(LayerScope.Project, "Orders.Api", "API"), new(LayerScope.Project, "Orders.Infrastructure", "Infrastructure")],
@@ -115,7 +153,10 @@ var graph = LayerGraph.Build(index, new LayerMap(index, model), cancellationToke
 var findings = LayerRules.AllowedDependencies(graph, model); // Finding(RuleId, Verdict, Subject, Message, Evidence)
 ```
 
-- `index.CallGraph` and `index.DependencyGraph` expose the whole program as graphs (`Sharpview.Graph`: out/in edges, BFS shortest paths, reachability, quotient by group, strongly connected components).
+- `index.GetCallGraph(cancellationToken)` and `index.GetDependencyGraph(cancellationToken)` lazily publish complete cached graphs; the tokenless properties remain available. They expose the whole program as graphs (`Sharpview.Graph`: out/in edges, BFS shortest paths, reachability, quotient by group, strongly connected components).
+- `CallEdge.Id` identifies a specific site/kind/target relationship. Quotients retain every group, original node membership and supporting edge, including isolated groups. Quotients are presentation/aggregation models; collapsing groups can invent apparent paths, so method exception analysis uses the original graph.
+- `Where` and `Subgraph` materialize new graphs; they share payload objects. Generic graph consumers must keep node equality/hash codes and edge endpoints stable.
+- Reach stores shared parent links and constructs witness arrays only when requested. Completed searches report shortest allowed distances; truncated searches retain consistent admitted paths. `ViaCandidate` means no bounded direct-only route was established, while `WitnessUsesCandidate` describes the selected shortest witness. A shorter candidate witness can coexist with a longer direct route.
 - Snapshots contain no Roslyn symbols and stay usable after the workspace is disposed.
 - A rule is a plain function returning `Finding`s. Keep `Verdict.Unknown` separate from `Pass`. See the worked example in the [overview](docs/overview.md#writing-your-own-rule).
 - Exception witnesses carry a machine-readable `ExceptionReason` next to the human-readable `Reason`.

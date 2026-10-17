@@ -31,7 +31,7 @@ public sealed class GraphTests
     }
 
     [Fact]
-    public void Where_and_subgraph_are_views_that_keep_order()
+    public void Where_and_subgraph_materialize_graphs_that_keep_order()
     {
         var graph = Graph(("A", "B"), ("B", "C"), ("A", "C"), ("C", "D"));
         var filtered = graph.Where(x => x.Target != "C");
@@ -87,6 +87,47 @@ public sealed class GraphTests
     }
 
     [Fact]
+    public void Phased_search_reopens_nodes_when_a_shorter_seed_arrives()
+    {
+        var graph = Graph(("R", "A"), ("A", "B"), ("B", "C"), ("C", "Y"), ("R", "X"), ("X", "Y"), ("Y", "Z"));
+        var search = new BreadthFirstSearch<string, Edge>(graph, expand: (_, d) => d < 4);
+        search.AddSource("R");
+        var deferred = new List<Edge>();
+        search.Run(e => { if (e.Label is "C>Y" or "R>X") { deferred.Add(e); return false; } return true; });
+        foreach (var edge in deferred.AsEnumerable().Reverse()) search.Relax(edge);
+        search.Run();
+        Assert.Equal(2, search.Distance("Y"));
+        Assert.Equal(3, search.Distance("Z"));
+        Assert.Equal(["R>X", "X>Y", "Y>Z"], search.PathTo("Z").Select(e => e.Label));
+        Assert.True(search.IsExpanded("Y"));
+    }
+
+    [Fact]
+    public void Late_source_improves_previously_expanded_descendants_and_validates_relax_endpoints()
+    {
+        var graph = Graph(("R", "A"), ("A", "B"), ("B", "C"));
+        var search = new BreadthFirstSearch<string, Edge>(graph);
+        search.AddSource("R"); search.Run();
+        search.AddSource("B"); search.Run();
+        Assert.Equal(0, search.Distance("B"));
+        Assert.Equal(1, search.Distance("C"));
+        Assert.Equal(["B>C"], search.PathTo("C").Select(e => e.Label));
+        Assert.Throws<KeyNotFoundException>(() => search.Relax(new Edge("R", "outside")));
+        Assert.Throws<KeyNotFoundException>(() => search.Relax(new Edge("outside", "R")));
+    }
+
+    [Fact]
+    public void Budget_stop_preserves_distance_and_witness_consistency_after_a_late_source()
+    {
+        var search = new BreadthFirstSearch<string, Edge>(Graph(("R", "A"), ("A", "B"), ("B", "C")), budget: 3);
+        search.AddSource("R"); search.Run();
+        search.AddSource("B"); search.Run();
+        Assert.True(search.BudgetExhausted);
+        Assert.Equal(search.Distance("C"), search.PathTo("C").Length);
+        Assert.Equal(["R>A", "A>B", "B>C"], search.PathTo("C").Select(e => e.Label));
+    }
+
+    [Fact]
     public void Quotient_buckets_edges_by_group_and_key_and_keeps_unassigned_edges()
     {
         var graph = Graph(("api1", "app1"), ("api2", "app1"), ("app1", "infra"), ("api1", "lib"), ("lib", "app1"), ("app1", "app2"));
@@ -95,6 +136,19 @@ public sealed class GraphTests
         Assert.Equal(["api>app:edge:2", "app>infra:edge:1", "app>app:edge:1"],
             quotient.Edges.Select(x => $"{x.From}>{x.To}:{x.Key}:{x.Edges.Length}"));
         Assert.Equal(["api1>lib", "lib>app1"], quotient.Unassigned.Select(x => x.Label));
+    }
+
+    [Fact]
+    public void Quotient_keeps_isolated_groups_memberships_and_parallel_supporting_edges()
+    {
+        var builder = DiGraph<string, Edge>.CreateBuilder().AddNode("isolated").AddNode("ungrouped");
+        builder.AddEdge(new("a1", "b", "first")).AddEdge(new("a2", "b", "second")).AddEdge(new("a1", "b", "parallel"));
+        var quotient = builder.Build().Quotient(n => n == "ungrouped" ? null : n.TrimEnd('1', '2'), _ => "calls");
+        Assert.Equal(["isolated", "a", "b"], quotient.Nodes.Select(n => n.Group));
+        Assert.Equal(["a1", "a2"], Assert.Single(quotient.Nodes, n => n.Group == "a").Members.AsEnumerable());
+        Assert.Equal(["isolated"], quotient.Nodes[0].Members.AsEnumerable());
+        Assert.Equal(["first", "second", "parallel"], Assert.Single(quotient.Edges).Edges.Select(e => e.Label));
+        Assert.Equal(["ungrouped"], quotient.UnassignedNodes.AsEnumerable());
     }
 
     [Fact]

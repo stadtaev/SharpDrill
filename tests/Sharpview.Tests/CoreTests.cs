@@ -39,6 +39,217 @@ public sealed class CoreTests
         ExceptionQuery.Analyze(snapshot, [new("Action")], new()).Results, x => x.Origin == new ThrowSiteId("origin"));
 
     [Fact]
+    public void Exception_summary_closed_recursion_has_no_escape_or_cycle_unknown()
+    {
+        var snapshot = Snapshot([Method("Action"), Method("Loop")],
+            [Call("Action", "Loop", "forward"), Call("Loop", "Action", "back")]);
+        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        Assert.Empty(result.Roots[new CallableId("Action")].Escapes);
+        Assert.Empty(result.Roots[new CallableId("Action")].Unknowns);
+        Assert.True(result.Roots[new CallableId("Action")].IsComplete);
+    }
+
+    [Fact]
+    public void Exception_summary_preserves_origins_across_recursive_calls_and_reconstructs_acyclic_witness()
+    {
+        var snapshot = Snapshot([Method("Action"), Method("Loop")],
+            [Call("Action", "Loop", "forward"), Call("Loop", "Action", "back")],
+            [Throw("Loop", "one"), Throw("Loop", "two")]);
+        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        Assert.Equal(new[] { "one", "two" }, result.Roots[new CallableId("Action")].Escapes.Select(x => x.Origin.Value).Order());
+        Assert.Empty(result.Roots[new CallableId("Action")].Unknowns);
+        var witness = result.GetWitness(new CallableId("Action"), new ThrowSiteId("one"));
+        Assert.Equal(new[] { "Action", "Loop" }, witness.Path.Select(x => x.Value));
+        Assert.Equal(new[] { "forward" }, witness.Sites.Select(x => x.Value));
+    }
+
+    [Fact]
+    public void Exception_summary_transfers_each_diamond_call_site_independently()
+    {
+        var snapshot = Snapshot([Method("Action"), Method("Left"), Method("Right"), Method("Shared")],
+            [Call("Action", "Left", "al"), Call("Action", "Right", "ar"),
+             Call("Left", "Shared", "ls", regions: ["try"]), Call("Right", "Shared", "rs")],
+            [Throw("Shared")], [Handler("catch", "Left", HandlerOutcome.Intercepts)], [Region("try", "Left", "catch")]);
+        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        Assert.Single(result.Roots[new CallableId("Action")].Escapes);
+        Assert.Empty(result.Crossings[new CallSiteId("ls")].Escapes);
+        Assert.Single(result.Crossings[new CallSiteId("rs")].Escapes);
+        Assert.Equal(new[] { "Action", "Right", "Shared" }, result.GetWitness(new CallableId("Action"), new ThrowSiteId("origin")).Path.Select(x => x.Value));
+    }
+
+    [Fact]
+    public void Exception_summary_keeps_known_escape_beside_unknown_boundary()
+    {
+        var snapshot = Snapshot([Method("Action"), Method("Leaf")],
+            [Call("Action", "Leaf", "known"), Call("Action", "Missing", "missing")], [Throw("Leaf")]);
+        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        Assert.Single(result.Roots[new CallableId("Action")].Escapes);
+        Assert.Contains(result.Roots[new CallableId("Action")].Unknowns, x => x.ReasonCode == ExceptionReason.UnresolvedTarget);
+        Assert.False(result.Roots[new CallableId("Action")].IsComplete);
+    }
+
+    [Theory]
+    [InlineData(HandlerOutcome.Rethrows, "Exception")]
+    [InlineData(HandlerOutcome.Replaces, "OtherException")]
+    public void Exception_summary_preserves_origin_and_applies_handler_transformation_per_site(HandlerOutcome outcome, string expectedType)
+    {
+        var next = Throw("Middle", "next", Type("OtherException")) with
+        { CatchId = new CatchId("catch"), Kind = outcome == HandlerOutcome.Rethrows ? ThrowKind.Rethrow : ThrowKind.Explicit };
+        var snapshot = Snapshot([Method("Action"), Method("Middle"), Method("Leaf")],
+            [Call("Action", "Middle", "am"), Call("Middle", "Leaf", "ml", regions: ["try"])],
+            [Throw("Leaf"), next], [Handler("catch", "Middle", outcome, "next")], [Region("try", "Middle", "catch")]);
+        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        var escape = Assert.Single(result.Roots[new CallableId("Action")].Escapes);
+        Assert.Equal(new ThrowSiteId("origin"), escape.Origin);
+        Assert.Equal(new ThrowSiteId("next"), escape.SubsequentOrigin);
+        Assert.Equal(expectedType, escape.ExceptionType);
+        Assert.Equal(ExceptionReason.ChangedMayEscape, escape.ReasonCode);
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void Exception_summary_requires_await_for_task_exception_to_reach_caller_catch(bool awaited, bool complete)
+    {
+        var snapshot = Snapshot([Method("Action"), Method("Operation") with { ReturnsTask = true }],
+            [Call("Action", "Operation", "call", regions: ["try"], awaited: awaited)], [Throw("Operation")],
+            [Handler("catch", "Action", HandlerOutcome.Intercepts)], [Region("try", "Action", "catch")]);
+        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        Assert.Empty(result.Roots[new CallableId("Action")].Escapes);
+        Assert.Equal(complete, result.Roots[new CallableId("Action")].IsComplete);
+        if (!awaited) Assert.Contains(result.Roots[new CallableId("Action")].Unknowns,
+            x => x.ReasonCode == ExceptionReason.UnobservedTask);
+    }
+
+    [Fact]
+    public void Exception_summary_ownerless_gap_marks_root_unknown()
+    {
+        var snapshot = Snapshot([Method("Action")], [], [Throw("Action")]) with
+        { Gaps = [new AnalysisGap(GapKind.Compilation, Project, null, "Compilation incomplete", Evidence)] };
+        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        Assert.Single(result.Roots[new CallableId("Action")].Escapes);
+        Assert.Contains(result.Roots[new CallableId("Action")].Unknowns,
+            x => x.ReasonCode == ExceptionReason.ExtractionGap && x.Message == "Compilation incomplete"
+                && x.Evidence == Evidence);
+    }
+
+    [Fact]
+    public void Detailed_exception_query_reports_ownerless_gap_for_selected_root()
+    {
+        var snapshot = Snapshot([Method("Action")], []) with
+        { Gaps = [new AnalysisGap(GapKind.Compilation, Project, null, "Compilation incomplete", Evidence)] };
+        var result = ExceptionQuery.Analyze(snapshot, [new("Action")], new());
+        Assert.Contains(result.Results, x => x.Action == new CallableId("Action")
+            && x.ReasonCode == ExceptionReason.ExtractionGap && x.Reason == "Compilation incomplete");
+    }
+
+    [Fact]
+    public void Exception_summary_work_and_fact_budgets_mark_all_roots_incomplete()
+    {
+        var snapshot = Snapshot([Method("Action"), Method("Middle"), Method("Leaf")],
+            [Call("Action", "Middle", "am"), Call("Middle", "Leaf", "ml")], [Throw("Leaf")]);
+        var work = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")], new(MaxWork: 1));
+        Assert.True(work.WorkLimitReached);
+        Assert.False(work.Roots[new CallableId("Action")].IsComplete);
+        Assert.Contains(work.Roots[new CallableId("Action")].Unknowns, x => x.ReasonCode == ExceptionReason.WorkLimit);
+        var facts = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")], new(MaxFacts: 1));
+        Assert.True(facts.FactLimitReached);
+        Assert.False(facts.Roots[new CallableId("Action")].IsComplete);
+        Assert.Contains(facts.Roots[new CallableId("Action")].Unknowns, x => x.ReasonCode == ExceptionReason.FactLimit);
+        var exact = ExceptionSummaryQuery.Analyze(new ProgramIndex(Snapshot([Method("Action")], [], [Throw("Action")])),
+            [new("Action")], new(MaxWork: 1, MaxFacts: 1));
+        Assert.False(exact.WorkLimitReached);
+        Assert.False(exact.FactLimitReached);
+        Assert.True(exact.Roots[new CallableId("Action")].IsComplete);
+    }
+
+    [Fact]
+    public void Exception_summary_honors_cancellation_and_rejects_invalid_budgets()
+    {
+        var index = new ProgramIndex(Snapshot([Method("Action")], []));
+        Assert.Throws<OperationCanceledException>(() => ExceptionSummaryQuery.Analyze(index, [new("Action")], token: new CancellationToken(true)));
+        Assert.Throws<ArgumentException>(() => ExceptionSummaryQuery.Analyze(index, [new("Action")], new(MaxFacts: 0)));
+    }
+
+    [Theory]
+    [InlineData(false, true, ExceptionReason.CatchFilter)]
+    [InlineData(true, false, ExceptionReason.FinallyUnsupported)]
+    public void Exception_summary_marks_filter_and_finally_boundaries_unknown(bool hasFinally, bool hasFilter, ExceptionReason expected)
+    {
+        var region = Region("try", "Action", "catch") with { HasFinally = hasFinally };
+        var handler = Handler("catch", "Action", HandlerOutcome.Intercepts, filter: hasFilter ? "condition" : null);
+        var snapshot = Snapshot([Method("Action")], [], [Throw("Action", regions: ["try"])], [handler], [region]);
+        var summary = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]).Roots[new CallableId("Action")];
+        Assert.Empty(summary.Escapes);
+        Assert.Contains(summary.Unknowns, x => x.ReasonCode == expected && x.Origin == new ThrowSiteId("origin"));
+    }
+
+    [Fact]
+    public void Exception_summary_budget_marks_crossing_effects_incomplete()
+    {
+        var snapshot = Snapshot([Method("Action"), Method("Leaf")], [Call("Action", "Leaf", "al")], [Throw("Leaf")]);
+        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")], new(MaxWork: 1));
+        var crossing = result.Crossings[new CallSiteId("al")];
+        Assert.False(crossing.IsComplete);
+        Assert.Contains(crossing.Unknowns, x => x.ReasonCode == ExceptionReason.WorkLimit);
+    }
+
+    [Fact]
+    public void Exception_summary_marks_unresolved_crossing_unknown_with_evidence()
+    {
+        var snapshot = Snapshot([Method("Action")], [Call("Action", "Missing", "missing")]);
+        var crossing = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")])
+            .Crossings[new CallSiteId("missing")];
+        Assert.False(crossing.IsComplete);
+        Assert.Contains(crossing.Unknowns, x => x.ReasonCode == ExceptionReason.UnresolvedTarget
+            && x.Evidence == Evidence);
+    }
+
+    [Fact]
+    public void Exception_summary_marks_unbound_type_at_call_site_without_claiming_escape()
+    {
+        var snapshot = Snapshot([Method("Action"), Method("Leaf")], [Call("Action", "Leaf", "al")],
+            [Throw("Leaf") with { StaticExceptionType = null, ExactExceptionType = null, IsExactType = false }]);
+        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        Assert.Empty(result.Crossings[new CallSiteId("al")].Escapes);
+        Assert.Contains(result.Crossings[new CallSiteId("al")].Unknowns,
+            x => x.ReasonCode == ExceptionReason.UnboundExceptionType && x.Origin == new ThrowSiteId("origin"));
+        Assert.False(result.Roots[new CallableId("Action")].IsComplete);
+    }
+
+    [Fact]
+    public void Exception_summary_witness_overload_selects_changed_effect_for_same_origin()
+    {
+        var snapshot = Snapshot([Method("Action"), Method("Left"), Method("Right"), Method("Leaf")],
+            [Call("Action", "Left", "al"), Call("Action", "Right", "ar"),
+             Call("Left", "Leaf", "ll", regions: ["try"]), Call("Right", "Leaf", "rl")],
+            [Throw("Leaf")], [Handler("catch", "Left", HandlerOutcome.Rethrows)], [Region("try", "Left", "catch")]);
+        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        var escapes = result.Roots[new CallableId("Action")].Escapes;
+        Assert.Equal(2, escapes.Length);
+        var changed = Assert.Single(escapes, x => x.ReasonCode == ExceptionReason.ChangedMayEscape);
+        Assert.Equal(new[] { "Action", "Left", "Leaf" }, result.GetWitness(new CallableId("Action"), changed).Path.Select(x => x.Value));
+    }
+
+    [Fact]
+    public void Exception_summary_long_chain_keeps_provenance_compact_until_witness_requested()
+    {
+        const int transitions = 3000;
+        var methods = Enumerable.Range(0, transitions + 1).Select(i => Method($"M{i}")).ToArray();
+        var calls = Enumerable.Range(0, transitions).Select(i => Call($"M{i}", $"M{i + 1}", $"site{i}")).ToArray();
+        var index = new ProgramIndex(Snapshot(methods, calls, [Throw($"M{transitions}")]));
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var result = ExceptionSummaryQuery.Analyze(index, [new("M0")]);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.True(allocated < 80_000_000, $"Summary allocated {allocated:N0} bytes before witness reconstruction.");
+        var escape = Assert.Single(result.Roots[new CallableId("M0")].Escapes);
+        var witness = result.GetWitness(new CallableId("M0"), escape);
+        Assert.Equal(transitions + 1, witness.Path.Length);
+        Assert.Equal(transitions, witness.Sites.Length);
+        Assert.Equal(new CallableId($"M{transitions}"), witness.Path[^1]);
+    }
+
+    [Fact]
     public void Snapshot_ids_serialize_as_plain_strings_and_round_trip()
     {
         var snapshot = Snapshot([Method("Action"), Method("Leaf")], [Call("Action", "Leaf", "al", regions: ["try"])],

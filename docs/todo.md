@@ -2,49 +2,55 @@
 
 ## Analytical graph for agents and visualisation
 
-**Idea.** Enrich the whole-program graph with analytical information, such as the exceptions a call can throw and the dependencies of each element. The enriched graph is then the shared source for agentic analysis and for visualisations.
+The immutable method graph is the common source for queries and projections. The initial graph corrections, exception
+summary engine and action Mermaid export are implemented; see [the detailed change document](changes/2026-10-18-graph-analysis-and-mermaid.md).
 
-### Design rule: context-free facts on the graph, context-dependent results beside it
+### Placement and semantics
 
-| Information | Depends on | Where it belongs |
+| Information | Depends on | Location |
 | --- | --- | --- |
-| Project, layer, type, signature, location, kind | nothing | node attribute |
-| Exceptions thrown locally in a method | nothing | node attribute |
-| Exceptions a method may let escape (summary) | the method and its callees, not the caller | node attribute (computed) |
-| Dispatch kind, call-site location, awaited, protected `try` regions | the call site | edge attribute |
-| Exceptions crossing a specific call | callee summary minus what that site's catches intercept | edge attribute |
-| Dependencies, fan-in/out, cycle membership (SCC) | nothing | node attribute |
-| Distance from an action, "escapes action X", witness path | a root and a path | not on the graph: overlays keyed by root, or query results |
+| Project/type/signature/declaration | snapshot and stable identity | callable facts/index |
+| Dispatch, call-site evidence, awaited flag, protected regions | call site | call-edge site fact |
+| Local explicit origins | source body | throw facts |
+| Possible escaping effects and uncertainty | snapshot, analysis policy and callees | immutable method summaries beside the graph |
+| Effects crossing a particular call | callee effects and that site's transfer | crossing summaries keyed by call-site ID |
+| SCC membership, fan-in/out, architectural mappings | snapshot and configuration | derived views/overlays |
+| Root distance, candidate provenance and witness | root and traversal policy | query result |
 
-**Why the split matters.** A `catch` protects a call site, not a method, so one method can be intercepted on one path and escape on another. Storing "exception status" on a node would be wrong. Storing the escape summary on the node and the per-site filtering on the edge is exact.
+A catch protects a call site. Transfer is not simple type-set subtraction: matching can be uncertain; filters/finally can
+change flow; rethrow/replacement changes provenance; task observation changes propagation. The supported transfer code is
+shared by detailed and summary analysis. Computed summaries are scoped to a snapshot and options, not mutable global truth.
 
-### Plan
+### Implemented
 
-1. **Attribute layers, not graph mutation.** Keep `DiGraph` generic and immutable. Add typed attribute layers, the equivalent of NetworkX node/edge attribute dicts, for example `NodeAttributes<CallableId, ExceptionSummary>` and `EdgeAttributes<CallEdge, CrossingExceptions>`. Each analysis adds a layer independently. Every value carries evidence and uncertainty (`Unknown` plus a reason code).
-2. **Exception summaries bottom-up.**
-   - **Order:** `StronglyConnectedComponents` already returns components in reverse topological order, so callees are processed before callers.
-   - **Cycles:** a small fixpoint inside each cyclic component; Unknown is sticky.
-   - **Performance:** linear in graph size, replacing the exponential path enumeration in `ExceptionQuery`.
-   - **Witnesses:** store one "came from" edge per (method, exception), like BFS parent pointers, so a witness path can be rebuilt on demand.
-3. **Export with levels.**
-   - **Agents:** node-link JSON with all attribute layers, loadable directly with `networkx.node_link_graph`.
-   - **Visualisation:** quotient views (project, layer, type) with aggregated attributes, e.g. "exceptions escaping Infrastructure into Application", plus per-action slices via `ReachableFrom`/`Subgraph`. Candidate formats: DOT, Mermaid.
+- Directed multigraph with stable semantic call-edge IDs, adjacency in both directions, SCCs and quotient membership.
+- Correct distance improvement across phased seeds and late sources. Work truncation preserves coherent admitted paths.
+- Lazy reach witnesses, independent direct-only classification, per-root truncation and explicit uncertainties.
+- Finite origin-preserving exception effects, SCC scheduling, monotone fixed points, per-site transfer and bounded work/facts.
+  Recursion alone is not unknown. Known effects coexist with uncertainty; one example witness is reconstructed on request.
+- `diagram` numbered action selection or `--root`/`--root-id`, bounded graph projection, project groups and Mermaid Markdown.
+  The command prints the absolute saved path. Raw full-program rendering is deliberately not the default.
 
-The suggested first increment is step 2 (exception summaries). It is the most valuable attribute, it replaces the exponential path enumeration, and it proves the attribute-layer design.
+### Next increments
 
-### Concerns
-
-- **Summaries answer "can", witnesses answer "how".** Agents usually need both, so keep the "came from" pointers. They cost little memory.
-- **Uncertainty compounds upward.** One Unknown deep in the graph marks every caller's summary as partially Unknown. That is honest, but reports must say *why* (reason codes and a source pointer), or agents will over-trust or over-discount results.
-- **Size is fine for analysis, not for raw rendering.** A 100k-edge graph is small in memory, but call-level drawings become unreadable beyond a few hundred nodes. Always quotient or slice before visualising.
-- **Do not create a second source of truth.** Attributes are derived from the snapshot facts. Exports are views, never re-imported as facts.
-- **Do not store root-dependent results on nodes.** Distances, per-action statuses and witness paths stay overlays or query results.
+- Typed reusable attribute-layer container if a second independent analysis demonstrates a useful common interface.
+  Current exception summaries already provide typed immutable dictionaries; avoid an untyped attribute bag.
+- Agent node-link JSON with schema/version, stable node/edge IDs, memberships and provenance, followed by NetworkX import
+  verification. Treat exports as projections; never re-import them as extraction facts.
+- Additional DOT/project/type/layer diagrams. Keep supporting edges and membership so aggregation is reversible for
+  explanations. Group collapse can introduce apparent paths; analyze exceptions on the method graph.
+- Evaluate conservative uncertainty categories so some unknown throws can safely be intercepted at catch-all sites.
+  Unsupported control flow or extraction gaps cannot generally be removed this way.
+- Performance measurement on representative large solutions. Costs depend on effects, call sites and fixed-point work;
+  do not claim summary propagation is linear solely in graph size. Graph preparation currently materializes all candidate
+  edges even when a particular query does not follow candidates.
+- Consider demand-driven candidate adjacency and cancellation-aware generic graph materialization for very large inputs.
 
 ## Other open items
 
-- Move `CallChainQuery` (`chains`, `controllers`) and `ExceptionQuery` onto `CallGraph`. They still use their own depth-first searches with per-path state.
-- `reach`:
-  - add a per-root truncation flag when the work budget stops mid-root (today only the global flag shows it);
-  - skip the depth-limit boundary when every callee past the limit is already reached.
+- Move detailed `CallChainQuery` / `ExceptionQuery` traversal onto shared graph operations if it reduces duplication while
+  retaining call-site/path-sensitive reporting. Their bounded enumeration is still useful for detailed explanations.
 - Event types are not dependency sources yet (documented in coverage).
-- Validate on an external Web API; so far only the repository fixture and Sharpview itself.
+- Validate against an external Web API with a working restore configuration. The earlier API archive's configured package
+  feed returned HTTP 404; repository fixtures and Sharpview remain the available validation inputs.
+- Extend extraction ownership for top-level/initializer callables, minimal APIs and inherited action enumeration.

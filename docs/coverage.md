@@ -66,3 +66,18 @@ Implementation candidates come from source types' interface maps and overrides; 
 ## How this is verified
 
 Tests combine independently built Core snapshots, in-memory Roslyn compilations, a three-project Web API fixture and fresh CLI processes (see [validation](validation.md)). Sharpview's own solution is used only as a loader smoke input; no external Web API analysis is claimed yet.
+
+
+## Graph analysis and diagram exports
+
+- Generic directed multigraph: both adjacency directions, parallel edges, deterministic insertion order, phased shortest-path
+  relaxation, quotient groups with original memberships (including isolated nodes), and iterative SCC discovery.
+- Reach: shared immutable parent links, lazy witness arrays, independent direct/candidate classification, per-root work
+  truncation, and explicit dispatch/unresolved/body/depth boundaries. A work stop can leave a valid nonoptimal path.
+- Exception summaries: bottom-up direct-call SCC fixed points over explicit origins, per-site transfers, finite fact identities,
+  reconstructed example witnesses, separate uncertainty and work/fact limits. Detailed witness enumeration is still available.
+  Unknown propagation is conservative; summaries do not remove arbitrary unknown effects merely because a catch-all exists.
+- Mermaid: one controller action selected interactively or by exact signature/ID, project groups, branches/shared nodes/cycles,
+  parallel sites, escaped labels, evidence, uncertainty boundaries and visible truncation. Default limits apply after loading
+  and whole-program graph preparation. Inherited actions, minimal APIs and implicit database/framework operations remain out
+  of scope; a graph ends at the bodies/bindings the extractor can establish.

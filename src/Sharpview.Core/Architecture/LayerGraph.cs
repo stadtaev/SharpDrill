@@ -21,6 +21,7 @@ public sealed record LayerGraph(ImmutableArray<LayerEdge> Edges, int ExternalRef
     // (not analysed source) are not program edges and are skipped.
     public static LayerGraph Build(ProgramIndex index, LayerMap map, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var edges = new List<LayerEdge>();
         var external = 0;
 
@@ -39,13 +40,14 @@ public sealed record LayerGraph(ImmutableArray<LayerEdge> Edges, int ExternalRef
             external += quotient.Unassigned.Count(sourceInGroup);
         }
 
-        var calls = index.CallGraph.Graph.Where(x => !x.IsDeclaredTargetCandidate)
+        var callGraph = index.GetCallGraph(cancellationToken);
+        var calls = callGraph.Graph.Where(x => !x.IsDeclaredTargetCandidate)
             .Quotient(CallableLayer, x => x.Kind switch { CallEdgeKind.Direct => LayerEdgeKind.DirectCall, CallEdgeKind.Declared => LayerEdgeKind.DeclaredCall, _ => LayerEdgeKind.CandidateCall }, cancellationToken);
         Collect(calls, x => (x.Site.Evidence, index.Callable(x.Source).DisplaySignature, index.Callable(x.Target).DisplaySignature), x => CallableLayer(x.Source) is not null);
-        var unresolved = index.CallGraph.UnresolvedSites.Count(x => CallableLayer(x.Caller) is not null);
+        var unresolved = callGraph.UnresolvedSites.Count(x => CallableLayer(x.Caller) is not null);
 
         // Callable-owned facts take the callable's layer, which is its declaring type's layer.
-        var dependencies = index.DependencyGraph.Where(x => map.IsSource(x.OwnerCallable is { } owner ? index.Callable(owner).Compilation : index.Type(x.Source).Compilation))
+        var dependencies = index.GetDependencyGraph(cancellationToken).Where(x => map.IsSource(x.OwnerCallable is { } owner ? index.Callable(owner).Compilation : index.Type(x.Source).Compilation))
             .Quotient(TypeLayer, _ => LayerEdgeKind.TypeDependency, cancellationToken);
         Collect(dependencies, x => (x.Fact.Evidence, x.OwnerCallable is { } owner ? index.Callable(owner).DisplaySignature : index.Type(x.Source).DisplayName,
             index.Type(x.Target).DisplayName), x => TypeLayer(x.Source) is not null);

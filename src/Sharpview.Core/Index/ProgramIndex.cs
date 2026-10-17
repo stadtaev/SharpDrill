@@ -26,11 +26,45 @@ public sealed class ProgramIndex
 
     public ProgramSnapshot Snapshot { get; }
 
-    private CallGraph? callGraph;
-    private DiGraph<TypeId, DependencyEdge>? dependencyGraph;
-    // Whole-program graphs, built on first use.
-    public CallGraph CallGraph => callGraph ??= CallGraph.Build(this);
-    public DiGraph<TypeId, DependencyEdge> DependencyGraph => dependencyGraph ??= Sharpview.Core.DependencyGraph.Build(this);
+    private volatile CallGraph? callGraph;
+    private volatile DiGraph<TypeId, DependencyEdge>? dependencyGraph;
+    private readonly SemaphoreSlim callGraphGate = new(1, 1);
+    private readonly SemaphoreSlim dependencyGraphGate = new(1, 1);
+    // Whole-program graphs are published only after a complete, uncancelled build.
+    public CallGraph CallGraph => GetCallGraph();
+    public DiGraph<TypeId, DependencyEdge> DependencyGraph => GetDependencyGraph();
+
+    public CallGraph GetCallGraph(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (callGraph is { } cached) return cached;
+        callGraphGate.Wait(cancellationToken);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (callGraph is { } existing) return existing;
+            var built = Sharpview.Core.CallGraph.Build(this, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            return callGraph = built;
+        }
+        finally { callGraphGate.Release(); }
+    }
+
+    public DiGraph<TypeId, DependencyEdge> GetDependencyGraph(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (dependencyGraph is { } cached) return cached;
+        dependencyGraphGate.Wait(cancellationToken);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (dependencyGraph is { } existing) return existing;
+            var built = Sharpview.Core.DependencyGraph.Build(this, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            return dependencyGraph = built;
+        }
+        finally { dependencyGraphGate.Release(); }
+    }
 
     public ProgramIndex(ProgramSnapshot snapshot)
     {

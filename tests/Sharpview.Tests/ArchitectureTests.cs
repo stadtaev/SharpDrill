@@ -87,6 +87,34 @@ public sealed class ArchitectureTests
     }
 
     [Fact]
+    public async Task Graph_caches_honor_cancellation_and_publish_one_complete_instance()
+    {
+        var index = Program();
+        using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
+        Assert.Throws<OperationCanceledException>(() => index.GetCallGraph(cancelled.Token));
+        Assert.Throws<OperationCanceledException>(() => index.GetDependencyGraph(cancelled.Token));
+        var calls = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() => index.GetCallGraph())));
+        var dependencies = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() => index.GetDependencyGraph())));
+        Assert.All(calls, graph => Assert.Same(calls[0], graph));
+        Assert.All(dependencies, graph => Assert.Same(dependencies[0], graph));
+        Assert.Equal(7, calls[0].Graph.EdgeCount);
+        Assert.Throws<OperationCanceledException>(() => index.GetCallGraph(cancelled.Token));
+        Assert.Throws<OperationCanceledException>(() => index.GetDependencyGraph(cancelled.Token));
+    }
+
+    [Fact]
+    public void Call_edge_ids_distinguish_site_kind_and_target_and_are_stable()
+    {
+        var first = Program().CallGraph.Graph.Edges;
+        Assert.Equal(first.Length, first.Select(e => e.Id).Distinct().Count());
+        Assert.Equal(first.Select(e => e.Id), Program().CallGraph.Graph.Edges.Select(e => e.Id));
+        var edge = first[0];
+        Assert.NotEqual(edge.Id, (edge with { Kind = CallEdgeKind.Candidate }).Id);
+        Assert.NotEqual(edge.Id, (edge with { Target = new CallableId("different") }).Id);
+        Assert.NotEqual(edge.Id, (edge with { Site = edge.Site with { Id = new CallSiteId("different") } }).Id);
+    }
+
+    [Fact]
     public void Layer_graph_aggregates_each_edge_kind_with_stable_witnesses()
     {
         var index = Program();

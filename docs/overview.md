@@ -32,7 +32,7 @@ flowchart LR
 
 `Sharpview.Core` has no Roslyn dependency: once a snapshot exists (or is loaded from JSON), all analysis runs on plain records.
 
-`Sharpview.Graph` is a small generic graph library underneath Core (it knows nothing about C#): an immutable directed multigraph (`DiGraph`) with NetworkX-style operations — out/in edges, successors/predecessors, `Where`, `Subgraph`, breadth-first search with shortest paths, `ReachableFrom`, `Quotient` (collapse nodes into groups such as layers) and `StronglyConnectedComponents` (cycles). Everything keeps insertion order, so results are deterministic. Reachability is a breadth-first search over the call graph, and the layer graph is a quotient of the call and dependency graphs.
+`Sharpview.Graph` is a small generic graph library underneath Core (it knows nothing about C#): an immutable directed multigraph (`DiGraph`) with NetworkX-style operations — out/in edges, successors/predecessors, `Where` and `Subgraph` (materialized copies sharing payload), breadth-first search with shortest paths, `ReachableFrom`, `Quotient` (collapse nodes into groups such as layers) and `StronglyConnectedComponents` (cycles). Everything keeps insertion order, so results are deterministic. Reachability searches the call graph with shared parent links; witnesses materialize on demand. The layer graph is a quotient of the call and dependency graphs, with isolated groups and original node membership retained. Node identities and edge endpoints must remain stable. Cached graph accessors accept cancellation tokens and publish complete graphs only.
 
 ## Principles
 
@@ -53,7 +53,7 @@ Snippets below are from the sample Web API, with names and paths shortened; the 
 | --- | --- | --- |
 | What can this action reach, and through which layers? | `reach` | [reach.txt](samples/reach.txt) |
 | What are all the call paths from an action? | `controllers` (actions) / `chains` (any method) | [controllers.txt](samples/controllers.txt) |
-| Which explicit exceptions can escape an action? | `exceptions` | [exceptions.txt](samples/exceptions.txt) |
+| Which explicit exceptions can escape an action? | `exceptions` / `exceptions --summary` | [exceptions.txt](samples/exceptions.txt) |
 | How do layers depend on each other; are rules broken? | `layers` (+ `--allow`) | [layers.txt](samples/layers.txt) |
 | What did Sharpview extract? | `methods`, `inspect` (`--format json`) | — |
 
@@ -66,7 +66,7 @@ Root: Research.Api.OrdersController.Get()
     Path: OrdersController.Get() --> Service.Load() --> Repository.Read()
 ```
 
-`[n]` is the number of call transitions (not stack depth). Each method appears once with one shortest path. Prefer `reach` over `controllers`/`chains` on large code: path enumeration grows exponentially, reachability does not.
+`[n]` is the number of call transitions (not stack depth). Each method appears once with one shortest allowed path after a complete search. A work-limited result retains a valid admitted path; its distance still agrees with its witness. Candidate-only classification is independent of whether the shortest witness uses a candidate edge. Prefer `reach` over `controllers`/`chains` on large code: path enumeration grows exponentially, reachability does not.
 
 ### `exceptions` — where each explicit throw ends up
 
@@ -127,3 +127,18 @@ Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `Shar
 - [Model reference](model.md) — facts, identities and query semantics in detail.
 - [Validation](validation.md) — which tests prove which behaviour.
 - [Sample reports](samples/README.md) — full outputs on the fixture.
+
+
+## Summary analysis and diagram projections
+
+`ExceptionSummaryQuery` keeps possible escape effects beside the immutable call graph. It processes direct-call SCCs
+bottom-up and joins finite, origin-preserving effects until stable. Catch/rethrow/replacement, awaited calls and unsupported
+flow use the same transfer code as detailed exception witnesses. Per-call-site crossing summaries prevent a catch at one
+site from hiding effects at another. Budgets bound retained facts and transfer work; uncertainty remains explicit. Complexity
+depends on the number of distinct effects, call sites and fixed-point transfers, rather than just the node/edge count.
+
+`CallDiagramQuery` projects a bounded action subgraph without enumerating all paths. `MermaidExporter` formats that projection;
+it does not infer layers or analyze exception behavior. The CLI `diagram` command supplies selection and safe file output.
+Project groups are labels for source ownership; collapsed project/layer graphs must never replace the method graph for
+reachability or exception propagation. See [the implementation change document](changes/2026-10-18-graph-analysis-and-mermaid.md)
+for contracts, defaults, regressions and limitations.

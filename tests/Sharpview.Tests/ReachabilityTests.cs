@@ -70,9 +70,85 @@ public sealed class ReachabilityTests
             [Call("a-iface", "Root", "I.Run", DispatchKind.Interface), Call("b", "Root", "B"), Call("b-impl", "B", "Impl.Run"), Call("leaf", "Impl.Run", "Leaf")],
             [new(new("I.Run"), new("Impl.Run"), ImplementationKind.Interface)]);
         var reach = Reach(index, new(FollowCandidates: true));
-        Assert.Equal(["B@1:b", "Impl.Run@2:b>b-impl", "Leaf@3:b>b-impl>leaf"], reach.Reached.Select(Describe));
+        Assert.Equal(["B@1:b", "Impl.Run@1:a-iface", "Leaf@2:a-iface>leaf"], reach.Reached.Select(Describe));
         Assert.All(reach.Reached, x => Assert.False(x.ViaCandidate));
         Assert.Equal(1, Assert.Single(reach.Boundaries, x => x.Kind == ReachBoundaryKind.Dispatch).CandidatesFollowed);
+    }
+
+    [Fact]
+    public void Shorter_candidate_route_reopens_a_direct_reachable_method_at_the_depth_limit()
+    {
+        var index = Index([Method("Root"), Method("A"), Method("B"), Method("C"), Method("I", BodyStatus.NoBody), Method("Leaf"), Method("End")],
+            [Call("ra", "Root", "A"), Call("ab", "A", "B"), Call("bc", "B", "C"), Call("ri", "Root", "I", DispatchKind.Interface),
+                Call("cl", "C", "Leaf"), Call("le", "Leaf", "End")],
+            [new(new("I"), new("C"), ImplementationKind.Interface)]);
+        var reach = Reach(index, new(FollowCandidates: true, MaxDepth: 3));
+        var c = Assert.Single(reach.Reached, x => x.Callable.Value == "C");
+        Assert.Equal(1, c.Distance);
+        Assert.False(c.ViaCandidate);
+        Assert.True(c.Witness.Single().Candidate);
+        Assert.Equal(3, Assert.Single(reach.Reached, x => x.Callable.Value == "End").Distance);
+        Assert.False(reach.DepthLimitReached);
+        Assert.Single(reach.Boundaries, x => x.Kind == ReachBoundaryKind.Dispatch);
+    }
+
+    [Fact]
+    public void Unresolved_sites_are_charged_individually_in_outgoing_order()
+    {
+        var index = Index([Method("Root"), Method("A")],
+            [Call("known", "Root", "A") with { TargetDisplay = "0" }, Call("u1", "Root", null), Call("u2", "Root", null)]);
+        var result = ReachabilityQuery.Analyze(index, [new("Root")], new(MaxExpansions: 2));
+        Assert.True(result.WorkLimitReached);
+        Assert.Equal(2, result.ExpandedSites);
+        Assert.Equal("A", Assert.Single(result.Roots[0].Reached).Callable.Value);
+        Assert.Equal("u1", Assert.Single(result.Roots[0].Boundaries).Site!.Value.Value);
+    }
+
+    [Fact]
+    public void Depth_boundary_is_suppressed_for_cycles_but_retains_dispatch_and_unresolved_uncertainty()
+    {
+        var cycle = Index([Method("Root"), Method("A")], [Call("ra", "Root", "A"), Call("ar", "A", "Root")]);
+        Assert.Empty(Reach(cycle, new(MaxDepth: 1)).Boundaries);
+        var uncertain = Index([Method("Root"), Method("A"), Method("I", BodyStatus.NoBody)],
+            [Call("ra", "Root", "A"), Call("ar", "A", "Root"), Call("u", "A", null), Call("i", "A", "I", DispatchKind.Interface)]);
+        var reach = Reach(uncertain, new(MaxDepth: 1));
+        Assert.True(reach.DepthLimitReached);
+        Assert.Equal([ReachBoundaryKind.DepthLimit, ReachBoundaryKind.Unresolved, ReachBoundaryKind.Dispatch], reach.Boundaries.Select(b => b.Kind));
+    }
+
+    [Fact]
+    public void Candidate_budget_stop_keeps_witnesses_consistent_and_reports_only_followed_candidates()
+    {
+        var index = Index([Method("Root"), Method("A"), Method("B"), Method("C"), Method("D"), Method("X"),
+                Method("I1", BodyStatus.NoBody), Method("I2", BodyStatus.NoBody), Method("E")],
+            [Call("ra", "Root", "A"), Call("rx", "Root", "I1", DispatchKind.Interface), Call("rc", "Root", "I2", DispatchKind.Interface),
+                Call("ab", "A", "B"), Call("bc", "B", "C"), Call("cd", "C", "D"), Call("xe", "X", "E")],
+            [new(new("I1"), new("X"), ImplementationKind.Interface), new(new("I2"), new("C"), ImplementationKind.Interface)]);
+        var reach = Reach(index, new(FollowCandidates: true, MaxExpansions: 6));
+        Assert.True(reach.WorkLimitReached);
+        Assert.All(reach.Reached, x => { Assert.Equal(x.Distance, x.Witness.Length); Assert.Equal(x.WitnessUsesCandidate, x.Witness.Any(step => step.Candidate)); });
+        var stoppedBeforeCandidates = Reach(index, new(FollowCandidates: true, MaxExpansions: 3));
+        Assert.True(stoppedBeforeCandidates.WorkLimitReached);
+        Assert.All(stoppedBeforeCandidates.Boundaries.Where(x => x.Kind == ReachBoundaryKind.Dispatch), x => Assert.Equal(0, x.CandidatesFollowed));
+    }
+
+    [Fact]
+    public void Long_chain_keeps_parent_links_without_eager_quadratic_witness_arrays()
+    {
+        const int length = 5000;
+        var methods = Enumerable.Range(0, length + 1).Select(i => Method(i == 0 ? "Root" : $"N{i}")).ToArray();
+        var calls = Enumerable.Range(0, length).Select(i => Call($"s{i}", i == 0 ? "Root" : $"N{i}", $"N{i + 1}")).ToArray();
+        var index = Index(methods, calls);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var reach = Reach(index, new(MaxDepth: length));
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.Equal(length, reach.Reached.Length);
+        // Eagerly copying all 12.5 million ReachStep references exceeds 100 MB even before the step objects.
+        // A generous allocation ceiling verifies the storage contract without asserting timing or exact layout.
+        Assert.True(allocated < 80_000_000, $"Reach allocated {allocated:N0} bytes before witnesses were requested.");
+        var last = Assert.Single(reach.Reached, x => x.Callable.Value == $"N{length}");
+        Assert.Equal(length, last.Witness.Length);
+        Assert.Equal(length, last.Distance);
     }
 
     [Fact]

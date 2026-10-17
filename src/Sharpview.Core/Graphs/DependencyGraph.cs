@@ -14,19 +14,36 @@ public static class DependencyGraph
 {
     public static DiGraph<TypeId, DependencyEdge> Build(ProgramIndex index, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var builder = DiGraph<TypeId, DependencyEdge>.CreateBuilder();
-        foreach (var type in index.Snapshot.Types) builder.AddNode(type.Id);
+        foreach (var type in index.Snapshot.Types) { cancellationToken.ThrowIfCancellationRequested(); builder.AddNode(type.Id); }
         foreach (var dependency in index.Snapshot.Dependencies)
         {
             cancellationToken.ThrowIfCancellationRequested();
             CallableId? ownerCallable = dependency.OwningCallable is { } owner && index.ContainsCallable(owner) ? owner : null;
             var source = ownerCallable is { } callable ? index.Callable(callable).DeclaringType ?? dependency.OwningType : dependency.OwningType;
             if (source is not { } from || !index.TryGetType(from, out _)) continue;
-            foreach (var use in dependency.Kind == DependencyKind.Inheritance ? Flatten(dependency.ReferencedType) : [dependency.ReferencedType])
+            foreach (var use in dependency.Kind == DependencyKind.Inheritance ? Flatten(dependency.ReferencedType, cancellationToken) : [dependency.ReferencedType])
+            {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (use.Declaration is { } target && index.TryGetType(target, out _)) builder.AddEdge(new(from, target, dependency, ownerCallable));
+            }
         }
         return builder.Build();
     }
 
-    private static IEnumerable<TypeUse> Flatten(TypeUse use) => use.Components.SelectMany(Flatten).Prepend(use);
+    private static IEnumerable<TypeUse> Flatten(TypeUse use, CancellationToken cancellationToken)
+    {
+        var pending = new Stack<TypeUse>(); pending.Push(use);
+        while (pending.TryPop(out var current))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return current;
+            for (var i = current.Components.Length - 1; i >= 0; i--)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                pending.Push(current.Components[i]);
+            }
+        }
+    }
 }
