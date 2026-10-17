@@ -30,7 +30,7 @@ public sealed class DiagramTests
         Assert.Contains(diagram.Edges, x => x.Target == diagram.Root);
         Assert.True(diagram.IsComplete);
         var markdown = MermaidExporter.Markdown(diagram);
-        Assert.Contains("subgraph p0[\"Example\"]", markdown);
+        Assert.Contains("subgraph p0 [\"Example\"]", markdown);
         Assert.Contains("A&#124;file.cs:2:3", markdown);
         Assert.Equal(markdown, MermaidExporter.Markdown(CallDiagramQuery.Build(index, new("Root"), new())));
     }
@@ -71,12 +71,42 @@ public sealed class DiagramTests
     }
 
     [Fact]
+    public void Library_generation_preserves_edge_identity_root_style_and_markdown_safe_labels()
+    {
+        const string name = "end[\"<T> & `x`\u2028\u2029]```mermaid";
+        var index = Index([Method(name), Method("Shared")],
+            [Call("one", name, "Shared"), Call("two", name, "Shared"), Call("back", "Shared", name)]);
+        var markdown = MermaidExporter.Markdown(CallDiagramQuery.Build(index, new(name), new()));
+        var graph = markdown.Split("```mermaid\n")[1].Split("\n```")[0];
+        Assert.Contains("&quot;", graph);
+        Assert.Contains("&lt;T&gt;", graph);
+        Assert.DoesNotContain('\u2028', graph); Assert.DoesNotContain('\u2029', graph);
+        Assert.DoesNotContain("```", graph);
+        Assert.Contains("e1: direct", graph); Assert.Contains("e2: direct", graph); Assert.Contains("e3: direct", graph);
+        Assert.Contains("classDef root fill:#dbeafe,stroke:#2563eb,stroke-width:3px", graph);
+        Assert.Contains("class n0 root", graph);
+        Assert.Equal(markdown, MermaidExporter.Markdown(CallDiagramQuery.Build(index, new(name), new())));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void Library_generation_retains_blank_display_labels(string label)
+    {
+        var diagram = CallDiagramQuery.Build(Index([Method("Root")], []), new("Root"), new());
+        diagram = diagram with { Nodes = [diagram.Nodes[0] with { Label = label, Project = label }] };
+        var markdown = MermaidExporter.Markdown(diagram);
+        Assert.Contains($"subgraph p0 [\"{label}\"]", markdown);
+        Assert.Contains($"n0[\"{label}\"]", markdown);
+    }
+
+    [Fact]
     public void Escapes_source_labels_and_rejects_invalid_roots_options_and_cancellation()
     {
         const string name = "end[\"<T> & `x`\n]";
         var index = Index([Method(name)], []);
         var markdown = MermaidExporter.Markdown(CallDiagramQuery.Build(index, new(name), new()));
-        Assert.Contains("#quot;", markdown);
+        Assert.Contains("&quot;", markdown);
         Assert.DoesNotContain("<T>", markdown);
         Assert.Equal(2, markdown.Split("```").Length - 1);
         Assert.Throws<ArgumentException>(() => CallDiagramQuery.Build(index, new("absent"), new()));

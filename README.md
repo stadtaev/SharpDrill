@@ -80,7 +80,8 @@ Existing files are never overwritten. EOF or `q` exits without exporting. Custom
 The Markdown contains a Mermaid `flowchart TB`, project groups, call-site evidence, and analysis boundaries. Direct calls
 use solid arrows; declared dispatch, unresolved calls and optional implementation candidates use dotted arrows with explicit
 labels. Branches, shared callees, parallel call sites and recursive edges survive the projection. Project groups do not imply
-architectural layers or exact runtime ordering. Display names are escaped before being used as diagram labels.
+architectural layers or exact runtime ordering. Flowchart markup is generated with [Mermaid.NET.Flowcharts](https://github.com/JansthcirlU/Mermaid.NET.Flowcharts) 6.0.0.
+Display names are escaped before being used as diagram labels, with extra handling to protect the Markdown fence.
 
 Defaults are 20 call transitions, 200 nodes, 1,000 edges and 100,000 examined sites. Adjust `--max-depth`, `--max-nodes`,
 `--max-edges` or `--max-expansions`; truncation is visible in both Markdown and stdout. Boundary nodes count toward the node

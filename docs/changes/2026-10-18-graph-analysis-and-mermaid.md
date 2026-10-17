@@ -193,3 +193,46 @@ consumers expecting direct-preferred witnesses or fewer Unknowns, and their publ
   by the Mermaid feature. No new graph library or runtime database is necessary for the current in-memory analysis.
 - External Web API validation is still unavailable without a working package feed/restore. The earlier archive's configured
   feed returned HTTP 404. Repository fixture and Sharpview inputs are used here; external validation is not claimed.
+
+## Follow-up: use a maintained Mermaid generator
+
+At the user's request, handwritten flowchart serialization is replaced by **Mermaid.NET.Flowcharts 6.0.0**, centrally pinned
+in `Directory.Packages.props` and referenced by `Sharpview.Core`. The package models nodes, project subgraphs, link kinds and
+root styles, and owns Mermaid formatting and standard text escaping. Graph projection, stable IDs, edge evidence, boundaries,
+limits, selection, filenames and Markdown reporting remain Sharpview responsibilities.
+
+The package was selected after checking its source, tests, license, CI and releases on 2026-10-18:
+
+- [Source and usage](https://github.com/JansthcirlU/Mermaid.NET.Flowcharts): MIT, typed flowchart API, subgraphs and styles,
+  distinct parallel links, no runtime package dependencies. Its CI builds/tests .NET 8, 9 and 10.
+- [Release 6.0.0](https://www.nuget.org/packages/Mermaid.NET.Flowcharts/6.0.0) was published in August 2026. It is actively
+  maintained as a small community project, not an official Mermaid SDK or a vendor-supported component.
+- `FoggyBalrog.MermaidDotNet` has promising parser integration tests but explicitly states it is not production-ready.
+  The other `MermaidDotNet` implementation was also inspected; the selected package offers the focused typed subgraph/text
+  API needed by this exporter.
+
+A private `MarkdownSafeText` adapter delegates ordinary escaping to the package and additionally flattens controls/Unicode
+line separators, encodes backticks so labels cannot close the Markdown fence, and preserves blank labels that the library's
+nonempty text factory rejects. Markdown evidence/heading escaping stays separate. This removes the handwritten Mermaid
+node/subgraph/arrow/style templates and the custom general Mermaid label escaper. No rendering engine, Node or browser
+runtime is introduced to the application.
+
+Generated syntax is semantically equivalent but not byte-identical: the package uses `--->` for ordinary arrows, a space
+before subgraph labels, HTML named entities for some escaped characters, and its own whitespace formatting. These are
+validated against the official Mermaid parsers. The checked-in diagram sample is regenerated from the package output.
+
+Validation for this follow-up:
+
+- `dotnet restore sharpview.slnx` succeeded; the resolved package targets .NET 10 and has no transitive runtime dependencies.
+- Updated text/escaping expectations were first run against the old formatter and failed as expected; the package-backed
+  implementation then passed all 8 focused diagram tests before blank-label coverage was added.
+- `dotnet test sharpview.slnx --no-restore --logger 'trx;LogFileName=mermaid-package.trx' --results-directory /tmp/sharpview-test-results`
+  passed **195/195**, with **0 failures and 0 skipped**, in 1 minute 11 seconds. TRX counters were inspected. This includes
+  existing fresh-process diagram/CLI integration tests and the new
+  `Library_generation_preserves_edge_identity_root_style_and_markdown_safe_labels` and
+  `Library_generation_retains_blank_display_labels` cases.
+- Official Mermaid **11.17.2** and **12.2.0** accepted package-generated fixture, special-character and actual-candidate
+  diagrams. Additional parser database checks verified node/edge counts (4/3, 1/0 and 3/2 respectively), including the
+  candidate label. Parser validation remains an external verification step, not a repository .NET integration test.
+- `git diff --check` passed. The sample Markdown was regenerated from an actual fresh-process CLI export; the command still
+  prints its absolute saved path. User-facing selection, limits, evidence and overwrite behavior remain covered by the suite.

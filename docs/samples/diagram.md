@@ -9,19 +9,22 @@ Implementation candidates followed: False. Completeness: partial (see boundaries
 
 ```mermaid
 flowchart TB
-  subgraph p0["Research.Api"]
+
+  subgraph p0 ["Research.Api"]
     n0["Research.Api.OrdersController.Get()"]
   end
-  subgraph p1["Research.Application"]
+  subgraph p1 ["Research.Application"]
     n1["Research.Application.Service.Load()"]
   end
-  subgraph p2["Research.Infrastructure"]
+  subgraph p2 ["Research.Infrastructure"]
     n2["Research.Infrastructure.Repository.Read()"]
-    n3["Research.Infrastructure.StorageException..ctor() #91;MetadataOnly#93;"]
+    n3["Research.Infrastructure.StorageException..ctor() [MetadataOnly]"]
   end
-  n0 -->|"e1: direct"| n1
-  n1 -->|"e2: direct"| n2
-  n2 -->|"e3: direct"| n3
+
+  n0 --->|"e1: direct"| n1
+  n1 --->|"e2: direct"| n2
+  n2 --->|"e3: direct"| n3
+
   classDef root fill:#dbeafe,stroke:#2563eb,stroke-width:3px
   class n0 root
 ```

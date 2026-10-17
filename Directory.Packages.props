@@ -1,4 +1,5 @@
 <Project><PropertyGroup><ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally></PropertyGroup><ItemGroup>
+<PackageVersion Include="Mermaid.NET.Flowcharts" Version="6.0.0" />
 <PackageVersion Include="Microsoft.Build" Version="18.0.2" />
 <PackageVersion Include="Microsoft.Build.Framework" Version="18.0.2" />
 <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0" />

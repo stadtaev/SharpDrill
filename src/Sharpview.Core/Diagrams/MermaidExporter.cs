@@ -1,5 +1,13 @@
 using System.Globalization;
 using System.Text;
+using Mermaid.Flowcharts;
+using Mermaid.Flowcharts.Links;
+using Mermaid.Flowcharts.Nodes;
+using Mermaid.Flowcharts.Nodes.NodeText;
+using Mermaid.Flowcharts.Styling;
+using Mermaid.Flowcharts.Styling.Attributes;
+using Mermaid.Flowcharts.Styling.Attributes.Enums;
+using Mermaid.Flowcharts.Subgraphs;
 
 namespace Sharpview.Core;
 
@@ -17,27 +25,7 @@ public static class MermaidExporter
         output.AppendLine($"Implementation candidates followed: {diagram.FollowCandidates}. Completeness: {(diagram.IsComplete ? "complete within the extracted call model" : "partial (see boundaries, limits and gaps below)")}.").AppendLine();
         if (!diagram.Limits.IsEmpty)
             output.AppendLine($"**Truncated: {string.Join(", ", diagram.Limits)} limit reached. Omitted calls may exist.**").AppendLine();
-        output.AppendLine("```mermaid").AppendLine("flowchart TB");
-        var group = 0;
-        foreach (var project in diagram.Nodes.GroupBy(x => x.ProjectId))
-        {
-            output.AppendLine($"  subgraph p{group++}[\"{Label(project.First().Project)}\"]");
-            foreach (var node in project)
-            {
-                var suffix = node.Body is BodyStatus.MetadataOnly or BodyStatus.NoBody or BodyStatus.Unsupported ? $" [{node.Body}]" : "";
-                output.AppendLine($"    {node.Id}[\"{Label(node.Label + suffix)}\"]");
-            }
-            output.AppendLine("  end");
-        }
-        for (var i = 0; i < diagram.Edges.Length; i++)
-        {
-            var edge = diagram.Edges[i];
-            var label = edge.Kind switch { CallEdgeKind.Direct => "direct", CallEdgeKind.Declared => "declared dispatch", CallEdgeKind.Candidate => "possible candidate", _ => "unresolved" };
-            var arrow = edge.Kind == CallEdgeKind.Direct ? "-->" : "-.->";
-            output.AppendLine($"  {edge.Source} {arrow}|\"e{i + 1}: {label}\"| {edge.Target}");
-        }
-        output.AppendLine("  classDef root fill:#dbeafe,stroke:#2563eb,stroke-width:3px");
-        output.AppendLine($"  class {diagram.Root} root");
+        output.AppendLine("```mermaid").Append(BuildFlowchart(diagram));
         output.AppendLine("```").AppendLine();
         output.AppendLine("## Call-site evidence").AppendLine();
         output.AppendLine("| Edge | Kind | Source location | Call-site ID |");
@@ -65,19 +53,50 @@ public static class MermaidExporter
         return output.ToString().Replace("\r\n", "\n", StringComparison.Ordinal);
     }
 
-    // Mermaid uses #...; entity codes rather than HTML's &...;. Encode syntax/HTML/Markdown delimiters before output.
-    private static string Label(string text)
+    private static string BuildFlowchart(CallDiagram diagram)
     {
-        var result = new StringBuilder();
-        foreach (var c in text)
+        var chart = Flowchart.Create(direction: FlowchartDirection.TB);
+        var rootStyle = new NodeStyle("root", new StyleClass(
+            Fill: new Fill(Color.FromHex("#dbeafe")),
+            Stroke: new Stroke(Color.FromHex("#2563eb")),
+            StrokeWidth: StrokeWidth.Length(3, Unit.Px)));
+        var nodes = new Dictionary<string, Node>(StringComparer.Ordinal);
+        var group = 0;
+        foreach (var project in diagram.Nodes.GroupBy(x => x.ProjectId))
         {
-            if (char.IsControl(c)) { result.Append(' '); continue; }
-            if (c == '"') result.Append("#quot;");
-            else if (c is '#' or '&' or '<' or '>' or '[' or ']' or '{' or '}' or '|' or '`' or '\\')
-                result.Append('#').Append(((int)c).ToString(CultureInfo.InvariantCulture)).Append(';');
-            else result.Append(c);
+            var subgraph = Subgraph.Create<MarkdownSafeText>("p" + group++, project.First().Project);
+            foreach (var node in project)
+            {
+                var suffix = node.Body is BodyStatus.MetadataOnly or BodyStatus.NoBody or BodyStatus.Unsupported ? $" [{node.Body}]" : "";
+                var item = Node.Create<MarkdownSafeText>(node.Id, node.Label + suffix, nodeStyle: node.Id == diagram.Root ? rootStyle : null);
+                nodes.Add(node.Id, item);
+                subgraph.AddNode(item);
+            }
+            chart.AddNode(subgraph);
         }
-        return result.ToString();
+        for (var i = 0; i < diagram.Edges.Length; i++)
+        {
+            var edge = diagram.Edges[i];
+            var label = edge.Kind switch { CallEdgeKind.Direct => "direct", CallEdgeKind.Declared => "declared dispatch", CallEdgeKind.Candidate => "possible candidate", _ => "unresolved" };
+            var type = LinkType.Create(thickness: edge.Kind == CallEdgeKind.Direct ? LinkThickness.Normal : LinkThickness.Dotted);
+            chart.AddLink(Link.Create(nodes[edge.Source], nodes[edge.Target], type, $"e{i + 1}: {label}"));
+        }
+        return chart.ToMermaidString();
+    }
+
+    // The library owns Mermaid escaping. These extra rules protect the surrounding Markdown fence and retain
+    // support for empty labels and line separators that the library's single-line text type rejects.
+    private readonly record struct MarkdownSafeText(string Value) : INodeText<MarkdownSafeText>
+    {
+        public static MarkdownSafeText FromString(string text)
+        {
+            var singleLine = string.Concat(text.Select(c => char.IsControl(c) || c is '\u2028' or '\u2029' ? ' ' : c));
+            var escaped = string.IsNullOrWhiteSpace(singleLine) ? singleLine : MermaidUnicodeText.FromString(singleLine).ToMermaidString();
+            return new(escaped.Replace("`", "#96;", StringComparison.Ordinal));
+        }
+
+        public string ToMermaidString(int indentations = 0, string indentationText = "  ") => Value;
+        public override string ToString() => Value;
     }
 
     private static string Html(string text)
