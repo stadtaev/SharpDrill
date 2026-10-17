@@ -147,6 +147,7 @@ inputs; offline loading is a library API. `CallIndex` is now internal; library c
 | [Coverage and limits](docs/coverage.md) | What is and is not modelled. |
 | [Model reference](docs/model.md) | Facts, identities, keys and query semantics in detail. |
 | [Validation](docs/validation.md) | Which tests prove which behaviour; regression comparison. |
+| [Todo](docs/todo.md) | Planned work: analytical graph for agents and visualisation, open items. |
 | [Sample reports](docs/samples/README.md) | Full outputs on the sample Web API. |
 | [Research plan](docs/superpowers/plans/2026-10-12-csharp-call-chain-research-plan.md), [consumer model plan](docs/superpowers/plans/2026-10-12-consumer-semantic-model-plan.md) | Design history and decisions. |
 
