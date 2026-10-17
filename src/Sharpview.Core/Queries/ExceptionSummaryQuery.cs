@@ -34,16 +34,19 @@ public sealed class ExceptionSummaryResult
         ImmutableDictionary<CallableId, ExceptionMethodSummary> roots,
         ImmutableDictionary<CallSiteId, ExceptionCrossingSummary> crossings,
         ImmutableDictionary<CallableId, ImmutableDictionary<FlowKey, Stored>> facts,
-        bool workLimitReached, bool factLimitReached, int workItemsProcessed, int factsAdded)
+        bool workLimitReached, bool factLimitReached, int workItemsProcessed, int factsAdded,
+        ImmutableArray<AnalysisGap> globalGaps)
     {
         Methods = methods; Roots = roots; Crossings = crossings; this.facts = facts;
         WorkLimitReached = workLimitReached; FactLimitReached = factLimitReached;
-        WorkItemsProcessed = workItemsProcessed; FactsAdded = factsAdded;
+        WorkItemsProcessed = workItemsProcessed; FactsAdded = factsAdded; GlobalGaps = globalGaps;
     }
 
     public ImmutableDictionary<CallableId, ExceptionMethodSummary> Methods { get; }
     public ImmutableDictionary<CallableId, ExceptionMethodSummary> Roots { get; }
     public ImmutableDictionary<CallSiteId, ExceptionCrossingSummary> Crossings { get; }
+    public ImmutableArray<AnalysisGap> GlobalGaps { get; }
+    public bool IsComplete => GlobalGaps.IsEmpty && !WorkLimitReached && !FactLimitReached && Roots.Values.All(x => x.IsComplete);
     public bool WorkLimitReached { get; }
     public bool FactLimitReached { get; }
     public int WorkItemsProcessed { get; }
@@ -220,20 +223,6 @@ public static class ExceptionSummaryQuery
                 }
             }
         }
-        // Ownerless extraction gaps cannot be assigned to one callable; every selected root remains uncertain.
-        foreach (var gap in index.Snapshot.Gaps.Where(x => x.Owner is null))
-        {
-            token.ThrowIfCancellationRequested();
-            if (factLimit || workLimit) break;
-            if (!Spend()) break;
-            foreach (var root in roots.Distinct())
-            {
-                if (factLimit) break;
-                AddUnknown(root, new(ExceptionReason.ExtractionGap, null, null, gap.Message, gap.Evidence));
-            }
-            if (factLimit) break;
-        }
-
         for (var component = 0; component < components.Length && !factLimit && !workLimit; component++)
         {
             var queue = queues[component]; var unknownQueue = unknownQueues[component];
@@ -312,6 +301,6 @@ public static class ExceptionSummaryQuery
         });
         var frozenFacts = facts.ToImmutableDictionary(x => x.Key, x => x.Value.ToImmutableDictionary());
         return new(methods, roots.Distinct().ToImmutableDictionary(x => x, x => methods[x]), crossings,
-            frozenFacts, workLimit, factLimit, work, count);
+            frozenFacts, workLimit, factLimit, work, count, [.. index.Snapshot.Gaps.Where(x => x.Owner is null)]);
     }
 }

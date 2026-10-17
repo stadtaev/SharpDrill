@@ -67,7 +67,7 @@ Root: Research.Api.OrdersController.Get()
     Path: OrdersController.Get() --> Service.Load() --> Repository.Read()
 ```
 
-`[n]` is the number of call transitions (not stack depth). Each method appears once with one shortest allowed path after a complete search. A work-limited result retains a valid admitted path; its distance still agrees with its witness. Candidate-only classification is independent of whether the shortest witness uses a candidate edge. Prefer `reach` over `controllers`/`chains` on large code: path enumeration grows exponentially, reachability does not.
+`[n]` is the number of call transitions (not stack depth). Each method appears once with one shortest allowed path after a complete search. A work-limited result retains a valid admitted path; its distance still agrees with its witness. With candidates enabled, `Distance`/`Witness` describe the shortest allowed route, while nullable `DirectDistance` and lazy `DirectWitness` preserve the direct-call-only route. `ViaCandidate` indicates no bounded direct proof was established; `WitnessUsesCandidate` describes the displayed path. Only examined sites produce per-site boundaries; a depth stop is a single boundary. Prefer `reach` over `controllers`/`chains` on large code: path enumeration grows exponentially, reachability does not.
 
 ### `exceptions` — where each explicit throw ends up
 
@@ -100,13 +100,15 @@ A rule is a function over the index (and optionally derived models) that returns
 static IEnumerable<Finding> NoDirectInfrastructure(ProgramIndex index, LayerMap layers)
 {
     var actions = AspNetConventions.ControllerActions(index).Select(x => x.Method).ToImmutableArray();
-    foreach (var root in ReachabilityQuery.Analyze(index, actions, new ReachOptions()).Roots)
-        foreach (var hit in root.Reached.Where(x => x.Distance == 1 && layers.LayerOf(x.Callable) == "Infrastructure"))
-            yield return new("no-direct-infrastructure", hit.ViaCandidate ? Verdict.Unknown : Verdict.Violation,
+    foreach (var root in ReachabilityQuery.Analyze(index, actions, new ReachOptions(FollowCandidates: true)).Roots)
+        foreach (var hit in root.Reached.Where(x => x.DirectDistance == 1 && layers.LayerOf(x.Callable) == "Infrastructure"))
+            yield return new("no-direct-infrastructure", Verdict.Violation,
                 index.Callable(root.Root).DisplaySignature, $"Calls {index.Callable(hit.Callable).DisplaySignature} directly.",
-                [index.CallSite(hit.Witness[0].Site).Evidence]);
+                [index.CallSite(hit.DirectWitness[0].Site).Evidence]);
 }
 ```
+
+Even with candidates enabled, this rule uses `DirectDistance == 1` and `DirectWitness` for its violation and evidence. A candidate shortcut cannot turn a longer direct route into a direct-call violation. Candidate possibilities can be evaluated separately as Unknown; this example enforces direct calls only.
 
 Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `Sharpview.Graph` algorithms, `LayerMap`/`LayerGraph` (architecture), `ReachabilityQuery`, `CallChainQuery`, `ExceptionQuery` (with `ExceptionReason` codes), `AspNetConventions`. Keep `Verdict.Unknown` separate from `Pass` — it is how a rule stays honest.
 
@@ -135,7 +137,7 @@ Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `Shar
 `ExceptionSummaryQuery` keeps possible escape effects beside the immutable call graph. It processes direct-call SCCs
 bottom-up and joins finite, origin-preserving effects until stable. Catch/rethrow/replacement, awaited calls and unsupported
 flow use the same transfer code as detailed exception witnesses. Per-call-site crossing summaries prevent a catch at one
-site from hiding effects at another. Budgets bound retained facts and transfer work; uncertainty remains explicit. Complexity
+site from hiding effects at another. Budgets bound retained facts and transfer work; uncertainty remains explicit. Ownerless gaps stay in result-level `GlobalGaps`, separate from action effects; overall `IsComplete` accounts for them. Complexity
 depends on the number of distinct effects, call sites and fixed-point transfers, rather than just the node/edge count.
 
 `CallDiagramQuery` projects a bounded action subgraph without enumerating all paths. `MermaidExporter` in `Sharpview.Export.Mermaid` formats that projection;

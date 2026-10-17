@@ -68,11 +68,11 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
     private static IEnumerable<Finding> NoDirectInfrastructure(ProgramIndex index, LayerMap layers)
     {
         var actions = AspNetConventions.ControllerActions(index).Select(x => x.Method).ToImmutableArray();
-        foreach (var root in ReachabilityQuery.Analyze(index, actions, new ReachOptions()).Roots)
-            foreach (var hit in root.Reached.Where(x => x.Distance == 1 && layers.LayerOf(x.Callable) == "Infrastructure"))
-                yield return new("no-direct-infrastructure", hit.ViaCandidate ? Verdict.Unknown : Verdict.Violation,
+        foreach (var root in ReachabilityQuery.Analyze(index, actions, new ReachOptions(FollowCandidates: true)).Roots)
+            foreach (var hit in root.Reached.Where(x => x.DirectDistance == 1 && layers.LayerOf(x.Callable) == "Infrastructure"))
+                yield return new("no-direct-infrastructure", Verdict.Violation,
                     index.Callable(root.Root).DisplaySignature, $"Calls {index.Callable(hit.Callable).DisplaySignature} directly.",
-                    [index.CallSite(hit.Witness[0].Site).Evidence]);
+                    [index.CallSite(hit.DirectWitness[0].Site).Evidence]);
     }
     [Fact]
     public void Documented_custom_rule_example_runs_on_the_fixture()
@@ -85,6 +85,50 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
         var strict = new LayerMap(index, new([new(LayerScope.Project, "Research.Application", "Infrastructure")]));
         Assert.Contains(NoDirectInfrastructure(index, strict), x => x.Verdict == Verdict.Violation && x.Subject == "Research.Api.OrdersController.Get()");
     }
+    [Fact]
+    public void Documented_rule_does_not_treat_candidate_shortcut_as_a_direct_call()
+    {
+        var compilation = new CompilationId("project");
+        var evidence = new SourceEvidence("Example.cs", "hash", 0, 1, 1, 1, false);
+        var voidType = new TypeUse(null, "void", NullabilityKind.NotAnnotated, []);
+        CallableFact Callable(string id, string type, BodyStatus body = BodyStatus.Source) =>
+            new(new(id), compilation, new TypeId(type), null, CallableKind.Method, type + "." + id + "()",
+                "Public", voidType, [], [], body, []);
+        CallSiteFact Site(string id, string from, string to, DispatchKind dispatch = DispatchKind.Direct) =>
+            new(new(id), new(from), new CallableId(to), to, dispatch, [], evidence, false, []);
+        TypeFact Type(string name) => new(new(name), compilation, name, "Public", [], [], []);
+        var snapshot = new ProgramSnapshot
+        {
+            Types = [Type("Controller") with { Attributes = [new("Microsoft.AspNetCore.Mvc.ControllerAttribute", [], [])] },
+                Type("Service"), Type("IRepo") with { Kind = DeclaredTypeKind.Interface }, Type("Repo")],
+            Callables = [Callable("Action", "Controller"), Callable("Middle", "Service"),
+                Callable("Declared", "IRepo", BodyStatus.NoBody), Callable("Implementation", "Repo")],
+            CallSites = [Site("dispatch", "Action", "Declared", DispatchKind.Interface), Site("first", "Action", "Middle"),
+                Site("second", "Middle", "Implementation")],
+            Implementations = [new(new("Declared"), new("Implementation"), ImplementationKind.Interface)]
+        };
+        var index = new ProgramIndex(snapshot);
+        var layers = new LayerMap(index, new([new(LayerScope.Type, "Repo", "Infrastructure")]));
+        Assert.Empty(NoDirectInfrastructure(index, layers));
+        var direct = Site("actual-direct", "Action", "Implementation") with { Evidence = evidence with { SpanStart = 17 } };
+        index = new ProgramIndex(snapshot with { CallSites = snapshot.CallSites.Add(direct) });
+        layers = new LayerMap(index, new([new(LayerScope.Type, "Repo", "Infrastructure")]));
+        var violation = Assert.Single(NoDirectInfrastructure(index, layers));
+        Assert.Equal(Verdict.Violation, violation.Verdict);
+        Assert.Equal(17, Assert.Single(violation.Evidence).SpanStart);
+    }
+
+    [Fact]
+    public void Detailed_fixture_exception_counts_exclude_global_gap_duplication()
+    {
+        var report = ExceptionQuery.Analyze(S, [.. Actions.Select(x => x.Method)], new());
+        Assert.Equal(26, report.Results.Length);
+        Assert.Equal(18, report.Results.Count(x => x.Status == ExceptionStatus.Unknown || x.SubsequentStatus == ExceptionStatus.Unknown));
+        Assert.Equal(6, report.GlobalGaps.Length);
+        Assert.False(report.IsComplete);
+        Assert.DoesNotContain(report.Results, x => x.ReasonCode == ExceptionReason.ExtractionGap);
+    }
+
     [Fact]
     public void Every_fixture_witness_has_a_reason_code_consistent_with_its_final_status()
     {

@@ -66,7 +66,7 @@ internal static class Commands
                         token.ThrowIfCancellationRequested();
                         var summary = summaries.Roots[root];
                         output.WriteLine($"Exception summary: {report.Name(root)}");
-                        output.WriteLine($"  Explicit escapes: {summary.Escapes.Length}; unknown effects: {summary.Unknowns.Length}; complete within model: {summary.IsComplete}.");
+                        output.WriteLine($"  Explicit escapes: {summary.Escapes.Length}; unknown effects: {summary.Unknowns.Length}; local summary complete within model: {summary.IsComplete}.");
                         foreach (var escape in summary.Escapes)
                         {
                             output.WriteLine($"  May escape: {escape.ExceptionType ?? "unknown type"} | origin: {escape.Origin.Value} | {escape.ReasonCode}");
@@ -83,16 +83,16 @@ internal static class Commands
                         foreach (var boundary in snapshot.BoundaryHandling.Where(x => x.Compilation == index.Callable(root).Compilation))
                             output.WriteLine($"  Boundary registration evidence (runtime coverage unknown): {boundary.Registration} | {TextReport.Location(boundary.Evidence)}");
                     }
-                    incomplete |= summaries.WorkLimitReached || summaries.FactLimitReached || summaries.Roots.Values.Any(x => !x.IsComplete);
-                    Console.Error.WriteLine($"Summary roots: {summaries.Roots.Count}; methods: {summaries.Methods.Count}; facts: {summaries.FactsAdded}; transfer work: {summaries.WorkItemsProcessed}; work limit: {summaries.WorkLimitReached}; fact limit: {summaries.FactLimitReached}.");
+                    incomplete |= !summaries.IsComplete;
+                    Console.Error.WriteLine($"Summary roots: {summaries.Roots.Count}; methods: {summaries.Methods.Count}; facts: {summaries.FactsAdded}; transfer work: {summaries.WorkItemsProcessed}; work limit: {summaries.WorkLimitReached}; fact limit: {summaries.FactLimitReached}; global caveats: {summaries.GlobalGaps.Length}.");
                     break;
                 }
                 report.Landscape(token);
                 var exceptions = ExceptionQuery.Analyze(index, roots, options.Traversal, token);
                 foreach (var witness in exceptions.Results) { token.ThrowIfCancellationRequested(); report.Witness(witness); }
                 var unknown = exceptions.Results.Count(x => x.Status == ExceptionStatus.Unknown || x.SubsequentStatus == ExceptionStatus.Unknown);
-                incomplete |= exceptions.OutputLimitReached || exceptions.WorkLimitReached || exceptions.DepthLimitReached || unknown > 0;
-                Console.Error.WriteLine($"Action roots: {roots.Length}; witnesses: {exceptions.Results.Length}; unknown: {unknown}; examined sites: {exceptions.ExpandedSites}; depth limit: {exceptions.DepthLimitReached}; output limit: {exceptions.OutputLimitReached}; work limit: {exceptions.WorkLimitReached}.");
+                incomplete |= !exceptions.IsComplete;
+                Console.Error.WriteLine($"Action roots: {roots.Length}; witnesses: {exceptions.Results.Length}; unknown: {unknown}; examined sites: {exceptions.ExpandedSites}; depth limit: {exceptions.DepthLimitReached}; output limit: {exceptions.OutputLimitReached}; work limit: {exceptions.WorkLimitReached}; global caveats: {exceptions.GlobalGaps.Length}.");
                 break;
         }
         foreach (var gap in snapshot.Gaps.Take(20)) Console.Error.WriteLine($"Gap [{gap.Kind}]: {gap.Message}" + (gap.Evidence is null ? "" : $" ({TextReport.Location(gap.Evidence)})"));

@@ -72,10 +72,10 @@ Tests combine independently built Core snapshots, in-memory Roslyn compilations,
 
 - Generic directed multigraph: both adjacency directions, parallel edges, deterministic insertion order, phased shortest-path
   relaxation, quotient groups with original memberships (including isolated nodes), and iterative SCC discovery.
-- Reach: shared immutable parent links, lazy witness arrays, independent direct/candidate classification, per-root work
+- Reach: shared immutable parent links, lazy witness arrays, separate direct-only distance/witness and candidate-inclusive routes, per-root work
   truncation, and explicit dispatch/unresolved/body/depth boundaries. A work stop can leave a valid nonoptimal path.
 - Exception summaries: bottom-up direct-call SCC fixed points over explicit origins, per-site transfers, finite fact identities,
-  reconstructed example witnesses, separate uncertainty and work/fact limits. Detailed witness enumeration is still available.
+  reconstructed example witnesses, separate uncertainty and work/fact limits. Detailed witness enumeration is still available. Ownerless gaps are global caveats, not repeated root effects; owned gaps remain associated with reached methods.
   Unknown propagation is conservative; summaries do not remove arbitrary unknown effects merely because a catch-all exists.
 - Mermaid: one controller action selected interactively or by exact signature/ID, project groups, branches/shared nodes/cycles,
   parallel sites, escaped labels, evidence, uncertainty boundaries and visible truncation. Default limits apply after loading

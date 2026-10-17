@@ -34,6 +34,54 @@ handlers, one example path, source evidence, separate Unknown reasons and middle
 are 1,000,000 work units and 100,000 facts. Path-depth, chain-count and dispatch options do not apply to summary mode and are
 rejected explicitly. Existing detailed `exceptions` remains available to report intercepted origins and individual paths.
 
+## Behaviour changes to existing commands
+
+The review follow-up corrects semantic/reporting changes introduced alongside the graph fixes:
+
+- **`reach --follow-candidates`:** `Distance`/`Witness` remain shortest allowed routes, which may contain candidates even
+  when a longer direct-only route exists. **`DirectDistance` / `DirectWitness` now preserve that separate proof.** Direct
+  witnesses are frozen before candidate relaxation, retain shared immutable links, and materialize arrays lazily. A null
+  direct distance means no proof was established within depth/work bounds. Rules must use `DirectDistance == 1` and direct
+  evidence when asserting a direct call; combining candidate distance with `!ViaCandidate` is insufficient.
+- **Reach text:** candidate steps use `-[candidate]->`; a candidate-bearing path is printed even at distance 1. With
+  candidate following enabled, a separate `Direct distance` line is printed, and a differing direct route is shown as
+  `Direct path` (plus direct evidence with `--locations`). Default direct-only rows retain their existing format.
+- **Depth boundaries:** the first graph-fix version also listed dispatch/unresolved boundaries for unexamined sites inside
+  depth-limited methods. Those extra per-site boundaries are removed. A single depth boundary reports omitted work;
+  examined-site counts and candidate-followed counts describe actual processed sites/edges.
+- **Work-limited `reach --follow-candidates`:** when the direct phase exhausts `--max-expansions`, no candidate edge is
+  processed, so the candidates-followed count is now 0 instead of the 1 previously claimed. Metadata-bodied methods that
+  were discovered but never dequeued now report a `body unavailable` boundary instead of being omitted; the budget-limited
+  self-analysis comparison run gains 6 such boundaries. Complete (non-truncated) runs are unaffected.
+- **Detailed `exceptions`:** attaching six ownerless fixture gaps to each of 12 actions temporarily changed witness counts
+  **26 -> 98** and Unknown counts **18 -> 90**. This duplication is reverted: current counts are **26 / 18**, and the six
+  ownerless gaps are global caveats. They consume neither action-witness output budgets nor summary fact/work budgets.
+  Owned gaps still produce uncertainty at the reached callable that owns them.
+- **`exceptions --summary`:** ownerless gaps likewise move out of root/method unknown sets into `GlobalGaps`. Root/method
+  `IsComplete` describes the local summary; result-level `IsComplete` is false when global caveats or other uncertainties
+  remain. CLI output qualifies local summary completeness and stderr includes the number of global caveats. Gap details
+  remain listed once in the shared stderr extraction-gap report (the first 20, with a further-gap count).
+- **JSON:** supported `inspect --format json` remains **schema 3**; the snapshot facts/envelope have not changed since
+  `598be42`. Reach has no CLI JSON output mode. Public query-result objects have additive properties: reach gained
+  `WitnessUsesCandidate`, per-root `WorkLimitReached`, and now `DirectDistance`/`DirectWitness`; exception results gain
+  `GlobalGaps` and `IsComplete`. Consumers performing their own serialization of result objects will see those fields.
+- **Diagram paths:** the binary-relative `diagrams_exports` default remains an explicit user requirement. `--output` can
+  select another location. This follow-up does not change diagram generation, selection, formatting or file behavior.
+
+The initializer/top-level ownership extraction model is not changed here. Mapping instance/static initializers and
+constructor chains or generated Main requires separate extraction work; global caveats avoid inventing action paths meanwhile.
+
+Review follow-up verification:
+
+- `dotnet build sharpview.slnx` succeeded with **0 warnings and 0 errors**; `dotnet test sharpview.slnx --no-build` passed
+  **202/202**, with **0 failures and 0 skipped**.
+- Fresh CLI output was compared against the pre-follow-up graph commit (`b8fb7a4`) on the fixture and a frozen
+  self-analysis source. `controllers`, `chains`, `methods`, `inspect` (text and JSON), `layers`, direct-only `reach` and
+  depth-limited self-analysis `reach` are unchanged apart from the removed per-site depth boundaries. Detailed `exceptions`
+  is back to 26 witnesses / 18 Unknown, with `global caveats: 6` on stderr. `reach --follow-candidates` adds the
+  `Direct distance` lines and shows `not established` for candidate-only shortcuts; budget-limited runs differ only as
+  described above.
+
 ## Graph defects and corrections
 
 ### Phased search and late sources
@@ -57,7 +105,8 @@ improvements may revisit nodes/edges, so their worst-case cost is not the single
 
 Direct-only traversal establishes bounded direct reachability first. Candidate relaxation then improves shortest allowed
 routes and reopens descendants. `ViaCandidate` means a bounded direct-only route was not established; `WitnessUsesCandidate`
-describes the chosen witness itself. A callable may have a longer direct route and a shorter candidate witness. Candidate
+describes the chosen witness itself. A callable may have a longer direct route and a shorter candidate witness.
+`DirectDistance` and `DirectWitness` preserve the direct route independently, including its source evidence. Candidate
 steps are labeled individually in text output, including one-transition shortcuts. This clarifies the former behavior, which
 preferred a longer direct witness and could consequently omit reachable descendants.
 
@@ -114,7 +163,7 @@ the method graph is recursive. They explain one supporting route and do not repr
 
 `ExceptionSummaryResult` exposes immutable method/root summaries and crossing summaries keyed by call-site ID, along with
 work/fact counters and limit flags. Missing bodies, unresolved/uncertain dispatch, unbound types and extraction gaps remain
-Unknown with machine-readable reasons and evidence. Ownerless extraction gaps are conservatively attached to selected roots.
+Unknown with machine-readable reasons and evidence. Ownerless extraction gaps are retained once as result-level `GlobalGaps`; they do not imply an action reaches the gap. Overall result completeness accounts for these global caveats.
 On budget exhaustion, method/crossing results are marked incomplete rather than presenting absent facts as a complete empty
 set. The fact cap counts unique method effects and uncertainties; crossing effects are bounded by charged transfer work. Work accounts for site/origin processing and crossing transfers; indexing, SCC preparation and result materialization
 have their own graph-sized cost. Fixed-point cost also depends on distinct effects and transfers; it is not claimed to be
@@ -143,7 +192,7 @@ checks precede the final solution run. Exact final commands, counts and parser v
 | Cache publication/cancellation and stable semantic IDs | `Graph_caches_honor_cancellation_and_publish_one_complete_instance`; `Call_edge_ids_distinguish_site_kind_and_target_and_are_stable` |
 | Call-site-sensitive exception propagation | `Exception_summary_transfers_each_diamond_call_site_independently` |
 | Recursive summaries and provenance | `Exception_summary_closed_recursion_has_no_escape_or_cycle_unknown`; `Exception_summary_preserves_origins_across_recursive_calls_and_reconstructs_acyclic_witness` |
-| Summary budgets, cancellation and gap evidence | `Exception_summary_work_and_fact_budgets_mark_all_roots_incomplete`; `Exception_summary_budget_marks_crossing_effects_incomplete`; `Exception_summary_honors_cancellation_and_rejects_invalid_budgets`; `Exception_summary_ownerless_gap_marks_root_unknown` |
+| Summary budgets, cancellation and gap evidence | `Exception_summary_work_and_fact_budgets_mark_all_roots_incomplete`; `Exception_summary_budget_marks_crossing_effects_incomplete`; `Exception_summary_honors_cancellation_and_rejects_invalid_budgets`; `Ownerless_exception_gaps_are_global_caveats_without_consuming_summary_budgets` |
 | Compact summary provenance | `Exception_summary_long_chain_keeps_provenance_compact_until_witness_requested` |
 | Known effects alongside unknown | `Exception_summary_keeps_known_escape_beside_unknown_boundary` |
 | Replacement/rethrow and task observation | `Exception_summary_preserves_origin_and_applies_handler_transformation_per_site`; `Exception_summary_requires_await_for_task_exception_to_reach_caller_catch` |

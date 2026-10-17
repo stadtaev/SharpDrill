@@ -72,6 +72,15 @@ public sealed class ReachabilityTests
         var reach = Reach(index, new(FollowCandidates: true));
         Assert.Equal(["B@1:b", "Impl.Run@1:a-iface", "Leaf@2:a-iface>leaf"], reach.Reached.Select(Describe));
         Assert.All(reach.Reached, x => Assert.False(x.ViaCandidate));
+        var impl = Assert.Single(reach.Reached, x => x.Callable.Value == "Impl.Run");
+        Assert.Equal(2, impl.DirectDistance);
+        Assert.Equal(["b", "b-impl"], impl.DirectWitness.Select(x => x.Site.Value));
+        Assert.All(impl.DirectWitness, x => Assert.False(x.Candidate));
+        var leaf = Assert.Single(reach.Reached, x => x.Callable.Value == "Leaf");
+        Assert.Equal(3, leaf.DirectDistance);
+        Assert.Equal(["b", "b-impl", "leaf"], leaf.DirectWitness.Select(x => x.Site.Value));
+        // A direct-call rule must use the direct-only proof, not candidate distance + direct-route existence.
+        Assert.DoesNotContain(reach.Reached.Where(x => x.DirectDistance == 1), x => x.Callable.Value == "Impl.Run");
         Assert.Equal(1, Assert.Single(reach.Boundaries, x => x.Kind == ReachBoundaryKind.Dispatch).CandidatesFollowed);
     }
 
@@ -87,9 +96,25 @@ public sealed class ReachabilityTests
         Assert.Equal(1, c.Distance);
         Assert.False(c.ViaCandidate);
         Assert.True(c.Witness.Single().Candidate);
+        Assert.Equal(3, c.DirectDistance);
+        Assert.Equal(["ra", "ab", "bc"], c.DirectWitness.Select(x => x.Site.Value));
+        Assert.Null(Assert.Single(reach.Reached, x => x.Callable.Value == "Leaf").DirectDistance);
+        Assert.Empty(Assert.Single(reach.Reached, x => x.Callable.Value == "Leaf").DirectWitness);
         Assert.Equal(3, Assert.Single(reach.Reached, x => x.Callable.Value == "End").Distance);
         Assert.False(reach.DepthLimitReached);
         Assert.Single(reach.Boundaries, x => x.Kind == ReachBoundaryKind.Dispatch);
+    }
+
+    [Fact]
+    public void Equal_length_direct_witness_wins_and_matches_direct_evidence()
+    {
+        var index = Index([Method("Root"), Method("Impl"), Method("I", BodyStatus.NoBody)],
+            [Call("direct", "Root", "Impl"), Call("candidate", "Root", "I", DispatchKind.Interface)],
+            [new(new("I"), new("Impl"), ImplementationKind.Interface)]);
+        var reached = Assert.Single(Reach(index, new(FollowCandidates: true)).Reached);
+        Assert.Equal(1, reached.Distance); Assert.Equal(1, reached.DirectDistance);
+        Assert.False(reached.WitnessUsesCandidate); Assert.False(reached.ViaCandidate);
+        Assert.Equal(reached.Witness.AsEnumerable(), reached.DirectWitness.AsEnumerable());
     }
 
     [Fact]
@@ -105,7 +130,7 @@ public sealed class ReachabilityTests
     }
 
     [Fact]
-    public void Depth_boundary_is_suppressed_for_cycles_but_retains_dispatch_and_unresolved_uncertainty()
+    public void Depth_boundary_suppresses_cycle_only_stops_and_does_not_report_unexamined_sites()
     {
         var cycle = Index([Method("Root"), Method("A")], [Call("ra", "Root", "A"), Call("ar", "A", "Root")]);
         Assert.Empty(Reach(cycle, new(MaxDepth: 1)).Boundaries);
@@ -113,7 +138,7 @@ public sealed class ReachabilityTests
             [Call("ra", "Root", "A"), Call("ar", "A", "Root"), Call("u", "A", null), Call("i", "A", "I", DispatchKind.Interface)]);
         var reach = Reach(uncertain, new(MaxDepth: 1));
         Assert.True(reach.DepthLimitReached);
-        Assert.Equal([ReachBoundaryKind.DepthLimit, ReachBoundaryKind.Unresolved, ReachBoundaryKind.Dispatch], reach.Boundaries.Select(b => b.Kind));
+        Assert.Equal(ReachBoundaryKind.DepthLimit, Assert.Single(reach.Boundaries).Kind);
     }
 
     [Fact]
@@ -126,7 +151,13 @@ public sealed class ReachabilityTests
             [new(new("I1"), new("X"), ImplementationKind.Interface), new(new("I2"), new("C"), ImplementationKind.Interface)]);
         var reach = Reach(index, new(FollowCandidates: true, MaxExpansions: 6));
         Assert.True(reach.WorkLimitReached);
-        Assert.All(reach.Reached, x => { Assert.Equal(x.Distance, x.Witness.Length); Assert.Equal(x.WitnessUsesCandidate, x.Witness.Any(step => step.Candidate)); });
+        Assert.All(reach.Reached, x =>
+        {
+            Assert.Equal(x.Distance, x.Witness.Length);
+            Assert.Equal(x.WitnessUsesCandidate, x.Witness.Any(step => step.Candidate));
+            Assert.All(x.DirectWitness, step => Assert.False(step.Candidate));
+            if (x.DirectDistance is { } distance) Assert.Equal(distance, x.DirectWitness.Length);
+        });
         var stoppedBeforeCandidates = Reach(index, new(FollowCandidates: true, MaxExpansions: 3));
         Assert.True(stoppedBeforeCandidates.WorkLimitReached);
         Assert.All(stoppedBeforeCandidates.Boundaries.Where(x => x.Kind == ReachBoundaryKind.Dispatch), x => Assert.Equal(0, x.CandidatesFollowed));
@@ -149,6 +180,8 @@ public sealed class ReachabilityTests
         var last = Assert.Single(reach.Reached, x => x.Callable.Value == $"N{length}");
         Assert.Equal(length, last.Witness.Length);
         Assert.Equal(length, last.Distance);
+        Assert.Equal(length, last.DirectDistance);
+        Assert.Equal(length, last.DirectWitness.Length);
     }
 
     [Fact]
@@ -164,7 +197,11 @@ public sealed class ReachabilityTests
         var followed = Reach(index, new(FollowCandidates: true));
         // Base.Run has a source body, so the declared virtual target is itself a candidate; overrides of overrides are included.
         Assert.Equal(["Base.Run@1:v", "Cached.Read@1:i", "Derived.Run@1:v", "Sql.Read@1:i"], followed.Reached.Select(Describe));
-        Assert.All(followed.Reached, x => Assert.True(x.ViaCandidate && x.Witness.Single().Candidate));
+        Assert.All(followed.Reached, x =>
+        {
+            Assert.True(x.ViaCandidate && x.Witness.Single().Candidate);
+            Assert.Null(x.DirectDistance); Assert.Empty(x.DirectWitness);
+        });
         Assert.Equal([2, 2], followed.Boundaries.Select(x => x.CandidatesFollowed));
     }
 }

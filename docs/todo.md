@@ -25,7 +25,7 @@ shared by detailed and summary analysis. Computed summaries are scoped to a snap
 
 - Directed multigraph with stable semantic call-edge IDs, adjacency in both directions, SCCs and quotient membership.
 - Correct distance improvement across phased seeds and late sources. Work truncation preserves coherent admitted paths.
-- Lazy reach witnesses, independent direct-only classification, per-root truncation and explicit uncertainties.
+- Lazy direct-only and candidate-inclusive reach witnesses/distances, per-root truncation and explicit uncertainties.
 - Finite origin-preserving exception effects, SCC scheduling, monotone fixed points, per-site transfer and bounded work/facts.
   Recursion alone is not unknown. Known effects coexist with uncertainty; one example witness is reconstructed on request.
 - `diagram` numbered action selection or `--root`/`--root-id`, bounded graph projection, project groups and Mermaid Markdown.

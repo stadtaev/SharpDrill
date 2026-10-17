@@ -117,6 +117,31 @@ public sealed class CliContractTests
         Assert.Contains("static; runtime type may differ", result.Out);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Ownerless_exception_gaps_are_reported_once_as_global_caveats(bool summary)
+    {
+        var result = await Run(summary ? ["exceptions", ResearchFixture.Input, "--summary"] : ["exceptions", ResearchFixture.Input]);
+        Assert.Equal(1, result.Exit);
+        Assert.Equal(6, result.Error.Split('\n').Count(x => x.StartsWith("Gap [", StringComparison.Ordinal)));
+        Assert.Contains("global caveats: 6", result.Error);
+        Assert.DoesNotContain("Unknown [ExtractionGap]", result.Out);
+        Assert.DoesNotContain("Reason: Top-level/initializer", result.Out);
+        if (!summary) Assert.Contains("witnesses: 26; unknown: 18", result.Error);
+    }
+
+    [Fact]
+    public async Task Depth_limited_reach_reports_one_stop_without_unexamined_dispatch_sites()
+    {
+        var result = await Run("reach", ResearchFixture.Input, "--root", "Research.Application.Service.Interface(Research.Infrastructure.IRepository)", "--max-depth", "0");
+        Assert.Equal(1, result.Exit);
+        Assert.Contains("Boundary: depth limit", result.Out);
+        Assert.DoesNotContain("Boundary: Interface", result.Out);
+        Assert.Contains("boundaries: 1", result.Error);
+        Assert.Contains("examined sites: 0", result.Error);
+    }
+
     [Fact]
     public async Task Missing_restoration_is_rejected_without_creating_assets_or_changing_source()
     {

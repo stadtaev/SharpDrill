@@ -19,7 +19,13 @@ public sealed record ExceptionWitness(CallableId Action, ThrowSiteId? Origin, Th
     string? StaticExceptionType = null, string? ExactExceptionType = null,
     ExceptionReason ReasonCode = ExceptionReason.Unspecified, DispatchKind? Dispatch = null);
 public sealed record ExceptionSearchResult(ImmutableArray<ExceptionWitness> Results, bool OutputLimitReached,
-    bool WorkLimitReached, bool DepthLimitReached, int ExpandedSites);
+    bool WorkLimitReached, bool DepthLimitReached, int ExpandedSites)
+{
+    // Ownerless gaps are snapshot-level caveats, not evidence of a path from each action.
+    public ImmutableArray<AnalysisGap> GlobalGaps { get; init; } = [];
+    public bool IsComplete => GlobalGaps.IsEmpty && !OutputLimitReached && !WorkLimitReached && !DepthLimitReached
+        && Results.All(x => x.Status != ExceptionStatus.Unknown && x.SubsequentStatus != ExceptionStatus.Unknown);
+}
 
 public static class ExceptionQuery
 {
@@ -42,12 +48,6 @@ public static class ExceptionQuery
         ExceptionWitness Unknown(CallableId root, ImmutableArray<CallableId> path, ExceptionReason code, string reason, SourceEvidence? evidence, DispatchKind? dispatch = null) =>
             new(root, null, null, null, false, path, ExceptionStatus.Unknown, reason,
                 evidence is null ? [] : [evidence], [], ReasonCode: code, Dispatch: dispatch);
-        foreach (var root in actions.Distinct())
-        {
-            foreach (var gap in program.Snapshot.Gaps.Where(x => x.Owner is null))
-                if (!Add(Unknown(root, [root], ExceptionReason.ExtractionGap, gap.Message, gap.Evidence))) break;
-            if (outputLimit) break;
-        }
         while (!outputLimit && stack.TryPop(out var frame))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -92,7 +92,8 @@ public static class ExceptionQuery
             if (workLimit || outputLimit) break;
             for (var i = descend.Count - 1; i >= 0; i--) stack.Push(descend[i]);
         }
-        return new(results.ToImmutable(), outputLimit, workLimit, depthLimit, work);
+        return new(results.ToImmutable(), outputLimit, workLimit, depthLimit, work)
+        { GlobalGaps = [.. program.Snapshot.Gaps.Where(x => x.Owner is null)] };
     }
 
     private static ExceptionWitness Unwind(CallableId root, ImmutableArray<CallableId> path,

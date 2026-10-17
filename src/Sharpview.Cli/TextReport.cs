@@ -112,6 +112,16 @@ internal sealed class TextReport(ProgramIndex index, TextWriter output, Argument
             var method = index.Callable(reached.Callable);
             output.WriteLine($"  [{reached.Distance}] {Name(reached.Callable)} | Project: {Project(method)} | Layer: {Layers.LayerOf(reached.Callable) ?? "unconfigured"}{(reached.ViaCandidate ? " (candidate)" : "")}");
             if (reached.Distance >= 2 || reached.WitnessUsesCandidate) output.WriteLine($"    Path: {Name(reach.Root)}{string.Concat(reached.Witness.Select(x => (x.Candidate ? " -[candidate]-> " : " --> ") + Name(x.Target)))}");
+            if (options.FollowCandidates)
+            {
+                output.WriteLine($"    Direct distance: {reached.DirectDistance?.ToString() ?? "not established"}");
+                if (reached.DirectDistance is not null && reached.WitnessUsesCandidate)
+                {
+                    output.WriteLine($"    Direct path: {string.Join(" --> ", reached.DirectWitness.Select(x => Name(x.Target)).Prepend(Name(reach.Root)))}");
+                    if (options.Locations) foreach (var step in reached.DirectWitness)
+                        output.WriteLine($"    Direct evidence: {Location(index.CallSite(step.Site).Evidence)}");
+                }
+            }
             if (options.Locations)
                 foreach (var step in reached.Witness)
                     output.WriteLine($"    Evidence: {Location(index.CallSite(step.Site).Evidence)} | {(step.Candidate ? "implementation candidate" : "direct call")}");

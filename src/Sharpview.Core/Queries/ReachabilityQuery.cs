@@ -14,24 +14,31 @@ public enum ReachBoundaryKind { Dispatch, Unresolved, MissingBody, DepthLimit }
 // Candidate steps follow an implementation candidate, never an inferred runtime target.
 public sealed record ReachStep(CallSiteId Site, CallableId Target, bool Candidate);
 // Distance/Witness describe a shortest allowed path when the root is complete; a work stop retains a valid
-// admitted path whose distance and witness agree. ViaCandidate independently means no bounded direct-only
-// path was found; a shorter witness may use candidates even for a directly reachable callable.
+// admitted path whose distance and witness agree. DirectDistance/DirectWitness independently describe a
+// direct-call-only route within the same bounds. Null means none was established, not proof none exists.
 public sealed record ReachedCallable
 {
     private Lazy<ImmutableArray<ReachStep>> witness;
+    private Lazy<ImmutableArray<ReachStep>> directWitness;
     public CallableId Callable { get; init; }
     public int Distance { get; init; }
     public ImmutableArray<ReachStep> Witness { get => witness.Value; init => witness = new(() => value); }
+    public int? DirectDistance { get; init; }
+    // Empty when DirectDistance is null; arrays are materialized only when requested.
+    public ImmutableArray<ReachStep> DirectWitness { get => directWitness.Value; init => directWitness = new(() => value); }
     public bool ViaCandidate { get; init; }
     public bool WitnessUsesCandidate { get; init; }
 
     public ReachedCallable(CallableId Callable, int Distance, ImmutableArray<ReachStep> Witness, bool ViaCandidate)
-        : this(Callable, Distance, () => Witness, ViaCandidate, Witness.Any(x => x.Candidate)) { }
+        : this(Callable, Distance, () => Witness, ViaCandidate, Witness.Any(x => x.Candidate),
+            !ViaCandidate && !Witness.Any(x => x.Candidate) ? Distance : null,
+            () => !ViaCandidate && !Witness.Any(x => x.Candidate) ? Witness : []) { }
 
     internal ReachedCallable(CallableId callable, int distance, Func<ImmutableArray<ReachStep>> witness,
-        bool viaCandidate, bool witnessUsesCandidate)
+        bool viaCandidate, bool witnessUsesCandidate, int? directDistance, Func<ImmutableArray<ReachStep>> directWitness)
     {
         Callable = callable; Distance = distance; this.witness = new(witness);
+        DirectDistance = directDistance; this.directWitness = new(directWitness);
         ViaCandidate = viaCandidate; WitnessUsesCandidate = witnessUsesCandidate;
     }
 
@@ -51,6 +58,19 @@ public sealed record ReachResult(ImmutableArray<RootReach> Roots, bool WorkLimit
 // those distances and reopen their descendants. Site work is charged once, including unresolved sites in order.
 public static class ReachabilityQuery
 {
+    // Freeze the direct-only phase as shared parent links before candidate relaxation mutates the search tree.
+    private sealed record DirectPath(DirectPath? Parent, CallEdge Edge, int Distance)
+    {
+        public ImmutableArray<ReachStep> Steps()
+        {
+            var steps = new List<ReachStep>(Distance);
+            for (DirectPath? path = this; path is not null; path = path.Parent)
+                steps.Add(new(path.Edge.Site.Id, path.Edge.Target, false));
+            steps.Reverse();
+            return [.. steps];
+        }
+    }
+
     public static ReachResult Analyze(ProgramIndex index, ImmutableArray<CallableId> roots, ReachOptions options,
         CancellationToken cancellationToken = default)
     {
@@ -97,7 +117,7 @@ public static class ReachabilityQuery
             search = new(calls.Graph, Expand, budget: options.MaxExpansions - work, cancellationToken: cancellationToken);
             search.AddSource(root);
             search.Run();
-            var direct = search.Discovered.ToHashSet();
+            var direct = search.FoldPaths<DirectPath?>(null, (parent, edge) => new(parent, edge, (parent?.Distance ?? 0) + 1));
             if (options.FollowCandidates && !search.BudgetExhausted)
             {
                 candidatePhase = true;
@@ -115,9 +135,10 @@ public static class ReachabilityQuery
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var usesCandidate = candidatePaths[node];
+                direct.TryGetValue(node, out var directPath);
                 reached.Add(new(node, search.Distance(node),
                     () => search.PathTo(node).Select(e => new ReachStep(e.Site.Id, e.Target, e.Kind == CallEdgeKind.Candidate)).ToImmutableArray(),
-                    !direct.Contains(node), usesCandidate));
+                    directPath is null, usesCandidate, directPath?.Distance, () => directPath?.Steps() ?? []));
             }
             var (boundaries, depthLimited) = Boundaries(index, siteEdges, search, examined, followedCandidates, options, cancellationToken);
             results.Add(new(root, reached.ToImmutable(), boundaries, depthLimited) { WorkLimitReached = workLimited });
@@ -152,7 +173,7 @@ public static class ReachabilityQuery
             foreach (var site in outgoing)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (!atDepth && !examined.Contains(site.Id)) continue;
+                if (!examined.Contains(site.Id)) continue;
                 if (!siteEdges.TryGetValue(site.Id, out var edges))
                     boundaries.Add(new(node, site.Id, ReachBoundaryKind.Unresolved, site.Dispatch, null, 0));
                 else if (site.Dispatch != DispatchKind.Direct)

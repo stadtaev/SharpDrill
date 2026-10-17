@@ -122,25 +122,44 @@ public sealed class CoreTests
     }
 
     [Fact]
-    public void Exception_summary_ownerless_gap_marks_root_unknown()
+    public void Ownerless_exception_gaps_are_global_caveats_without_consuming_summary_budgets()
     {
-        var snapshot = Snapshot([Method("Action")], [], [Throw("Action")]) with
-        { Gaps = [new AnalysisGap(GapKind.Compilation, Project, null, "Compilation incomplete", Evidence)] };
-        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        var gap = new AnalysisGap(GapKind.Compilation, Project, null, "Compilation incomplete", Evidence);
+        var snapshot = Snapshot([Method("Action"), Method("Other")], [], [Throw("Action")]) with { Gaps = [gap] };
+        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action"), new("Other")], new(MaxWork: 1, MaxFacts: 1));
+        Assert.Equal(gap, Assert.Single(result.GlobalGaps));
+        Assert.False(result.IsComplete);
+        Assert.False(result.WorkLimitReached); Assert.False(result.FactLimitReached);
         Assert.Single(result.Roots[new CallableId("Action")].Escapes);
-        Assert.Contains(result.Roots[new CallableId("Action")].Unknowns,
-            x => x.ReasonCode == ExceptionReason.ExtractionGap && x.Message == "Compilation incomplete"
-                && x.Evidence == Evidence);
+        Assert.All(result.Roots.Values, root => { Assert.True(root.IsComplete); Assert.Empty(root.Unknowns); });
     }
 
     [Fact]
-    public void Detailed_exception_query_reports_ownerless_gap_for_selected_root()
+    public void Detailed_exception_query_reports_ownerless_gaps_once_outside_action_witnesses()
     {
-        var snapshot = Snapshot([Method("Action")], []) with
-        { Gaps = [new AnalysisGap(GapKind.Compilation, Project, null, "Compilation incomplete", Evidence)] };
+        var gap = new AnalysisGap(GapKind.Compilation, Project, null, "Compilation incomplete", Evidence);
+        var snapshot = Snapshot([Method("Action"), Method("Other")], [], [Throw("Action"), Throw("Other", "other")]) with { Gaps = [gap] };
+        var result = ExceptionQuery.Analyze(snapshot, [new("Action"), new("Other")], new());
+        Assert.Equal(gap, Assert.Single(result.GlobalGaps));
+        Assert.False(result.IsComplete);
+        Assert.Equal(2, result.Results.Length);
+        Assert.All(result.Results, x => Assert.NotEqual(ExceptionReason.ExtractionGap, x.ReasonCode));
+        var limited = ExceptionQuery.Analyze(snapshot, [new("Action"), new("Other")], new(MaxChains: 1));
+        Assert.NotNull(Assert.Single(limited.Results).Origin);
+        Assert.Single(limited.GlobalGaps); Assert.True(limited.OutputLimitReached);
+    }
+
+    [Fact]
+    public void Owned_exception_gap_stays_attached_to_its_reached_callable()
+    {
+        var snapshot = Snapshot([Method("Action"), Method("Leaf")], [Call("Action", "Leaf", "call")]) with
+        { Gaps = [new AnalysisGap(GapKind.Unsupported, Project, new CallableId("Leaf"), "Unsupported source body", Evidence)] };
         var result = ExceptionQuery.Analyze(snapshot, [new("Action")], new());
-        Assert.Contains(result.Results, x => x.Action == new CallableId("Action")
-            && x.ReasonCode == ExceptionReason.ExtractionGap && x.Reason == "Compilation incomplete");
+        Assert.Empty(result.GlobalGaps);
+        Assert.False(result.IsComplete);
+        var witness = Assert.Single(result.Results);
+        Assert.Equal(ExceptionReason.ExtractionGap, witness.ReasonCode);
+        Assert.Equal(["Action", "Leaf"], witness.Path.Select(x => x.Value));
     }
 
     [Fact]

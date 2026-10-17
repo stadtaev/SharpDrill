@@ -18,4 +18,4 @@ The fixture exercises caught, unrelated and incompatible catches, rethrow/replac
 
 The host's own `sharpview.slnx` was also inspected as a loader smoke check. An external Web API experiment remains pending; these samples establish fixture behavior only.
 
-The diagram file includes project groups, per-edge source evidence, missing-body boundaries and extraction gaps. Its CLI command prints the absolute saved path; choose a new `--output` path for each invocation. `exceptions --summary` provides finite bottom-up effects and uncertainty; detailed exception samples above show the original path-report form, which now also includes ownerless extraction gaps.
+The diagram file includes project groups, per-edge source evidence, missing-body boundaries and extraction gaps. Its CLI command prints the absolute saved path; choose a new `--output` path for each invocation. `exceptions --summary` provides finite bottom-up effects and uncertainty; detailed exception samples above show the original path-report form, with ownerless extraction gaps reported once as global caveats on stderr.
