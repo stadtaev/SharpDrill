@@ -120,6 +120,24 @@ var findings = LayerRules.AllowedDependencies(graph, model); // Finding(RuleId, 
 - Exception witnesses carry a machine-readable `ExceptionReason` next to the human-readable `Reason`.
 - MSBuild Locator finds an installed SDK. Host selection and the input's `global.json` are not guaranteed to match every shell configuration.
 
+To analyse an existing `inspect --format json` export without loading Roslyn, reference only `Sharpview.Core`:
+
+```csharp
+await using var input = File.OpenRead("snapshot.json");
+var document = await SnapshotJson.ReadAsync(input, cancellationToken);
+var index = new ProgramIndex(document.Snapshot);
+var actions = AspNetConventions.ControllerActions(index, cancellationToken)
+    .Select(x => x.Method).ToImmutableArray();
+var reach = ReachabilityQuery.Analyze(index, actions, new ReachOptions(), cancellationToken);
+```
+
+`SnapshotJson.WriteAsync(stream, snapshot, producerVersion, cancellationToken)` writes the same envelope as the CLI.
+The reader accepts schema 3 only: unsupported versions throw `NotSupportedException`; malformed JSON or envelopes throw
+`JsonException`. There are no automatic migrations. The reader checks the envelope, not every graph reference or fact;
+use snapshots from a trusted producer. Both methods leave the stream open. The CLI still takes source project/solution
+inputs; offline loading is a library API. `CallIndex` is now internal; library consumers should use `ProgramIndex` and
+`CallChainQuery`.
+
 ## Documentation
 
 | Document | Read it for |
@@ -131,4 +149,5 @@ var findings = LayerRules.AllowedDependencies(graph, model); // Finding(RuleId, 
 | [Sample reports](docs/samples/README.md) | Full outputs on the sample Web API. |
 | [Research plan](docs/superpowers/plans/2026-10-12-csharp-call-chain-research-plan.md), [consumer model plan](docs/superpowers/plans/2026-10-12-consumer-semantic-model-plan.md) | Design history and decisions. |
 
-Status: validated on the repository's sample Web API (reproducible). An experiment on an external Web API is still pending.
+Status: validated on the repository's sample Web API (reproducible). The external Web API attempt is blocked on package
+restore; see [external validation](docs/validation.md#external-web-api-attempt-2026-10-17).

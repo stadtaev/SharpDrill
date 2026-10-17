@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text;
+using Sharpview.Core;
 using Xunit;
 
 namespace Sharpview.Tests;
@@ -81,6 +83,12 @@ public sealed class CliContractTests
         var first = await Run("inspect", ResearchFixture.Input, "--format", "json");
         var second = await Run("inspect", ResearchFixture.Input, "--format", "json");
         Assert.Equal(1, first.Exit); Assert.Equal(first.Out, second.Out);
+        using var saved = new MemoryStream(Encoding.UTF8.GetBytes(first.Out));
+        var restored = await SnapshotJson.ReadAsync(saved);
+        var index = new ProgramIndex(restored.Snapshot);
+        var action = Assert.Single(restored.Snapshot.Callables, x => x.DisplaySignature == "Research.Api.OrdersController.Get()");
+        var reach = Assert.Single(ReachabilityQuery.Analyze(index, [action.Id], new()).Roots);
+        Assert.Contains(reach.Reached, x => index.Callable(x.Callable).DisplaySignature == "Research.Application.Service.Load()");
         using var doc = JsonDocument.Parse(first.Out);
         var method = doc.RootElement.GetProperty("snapshot").GetProperty("callables").EnumerateArray()
             .Single(x => x.GetProperty("displaySignature").GetString() == "Research.Api.OrdersController.Get()");

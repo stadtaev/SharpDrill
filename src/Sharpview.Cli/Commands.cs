@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Text.Json;
 using Sharpview.Core;
 using Sharpview.Roslyn;
 
@@ -27,9 +26,7 @@ internal static class Commands
                 break;
             case "inspect":
                 if (options.Format == "json")
-                    await JsonSerializer.SerializeAsync(file?.BaseStream ?? Console.OpenStandardOutput(),
-                        new { schemaVersion = 3, producerVersion = "0.1.0", snapshot },
-                        new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true }, token);
+                    await SnapshotJson.WriteAsync(file?.BaseStream ?? Console.OpenStandardOutput(), snapshot, "0.1.0", token);
                 else report.Inspect(token);
                 break;
             case "chains":
