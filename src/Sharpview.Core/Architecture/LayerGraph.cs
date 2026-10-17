@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Sharpview.Graph;
 
 namespace Sharpview.Core;
 
@@ -16,78 +17,45 @@ public sealed record LayerEdge(string From, string To, LayerEdgeKind Kind, int C
 // UnresolvedCalls: call sites without a known bound target.
 public sealed record LayerGraph(ImmutableArray<LayerEdge> Edges, int ExternalReferences, int UnresolvedCalls)
 {
+    // A quotient of the call graph and the dependency graph by layer. Edges whose caller/owner is referenced code
+    // (not analysed source) are not program edges and are skipped.
     public static LayerGraph Build(ProgramIndex index, LayerMap map, CancellationToken cancellationToken = default)
     {
-        var edges = new Dictionary<(string From, string To, LayerEdgeKind Kind), (int Count, SourceEvidence? Evidence, string Source, string Target)>();
-        var external = 0; var unresolved = 0;
+        var edges = new List<LayerEdge>();
+        var external = 0;
 
-        // Returns the endpoint layer, or null when the endpoint is an unmapped referenced element.
-        string? Layer(CompilationId compilation, string? layer) => layer ?? (map.IsSource(compilation) ? LayerMap.Unmapped : null);
-        void Add(string from, string? to, LayerEdgeKind kind, SourceEvidence? evidence, string source, string target)
+        // The endpoint layer: a mapped layer, Unmapped for analysed source, or null for unmapped referenced code.
+        string? CallableLayer(CallableId id) => map.LayerOf(id) ?? (map.IsSource(index.Callable(id).Compilation) ? LayerMap.Unmapped : null);
+        string? TypeLayer(TypeId id) => map.LayerOf(id) ?? (map.IsSource(index.Type(id).Compilation) ? LayerMap.Unmapped : null);
+        void Collect<TEdge>(Quotient<string, LayerEdgeKind, TEdge> quotient, Func<TEdge, (SourceEvidence? Evidence, string Source, string Target)> witness,
+            Func<TEdge, bool> sourceInGroup)
         {
-            if (to is null) { external++; return; }
-            var key = (from, to, kind);
-            if (!edges.TryGetValue(key, out var edge)) { edges[key] = (1, evidence, source, target); return; }
-            var better = evidence is not null && (edge.Evidence is null || Compare(evidence, source, target, edge.Evidence, edge.Source, edge.Target) < 0);
-            edges[key] = better ? (edge.Count + 1, evidence, source, target) : (edge.Count + 1, edge.Evidence, edge.Source, edge.Target);
+            foreach (var group in quotient.Edges)
+            {
+                var best = group.Edges.Select(witness).Aggregate((a, b) => Better(b, a) ? b : a);
+                edges.Add(new(group.From, group.To, group.Key, group.Edges.Length, best.Evidence, best.Source, best.Target));
+            }
+            // Unassigned edges from source into unmapped referenced code are counted; edges owned by referenced code are not program edges.
+            external += quotient.Unassigned.Count(sourceInGroup);
         }
 
-        foreach (var site in index.Snapshot.CallSites)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var caller = index.Callable(site.Caller);
-            var from = Layer(caller.Compilation, map.LayerOf(caller.Id));
-            if (from is null) continue;
-            if (site.BoundTarget is not { } bound || !index.TryGetCallable(bound, out var target)) { unresolved++; continue; }
-            var direct = site.Dispatch == DispatchKind.Direct;
-            Add(from, Layer(target.Compilation, map.LayerOf(bound)), direct ? LayerEdgeKind.DirectCall : LayerEdgeKind.DeclaredCall,
-                site.Evidence, caller.DisplaySignature, target.DisplaySignature);
-            if (direct) continue;
-            // Overrides of overrides are candidates too; each candidate counts once per site.
-            var seen = new HashSet<CallableId> { bound };
-            var pending = new Queue<CallableId>(); pending.Enqueue(bound);
-            while (pending.TryDequeue(out var declared))
-                foreach (var candidate in index.Implementations(declared))
-                {
-                    if (!seen.Add(candidate.Implementation)) continue;
-                    pending.Enqueue(candidate.Implementation);
-                    var implementation = index.Callable(candidate.Implementation);
-                    Add(from, Layer(implementation.Compilation, map.LayerOf(implementation.Id)), LayerEdgeKind.CandidateCall,
-                        site.Evidence, caller.DisplaySignature, implementation.DisplaySignature);
-                }
-        }
+        var calls = index.CallGraph.Graph.Where(x => !x.IsDeclaredTargetCandidate)
+            .Quotient(CallableLayer, x => x.Kind switch { CallEdgeKind.Direct => LayerEdgeKind.DirectCall, CallEdgeKind.Declared => LayerEdgeKind.DeclaredCall, _ => LayerEdgeKind.CandidateCall }, cancellationToken);
+        Collect(calls, x => (x.Site.Evidence, index.Callable(x.Source).DisplaySignature, index.Callable(x.Target).DisplaySignature), x => CallableLayer(x.Source) is not null);
+        var unresolved = index.CallGraph.UnresolvedSites.Count(x => CallableLayer(x.Caller) is not null);
 
-        foreach (var dependency in index.Snapshot.Dependencies)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            // Only dependencies owned by analysed source; facts about referenced members are not program edges.
-            string? from; string source;
-            if (dependency.OwningCallable is { } owner && index.TryGetCallable(owner, out var callable))
-            {
-                if (!map.IsSource(callable.Compilation)) continue;
-                from = map.LayerOf(owner) ?? LayerMap.Unmapped; source = callable.DisplaySignature;
-            }
-            else if (dependency.OwningType is { } ownerType && index.TryGetType(ownerType, out var type))
-            {
-                if (!map.IsSource(type.Compilation)) continue;
-                from = map.LayerOf(ownerType) ?? LayerMap.Unmapped; source = type.DisplayName;
-            }
-            else continue;
-            // Type parameters have no declaration and are not dependencies on another element.
-            // Other dependency kinds are already flattened into one fact per type argument; inheritance facts are not,
-            // so `class Order : Entity<Key>` also depends on Key.
-            foreach (var use in dependency.Kind == DependencyKind.Inheritance ? Flatten(dependency.ReferencedType) : [dependency.ReferencedType])
-            {
-                if (use.Declaration is not { } referenced || !index.TryGetType(referenced, out var target)) continue;
-                Add(from, Layer(target.Compilation, map.LayerOf(referenced)), LayerEdgeKind.TypeDependency, dependency.Evidence, source, target.DisplayName);
-            }
-        }
+        // Callable-owned facts take the callable's layer, which is its declaring type's layer.
+        var dependencies = index.DependencyGraph.Where(x => map.IsSource(x.OwnerCallable is { } owner ? index.Callable(owner).Compilation : index.Type(x.Source).Compilation))
+            .Quotient(TypeLayer, _ => LayerEdgeKind.TypeDependency, cancellationToken);
+        Collect(dependencies, x => (x.Fact.Evidence, x.OwnerCallable is { } owner ? index.Callable(owner).DisplaySignature : index.Type(x.Source).DisplayName,
+            index.Type(x.Target).DisplayName), x => TypeLayer(x.Source) is not null);
 
-        return new([.. edges.Select(x => new LayerEdge(x.Key.From, x.Key.To, x.Key.Kind, x.Value.Count, x.Value.Evidence, x.Value.Source, x.Value.Target))
-            .OrderBy(x => x.From, StringComparer.Ordinal).ThenBy(x => x.To, StringComparer.Ordinal).ThenBy(x => x.Kind)], external, unresolved);
+        return new([.. edges.OrderBy(x => x.From, StringComparer.Ordinal).ThenBy(x => x.To, StringComparer.Ordinal).ThenBy(x => x.Kind)], external, unresolved);
     }
 
-    private static IEnumerable<TypeUse> Flatten(TypeUse use) => use.Components.SelectMany(Flatten).Prepend(use);
+    // The witness is the fact with the smallest evidence location; facts without evidence lose to any with it.
+    private static bool Better((SourceEvidence? Evidence, string Source, string Target) candidate, (SourceEvidence? Evidence, string Source, string Target) current) =>
+        candidate.Evidence is not null && (current.Evidence is null || Compare(candidate.Evidence, candidate.Source, candidate.Target, current.Evidence, current.Source, current.Target) < 0);
 
     private static int Compare(SourceEvidence a, string aSource, string aTarget, SourceEvidence b, string bSource, string bTarget)
     {

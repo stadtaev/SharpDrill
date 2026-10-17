@@ -64,6 +64,29 @@ public sealed class ArchitectureTests
     }
 
     [Fact]
+    public void Call_and_dependency_graphs_expose_program_edges_in_deterministic_order()
+    {
+        var index = Program();
+        var calls = index.CallGraph;
+        Assert.Equal(index.Snapshot.Callables.Select(x => x.Id), calls.Graph.Nodes.AsEnumerable());
+        // IRepo.Read has a source body here, so it is its own first candidate (flagged, and skipped by layer edges).
+        Assert.Equal(["Get>Load Direct c1", "Get>Load Direct c2", "Load>IRepo.Read Declared c3", "Load>IRepo.Read Candidate c3 self",
+            "Load>Repo.Read Candidate c3", "Load>WriteLine Direct c4", "Run>Load Direct c6"],
+            calls.Graph.Edges.Select(x => $"{x.Source.Value}>{x.Target.Value} {x.Kind} {x.Site.Id.Value}{(x.IsDeclaredTargetCandidate ? " self" : "")}"));
+        Assert.Equal(["c5"], calls.Unresolved(new("Get")).Select(x => x.Id.Value));
+        Assert.Same(calls, index.CallGraph);
+
+        var withBase = new ProgramIndex(index.Snapshot with
+        {
+            Dependencies = [.. index.Snapshot.Dependencies, new(new TypeId("Service"), null,
+                new TypeUse(new TypeId("Controller"), "Controller<Repo>", NullabilityKind.NotAnnotated, [Use("Repo")]), DependencyKind.Inheritance, At("s.cs", 9))]
+        });
+        // The callable-owned fact hangs off its declaring type; type parameters produce no edge; base-type arguments do.
+        Assert.Equal(["Repo>IRepo Field", "Console>Repo Signature WriteLine", "Service>Controller Inheritance", "Service>Repo Inheritance"],
+            withBase.DependencyGraph.Edges.Select(x => $"{x.Source.Value}>{x.Target.Value} {x.Fact.Kind}{(x.OwnerCallable is { } o ? " " + o.Value : "")}"));
+    }
+
+    [Fact]
     public void Layer_graph_aggregates_each_edge_kind_with_stable_witnesses()
     {
         var index = Program();

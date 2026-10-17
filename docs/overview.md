@@ -25,12 +25,14 @@ flowchart LR
 | --- | --- | --- |
 | Load | `Sharpview.Roslyn` | Opens the solution with the .NET SDK. Never restores, builds or edits your code. |
 | Extract facts | `Sharpview.Roslyn` | Turns compiler symbols into small immutable records: types, callables, call sites, dependencies, throws, catches, implementation candidates, gaps. |
-| Index | `Sharpview.Core` | `ProgramIndex` builds lookups once (callers, callees, members, ancestors, candidates…). |
+| Index | `Sharpview.Core` | `ProgramIndex` builds lookups once (callers, callees, members, ancestors, candidates…) and, on first use, the whole-program `CallGraph` and type `DependencyGraph`. |
 | Analyses & models | `Sharpview.Core` | Queries over the index: call paths, reachability, exception propagation, layer graph. |
 | Rules | `Sharpview.Core` | Plain C# functions that turn analysis results into `Finding`s. |
 | Reports | `Sharpview.Cli` | Formats text/JSON. No analysis logic lives here. |
 
 `Sharpview.Core` has no Roslyn dependency: once a snapshot exists (or is loaded from JSON), all analysis runs on plain records.
+
+`Sharpview.Graph` is a small generic graph library underneath Core (it knows nothing about C#): an immutable directed multigraph (`DiGraph`) with NetworkX-style operations — out/in edges, successors/predecessors, `Where`, `Subgraph`, breadth-first search with shortest paths, `ReachableFrom`, `Quotient` (collapse nodes into groups such as layers) and `StronglyConnectedComponents` (cycles). Everything keeps insertion order, so results are deterministic. Reachability is a breadth-first search over the call graph, and the layer graph is a quotient of the call and dependency graphs.
 
 ## Principles
 
@@ -105,7 +107,7 @@ static IEnumerable<Finding> NoDirectInfrastructure(ProgramIndex index, LayerMap 
 }
 ```
 
-Building blocks: `ProgramIndex` (lookups), `LayerMap`/`LayerGraph` (architecture), `ReachabilityQuery`, `CallChainQuery`, `ExceptionQuery` (with `ExceptionReason` codes), `AspNetConventions`. Keep `Verdict.Unknown` separate from `Pass` — it is how a rule stays honest.
+Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `Sharpview.Graph` algorithms, `LayerMap`/`LayerGraph` (architecture), `ReachabilityQuery`, `CallChainQuery`, `ExceptionQuery` (with `ExceptionReason` codes), `AspNetConventions`. Keep `Verdict.Unknown` separate from `Pass` — it is how a rule stays honest.
 
 ## Glossary
 

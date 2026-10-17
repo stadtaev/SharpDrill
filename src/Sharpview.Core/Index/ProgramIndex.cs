@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Sharpview.Graph;
 
 namespace Sharpview.Core;
 
@@ -24,6 +25,12 @@ public sealed class ProgramIndex
     private readonly Dictionary<CallSiteId, CallSiteFact> sites;
 
     public ProgramSnapshot Snapshot { get; }
+
+    private CallGraph? callGraph;
+    private DiGraph<TypeId, DependencyEdge>? dependencyGraph;
+    // Whole-program graphs, built on first use.
+    public CallGraph CallGraph => callGraph ??= CallGraph.Build(this);
+    public DiGraph<TypeId, DependencyEdge> DependencyGraph => dependencyGraph ??= Sharpview.Core.DependencyGraph.Build(this);
 
     public ProgramIndex(ProgramSnapshot snapshot)
     {

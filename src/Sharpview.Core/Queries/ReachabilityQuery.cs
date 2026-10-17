@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Sharpview.Graph;
 
 namespace Sharpview.Core;
 
@@ -31,83 +32,75 @@ public static class ReachabilityQuery
         options.Validate(); cancellationToken.ThrowIfCancellationRequested();
         foreach (var root in roots) if (!index.ContainsCallable(root)) throw new ArgumentException($"Unknown root ID: {root.Value}");
         var results = ImmutableArray.CreateBuilder<RootReach>();
+        var calls = index.CallGraph;
         var work = 0; var workLimited = false;
         foreach (var root in roots.Distinct().OrderBy(x => index.Callable(x).DisplaySignature, StringComparer.Ordinal).ThenBy(x => x.Value, StringComparer.Ordinal))
         {
-            var reached = new Dictionary<CallableId, ReachedCallable> { [root] = new(root, 0, [], false) };
-            var boundaries = ImmutableArray.CreateBuilder<ReachBoundary>();
-            var depthLimited = false;
-            var queue = new Queue<CallableId>(); queue.Enqueue(root);
-            void Visit(CallableId target, ReachedCallable from, ReachStep step, Queue<CallableId> pending)
-            {
-                if (reached.ContainsKey(target)) return;
-                reached[target] = new(target, from.Distance + 1, from.Witness.Add(step), from.ViaCandidate || step.Candidate);
-                pending.Enqueue(target);
-            }
+            BreadthFirstSearch<CallableId, CallEdge>? search = null;
+            var charged = new HashSet<CallableId>();
+            // Bodies are expanded within the depth limit. Unresolved sites are not graph edges, so they are charged
+            // to the shared budget when their caller is expanded.
+            bool Expand(CallableId node, int distance) =>
+                index.Callable(node).Body == BodyStatus.Source && distance < options.MaxDepth && search!.Charge(calls.Unresolved(node).Length) && charged.Add(node);
+            // A non-direct site costs one examined site; its candidate edges belong to that site and are free.
+            search = new(calls.Graph, Expand, x => x.Kind == CallEdgeKind.Candidate ? 0 : 1, options.MaxExpansions - work, cancellationToken);
+            search.AddSource(root);
             // Candidate steps found during the direct-only phase wait until every definitely reachable callable is known,
             // so a callable reachable through direct calls is never labelled as candidate-only.
-            var deferred = new List<(ReachedCallable From, ReachStep Step)>();
-            var candidatePhase = false;
-            while (!workLimited && (queue.Count > 0 || (!candidatePhase && deferred.Count > 0)))
+            var deferred = new List<CallEdge>();
+            search.Run(x => x.Kind == CallEdgeKind.Direct || x.Kind == CallEdgeKind.Candidate && options.FollowCandidates && Defer(x));
+            bool Defer(CallEdge edge) { deferred.Add(edge); return false; }
+            if (options.FollowCandidates && !search.BudgetExhausted)
             {
-                if (queue.Count == 0)
-                {
-                    candidatePhase = true;
-                    foreach (var (from, step) in deferred) Visit(step.Target, from, step, queue);
-                    continue;
-                }
-                var current = queue.Dequeue();
-                cancellationToken.ThrowIfCancellationRequested();
-                var here = reached[current];
-                var callable = index.Callable(current);
-                if (callable.Body != BodyStatus.Source)
-                {
-                    boundaries.Add(new(current, null, ReachBoundaryKind.MissingBody, DispatchKind.Direct, null, 0));
-                    continue;
-                }
-                var outgoing = index.Outgoing(current);
-                if (here.Distance >= options.MaxDepth)
-                {
-                    if (!outgoing.IsEmpty) { depthLimited = true; boundaries.Add(new(current, null, ReachBoundaryKind.DepthLimit, DispatchKind.Direct, null, 0)); }
-                    continue;
-                }
-                foreach (var site in outgoing)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (work >= options.MaxExpansions) { workLimited = true; break; }
-                    work++;
-                    if (site.BoundTarget is not { } target || !index.ContainsCallable(target))
-                    {
-                        boundaries.Add(new(current, site.Id, ReachBoundaryKind.Unresolved, site.Dispatch, null, 0));
-                        continue;
-                    }
-                    if (site.Dispatch == DispatchKind.Direct) { Visit(target, here, new(site.Id, target, false), queue); continue; }
-                    var candidates = options.FollowCandidates ? Candidates(index, target) : [];
-                    boundaries.Add(new(current, site.Id, ReachBoundaryKind.Dispatch, site.Dispatch, target, candidates.Length));
-                    foreach (var candidate in candidates)
-                        if (candidatePhase) Visit(candidate, here, new(site.Id, candidate, true), queue);
-                        else deferred.Add((here, new(site.Id, candidate, true)));
-                }
+                foreach (var edge in deferred) search.Relax(edge);
+                search.Run(x => x.Kind != CallEdgeKind.Declared);
             }
-            results.Add(new(root, [.. reached.Values.Where(x => x.Callable != root)
-                .OrderBy(x => x.Distance).ThenBy(x => index.Callable(x.Callable).DisplaySignature, StringComparer.Ordinal).ThenBy(x => x.Callable.Value, StringComparer.Ordinal)],
-                boundaries.ToImmutable(), depthLimited));
+            work += search.Spent;
+            workLimited = search.BudgetExhausted;
+
+            var reached = search.Discovered.Where(x => x != root).Select(x =>
+            {
+                var witness = search.PathTo(x).Select(e => new ReachStep(e.Site.Id, e.Target, e.Kind == CallEdgeKind.Candidate)).ToImmutableArray();
+                return new ReachedCallable(x, search.Distance(x), witness, witness.Any(e => e.Candidate));
+            });
+            var (boundaries, depthLimited) = Boundaries(index, calls, search, charged, options);
+            results.Add(new(root, [.. reached.OrderBy(x => x.Distance).ThenBy(x => index.Callable(x.Callable).DisplaySignature, StringComparer.Ordinal).ThenBy(x => x.Callable.Value, StringComparer.Ordinal)],
+                boundaries, depthLimited));
             if (workLimited) break;
         }
         return new(results.ToImmutable(), workLimited, work);
     }
 
-    // Transitive implementation candidates of a declared target, in ID order. A declared target with its own source
-    // body (a virtual method) is itself a candidate.
-    private static ImmutableArray<CallableId> Candidates(ProgramIndex index, CallableId declared)
+    // Where traversal stopped, in the order callables were taken from the queue and, per callable, in call-site order.
+    private static (ImmutableArray<ReachBoundary>, bool) Boundaries(ProgramIndex index, CallGraph calls,
+        BreadthFirstSearch<CallableId, CallEdge> search, HashSet<CallableId> charged, ReachOptions options)
     {
-        var result = new SortedSet<string>(StringComparer.Ordinal);
-        if (index.Callable(declared).Body == BodyStatus.Source) result.Add(declared.Value);
-        var seen = new HashSet<CallableId> { declared };
-        var pending = new Queue<CallableId>(); pending.Enqueue(declared);
-        while (pending.TryDequeue(out var current))
-            foreach (var implementation in index.Implementations(current))
-                if (seen.Add(implementation.Implementation)) { result.Add(implementation.Implementation.Value); pending.Enqueue(implementation.Implementation); }
-        return [.. result.Select(x => new CallableId(x))];
+        var boundaries = ImmutableArray.CreateBuilder<ReachBoundary>();
+        var depthLimited = false;
+        foreach (var node in search.Dequeued)
+        {
+            if (index.Callable(node).Body != BodyStatus.Source)
+            {
+                boundaries.Add(new(node, null, ReachBoundaryKind.MissingBody, DispatchKind.Direct, null, 0));
+                continue;
+            }
+            var outgoing = index.Outgoing(node);
+            if (search.Distance(node) >= options.MaxDepth)
+            {
+                if (!outgoing.IsEmpty) { depthLimited = true; boundaries.Add(new(node, null, ReachBoundaryKind.DepthLimit, DispatchKind.Direct, null, 0)); }
+                continue;
+            }
+            // Only sites that were examined: a budget stop can leave a callable unexpanded or partially expanded.
+            var edges = calls.Graph.OutEdges(node)[..search.ExaminedEdges(node)];
+            var examined = edges.Select(x => x.Site.Id).ToHashSet();
+            foreach (var site in outgoing)
+            {
+                if (calls.Unresolved(node).Contains(site)) { if (charged.Contains(node)) boundaries.Add(new(node, site.Id, ReachBoundaryKind.Unresolved, site.Dispatch, null, 0)); }
+                else if (site.Dispatch != DispatchKind.Direct && examined.Contains(site.Id))
+                    boundaries.Add(new(node, site.Id, ReachBoundaryKind.Dispatch, site.Dispatch, site.BoundTarget,
+                        options.FollowCandidates ? edges.Count(x => x.Kind == CallEdgeKind.Candidate && x.Site.Id == site.Id) : 0));
+            }
+        }
+        return (boundaries.ToImmutable(), depthLimited);
     }
 }

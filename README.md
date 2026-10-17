@@ -115,6 +115,7 @@ var graph = LayerGraph.Build(index, new LayerMap(index, model), cancellationToke
 var findings = LayerRules.AllowedDependencies(graph, model); // Finding(RuleId, Verdict, Subject, Message, Evidence)
 ```
 
+- `index.CallGraph` and `index.DependencyGraph` expose the whole program as graphs (`Sharpview.Graph`: out/in edges, BFS shortest paths, reachability, quotient by group, strongly connected components).
 - Snapshots contain no Roslyn symbols and stay usable after the workspace is disposed.
 - A rule is a plain function returning `Finding`s. Keep `Verdict.Unknown` separate from `Pass`. See the worked example in the [overview](docs/overview.md#writing-your-own-rule).
 - Exception witnesses carry a machine-readable `ExceptionReason` next to the human-readable `Reason`.
