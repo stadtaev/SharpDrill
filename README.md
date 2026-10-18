@@ -148,7 +148,7 @@ The version is computed by [github-tag-action](https://github.com/mathieudutour/
 
 The highest bump among the new commits wins. Before the first tag the baseline is 0.0.0, so a `feat:` commit makes the first release 0.1.0. The subject must start with the type: `feat: ...` counts, while "feat" only in the description does not. Add `[skip-release]` to a commit message to leave it out of the version calculation. Local builds report `0.0.0-dev`.
 
-One-time setup: create an API key on nuget.org (scope *Push*, glob pattern `SharpView*`, which covers all five package IDs) and add it as the repository secret `NUGET_API_KEY`. Optionally reserve the `SharpView.` ID prefix on nuget.org so nobody else can publish packages under it.
+Publishing uses nuget.org [trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing), so no API key is stored: the workflow exchanges its GitHub OIDC token for a short-lived key. One-time setup on nuget.org (Trusted Publishing page): a policy for repository owner `stadtaev`, repository `sharpview`, workflow file `release.yml`, glob pattern `SharpView*` (covers all five package IDs). The workflow's `NuGet login` step names the nuget.org account (`user: StasT`). Optionally reserve the `SharpView.` ID prefix so nobody else can publish packages under it.
 
 ## Packages
 
