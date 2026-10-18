@@ -1,13 +1,13 @@
 # Coverage and limits
 
-What Sharpview models today, and what it deliberately does not. "Boundary" and "Unknown" results are how the limits show up in reports; nothing outside the model is silently dropped.
+What SharpView models today, and what it deliberately does not. "Boundary" and "Unknown" results are how the limits show up in reports; nothing outside the model is silently dropped.
 
 ## Inputs and loading
 
 - Restored SDK-style C# projects and solutions (`.csproj`, `.sln`, `.slnx`), hosted on .NET 10, loaded through the SDK's MSBuild workspace (no Visual Studio).
 - One configuration/target-framework variant per project. An explicit `--framework` applies to the whole input and must be declared by every selected project.
 - Missing restore assets in any selected project abort loading. Workspace or compiler failures that still produce a compilation become visible gaps.
-- Project evaluation happens before the assets check, so project tooling and source generators may execute. Sharpview never builds, restores or edits the analysed source.
+- Project evaluation happens before the assets check, so project tooling and source generators may execute. SharpView never builds, restores or edits the analysed source.
 - Generated documents are included by default; `--exclude-generated` records each exclusion as evidence.
 
 ## Controller actions
@@ -72,7 +72,7 @@ Implementation candidates come from source types' interface maps and overrides; 
 
 ## How this is verified
 
-Tests combine independently built Core snapshots, in-memory Roslyn compilations, a three-project Web API fixture and fresh CLI processes (see [validation](validation.md)). Sharpview's own solution is used only as a loader smoke input; no external Web API analysis is claimed yet.
+Tests combine independently built Core snapshots, in-memory Roslyn compilations, a three-project Web API fixture and fresh CLI processes (see [validation](validation.md)). SharpView's own solution is used only as a loader smoke input; no external Web API analysis is claimed yet.
 
 
 ## Graph analysis and diagram exports

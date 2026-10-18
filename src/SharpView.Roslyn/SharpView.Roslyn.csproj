@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+<PackageReference Include="Microsoft.Build" ExcludeAssets="runtime" PrivateAssets="all" />
+<PackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" PrivateAssets="all" />
+    <ProjectReference Include="../SharpView.Core/SharpView.Core.csproj" />
+  <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
+<PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" />
+<PackageReference Include="Microsoft.Build.Locator" />
+</ItemGroup>
+
+  <PropertyGroup>
+    <Description>Loads .csproj, .sln and .slnx inputs with MSBuild and Roslyn and extracts the SharpView fact snapshot (types, callables, call sites, throws, catches, project settings). Uses the installed .NET SDK; never restores, builds or edits the analysed code.</Description>
+    <PackageTags>roslyn;msbuild;static-analysis;aspnetcore;workspace</PackageTags>
+  </PropertyGroup>
+
+</Project>

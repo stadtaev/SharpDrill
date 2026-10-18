@@ -1,6 +1,6 @@
-# Sharpview
+# SharpView
 
-Sharpview is a C# research tool for understanding ASP.NET Core Web APIs from source:
+SharpView is a C# research tool for understanding ASP.NET Core Web APIs from source:
 
 - **Project map:** the real `<ProjectReference>` tree, with each project's framework, nullable settings and compiler warnings.
 - **Exceptions:** every explicit throw, and which ones go uncaught, get caught, or pass through a `try` whose catches don't match them.
@@ -9,16 +9,16 @@ Sharpview is a C# research tool for understanding ASP.NET Core Web APIs from sou
 
 Results carry source evidence (file:line:column), and anything the analysis cannot decide is reported as *Unknown* instead of being hidden. It uses the .NET SDK and Roslyn; Visual Studio is not required.
 
-**New here? Read [How Sharpview works](docs/overview.md)** — pipeline, principles, what each command answers, and how to write your own rule.
+**New here? Read [How SharpView works](docs/overview.md)** — pipeline, principles, what each command answers, and how to write your own rule.
 
 ## Install
 
 ```sh
-dotnet tool install -g Sharpview   # requires a .NET 10 or newer SDK
+dotnet tool install -g SharpView   # requires a .NET 10 or newer SDK
 sharpview projects MyApi.slnx
 ```
 
-Update with `dotnet tool update -g Sharpview`. The examples below run from source with `dotnet run --project src/Sharpview.Cli --`; with the tool installed, use `sharpview` instead.
+Update with `dotnet tool update -g SharpView`. The examples below run from source with `dotnet run --project src/SharpView.Cli --`; with the tool installed, use `sharpview` instead.
 
 ## Quick start (from source)
 
@@ -35,14 +35,14 @@ Try it on the sample (`F` is the input):
 ```sh
 F=tests/Fixtures/ResearchSolution/ResearchSolution.slnx
 
-dotnet run --project src/Sharpview.Cli -- projects $F
-dotnet run --project src/Sharpview.Cli -- exceptions $F
-dotnet run --project src/Sharpview.Cli -- exceptions $F --miscaught
-dotnet run --project src/Sharpview.Cli -- reach $F --root 'Research.Api.OrdersController.Get()'
-dotnet run --project src/Sharpview.Cli -- diagram $F
+dotnet run --project src/SharpView.Cli -- projects $F
+dotnet run --project src/SharpView.Cli -- exceptions $F
+dotnet run --project src/SharpView.Cli -- exceptions $F --miscaught
+dotnet run --project src/SharpView.Cli -- reach $F --root 'Research.Api.OrdersController.Get()'
+dotnet run --project src/SharpView.Cli -- diagram $F
 ```
 
-Analysing your own solution: restore it first (Sharpview never restores, builds or edits analysed code). Loading evaluates MSBuild projects and may run project tooling and source generators, so it is not a sandbox.
+Analysing your own solution: restore it first (SharpView never restores, builds or edits analysed code). Loading evaluates MSBuild projects and may run project tooling and source generators, so it is not a sandbox.
 
 ## Commands
 
@@ -74,10 +74,10 @@ For practical use cases of each command, such as impact analysis, CI gating, fin
 
 ```sh
 # Lists numbered controller actions; enter a number, or q to cancel.
-dotnet run --project src/Sharpview.Cli -- diagram tests/Fixtures/ResearchSolution/ResearchSolution.slnx
+dotnet run --project src/SharpView.Cli -- diagram tests/Fixtures/ResearchSolution/ResearchSolution.slnx
 
 # Select directly for scripts. --root also accepts an action ID from inspect --methods.
-dotnet run --project src/Sharpview.Cli -- diagram tests/Fixtures/ResearchSolution/ResearchSolution.slnx \
+dotnet run --project src/SharpView.Cli -- diagram tests/Fixtures/ResearchSolution/ResearchSolution.slnx \
   --root 'Research.Api.OrdersController.Get()' --output /tmp/orders-get.md
 ```
 
@@ -136,7 +136,7 @@ A saved file can return exit code 1 because it contains useful but partial resul
 
 ## Releasing
 
-Every push to `main` that changes code runs [release.yml](.github/workflows/release.yml): restore, build the fixture, test, then publish the `Sharpview` tool to nuget.org, tag `v<version>` and create a GitHub release with the package attached. Pull requests and other branches run [ci.yml](.github/workflows/ci.yml) (test and pack only). Changes limited to `docs/` or `README.md` do not publish; they ship with the next code change.
+Every push to `main` that changes code runs [release.yml](.github/workflows/release.yml): restore, build the fixture, test, then publish all five packages (see [Packages](#packages)) with the same version to nuget.org, tag `v<version>` and create a GitHub release with the packages attached. Pull requests and other branches run [ci.yml](.github/workflows/ci.yml) (test and pack only). Changes limited to `docs/` or `README.md` do not publish; they ship with the next code change.
 
 The version is computed by [github-tag-action](https://github.com/mathieudutour/github-tag-action) (pinned to a commit) from [Conventional Commit](https://www.conventionalcommits.org/) subjects since the last `v*` tag. The tag is created only after nuget.org accepts the package:
 
@@ -148,15 +148,27 @@ The version is computed by [github-tag-action](https://github.com/mathieudutour/
 
 The highest bump among the new commits wins. Before the first tag the baseline is 0.0.0, so a `feat:` commit makes the first release 0.1.0. The subject must start with the type: `feat: ...` counts, while "feat" only in the description does not. Add `[skip-release]` to a commit message to leave it out of the version calculation. Local builds report `0.0.0-dev`.
 
-One-time setup: create an API key on nuget.org (scope *Push*, glob pattern `Sharpview`) and add it as the repository secret `NUGET_API_KEY`.
+One-time setup: create an API key on nuget.org (scope *Push*, glob pattern `SharpView*`, which covers all five package IDs) and add it as the repository secret `NUGET_API_KEY`. Optionally reserve the `SharpView.` ID prefix on nuget.org so nobody else can publish packages under it.
+
+## Packages
+
+| Package | Purpose |
+| --- | --- |
+| `SharpView` | The `sharpview` .NET tool (`dotnet tool install -g SharpView`). |
+| `SharpView.Core` | Fact model, `ProgramIndex` and the queries: reachability, paths, exceptions, project map, layer rules. No Roslyn dependency. |
+| `SharpView.Roslyn` | Loads solutions and projects with MSBuild and Roslyn into a fact snapshot. |
+| `SharpView.Graph` | Generic immutable directed multigraph with search and SCC algorithms. |
+| `SharpView.Export.Mermaid` | Mermaid/Markdown formatting for project maps and call diagrams. |
+
+Every package gets the same version. The libraries are pre-1.0 and their API may still change between minor versions.
 
 ## Library use
 
 ```csharp
 using System.Collections.Immutable;
-using Sharpview.Core;
-using Sharpview.Export.Mermaid;
-using Sharpview.Roslyn;
+using SharpView.Core;
+using SharpView.Export.Mermaid;
+using SharpView.Roslyn;
 
 MSBuildBootstrap.RegisterSdk(); // call at process startup; LoadAsync also registers if needed
 var snapshot = await RoslynProgramLoader.LoadAsync(new AnalysisRequest("Example.slnx"), cancellationToken);
@@ -185,8 +197,8 @@ var graph = LayerGraph.Build(index, new LayerMap(index, model), cancellationToke
 var findings = LayerRules.AllowedDependencies(graph, model); // Finding(RuleId, Verdict, Subject, Message, Evidence)
 ```
 
-- Mermaid/Markdown exports live in `Sharpview.Export.Mermaid`; reference it and import `Sharpview.Export.Mermaid` when calling `MermaidExporter`. Core retains the diagram model/query and depends only on `Sharpview.Graph`.
-- `index.GetCallGraph(cancellationToken)` and `index.GetDependencyGraph(cancellationToken)` lazily publish complete cached graphs; the tokenless properties remain available. They expose the whole program as graphs (`Sharpview.Graph`: out/in edges, BFS shortest paths, reachability, quotient by group, strongly connected components).
+- Mermaid/Markdown exports live in `SharpView.Export.Mermaid`; reference it and import `SharpView.Export.Mermaid` when calling `MermaidExporter`. Core retains the diagram model/query and depends only on `SharpView.Graph`.
+- `index.GetCallGraph(cancellationToken)` and `index.GetDependencyGraph(cancellationToken)` lazily publish complete cached graphs; the tokenless properties remain available. They expose the whole program as graphs (`SharpView.Graph`: out/in edges, BFS shortest paths, reachability, quotient by group, strongly connected components).
 - `CallEdge.Id` identifies a specific site/kind/target relationship. Quotients retain every group, original node membership and supporting edge, including isolated groups. Quotients are presentation/aggregation models; collapsing groups can invent apparent paths, so method exception analysis uses the original graph.
 - `Where` and `Subgraph` materialize new graphs; they share payload objects. Generic graph consumers must keep node equality/hash codes and edge endpoints stable.
 - Reach stores shared parent links and constructs witness arrays only when requested. Completed searches report shortest allowed distances; truncated searches retain consistent admitted paths. `ViaCandidate` means no bounded direct-only route was established, while `WitnessUsesCandidate` describes the selected shortest witness. A shorter candidate witness can coexist with a longer direct route. `DirectDistance` (nullable) and lazy `DirectWitness` preserve that direct-only proof; direct-call rules must use them. Null means no direct route was established within the bounds, not proof none exists.
@@ -195,7 +207,7 @@ var findings = LayerRules.AllowedDependencies(graph, model); // Finding(RuleId, 
 - Exception witnesses carry a machine-readable `ExceptionReason` next to the human-readable `Reason`.
 - MSBuild Locator finds an installed SDK. Host selection and the input's `global.json` are not guaranteed to match every shell configuration.
 
-To analyse an existing `inspect --json` export without loading Roslyn, reference only `Sharpview.Core`:
+To analyse an existing `inspect --json` export without loading Roslyn, reference only `SharpView.Core`:
 
 ```csharp
 await using var input = File.OpenRead("snapshot.json");
@@ -217,7 +229,7 @@ inputs; offline loading is a library API. `CallIndex` is now internal; library c
 
 | Document | Read it for |
 | --- | --- |
-| [How Sharpview works](docs/overview.md) | The approach: pipeline, principles, commands, custom rules, glossary. |
+| [How SharpView works](docs/overview.md) | The approach: pipeline, principles, commands, custom rules, glossary. |
 | [Coverage and limits](docs/coverage.md) | What is and is not modelled. |
 | [Model reference](docs/model.md) | Facts, identities, keys and query semantics in detail. |
 | [Validation](docs/validation.md) | Which tests prove which behaviour; regression comparison. |

@@ -5,7 +5,7 @@ These reports were produced from the repository-owned three-project Web API fixt
 Reproduce with the built CLI (`F=tests/Fixtures/ResearchSolution/ResearchSolution.slnx`, `R='Research.Api.OrdersController.Get()'`):
 
 ```sh
-CLI="dotnet src/Sharpview.Cli/bin/Debug/net10.0/Sharpview.Cli.dll"
+CLI="dotnet src/SharpView.Cli/bin/Debug/net10.0/SharpView.Cli.dll"
 $CLI projects $F                                   # projects.txt
 $CLI projects $F --mermaid --output projects.md    # projects.md
 $CLI exceptions $F                                 # exceptions.txt

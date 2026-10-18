@@ -52,5 +52,5 @@ shared by detailed and summary analysis. Computed summaries are scoped to a snap
   retaining call-site/path-sensitive reporting. Their bounded enumeration is still useful for detailed explanations.
 - Event types are not dependency sources yet (documented in coverage).
 - Validate against an external Web API with a working restore configuration. The earlier API archive's configured package
-  feed returned HTTP 404; repository fixtures and Sharpview remain the available validation inputs.
+  feed returned HTTP 404; repository fixtures and SharpView remain the available validation inputs.
 - Extend extraction ownership for top-level/initializer callables, minimal APIs and inherited action enumeration.

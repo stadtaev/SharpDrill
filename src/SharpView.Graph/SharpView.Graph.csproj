@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Description>Small generic immutable directed multigraph for .NET: out/in edges, breadth-first search with shortest paths, reachability, quotient graphs and strongly connected components. Deterministic by construction; independent of C# and Roslyn.</Description>
+    <PackageTags>graph;digraph;multigraph;bfs;scc;shortest-path</PackageTags>
+  </PropertyGroup>
+
+</Project>

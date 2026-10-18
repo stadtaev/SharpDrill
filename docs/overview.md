@@ -1,6 +1,6 @@
-# How Sharpview works
+# How SharpView works
 
-Sharpview answers structural questions about an ASP.NET Core Web API by reading its C# source with the compiler (Roslyn):
+SharpView answers structural questions about an ASP.NET Core Web API by reading its C# source with the compiler (Roslyn):
 
 - How do the projects reference each other, and how is each one built?
 - Where are exceptions thrown, which ones go uncaught, which get caught where, and which slip past a `try` that doesn't match them?
@@ -23,24 +23,24 @@ flowchart LR
 
 | Stage | Project | What it does |
 | --- | --- | --- |
-| Load | `Sharpview.Roslyn` | Opens the solution with the .NET SDK. Never restores, builds or edits your code. |
-| Extract facts | `Sharpview.Roslyn` | Turns compiler symbols into small immutable records: types, callables, call sites, dependencies, throws, catches, implementation candidates, gaps. |
-| Index | `Sharpview.Core` | `ProgramIndex` builds lookups once (callers, callees, members, ancestors, candidates…) and, on first use, the whole-program `CallGraph` and type `DependencyGraph`. |
-| Analyses & models | `Sharpview.Core` | Queries over the index: project map, exception propagation and handling, reachability, call paths, layer graph (library only). |
-| Rules | `Sharpview.Core` | Plain C# functions that turn analysis results into `Finding`s. |
-| Diagram export | `Sharpview.Export.Mermaid` | Formats the project map and call-diagram projections as Mermaid/Markdown; owns the Mermaid NuGet dependency. |
-| Reports | `Sharpview.Cli` | Formats text/JSON. No analysis logic lives here. |
+| Load | `SharpView.Roslyn` | Opens the solution with the .NET SDK. Never restores, builds or edits your code. |
+| Extract facts | `SharpView.Roslyn` | Turns compiler symbols into small immutable records: types, callables, call sites, dependencies, throws, catches, implementation candidates, gaps. |
+| Index | `SharpView.Core` | `ProgramIndex` builds lookups once (callers, callees, members, ancestors, candidates…) and, on first use, the whole-program `CallGraph` and type `DependencyGraph`. |
+| Analyses & models | `SharpView.Core` | Queries over the index: project map, exception propagation and handling, reachability, call paths, layer graph (library only). |
+| Rules | `SharpView.Core` | Plain C# functions that turn analysis results into `Finding`s. |
+| Diagram export | `SharpView.Export.Mermaid` | Formats the project map and call-diagram projections as Mermaid/Markdown; owns the Mermaid NuGet dependency. |
+| Reports | `SharpView.Cli` | Formats text/JSON. No analysis logic lives here. |
 
-`Sharpview.Core` depends only on `Sharpview.Graph`, with no Roslyn or Mermaid dependency: once a snapshot exists (or is loaded from JSON), all analysis runs on plain records.
+`SharpView.Core` depends only on `SharpView.Graph`, with no Roslyn or Mermaid dependency: once a snapshot exists (or is loaded from JSON), all analysis runs on plain records.
 
-`Sharpview.Graph` is a small generic graph library underneath Core (it knows nothing about C#): an immutable directed multigraph (`DiGraph`) with NetworkX-style operations — out/in edges, successors/predecessors, `Where` and `Subgraph` (materialized copies sharing payload), breadth-first search with shortest paths, `ReachableFrom`, `Quotient` (collapse nodes into groups such as layers) and `StronglyConnectedComponents` (cycles). Everything keeps insertion order, so results are deterministic. Reachability searches the call graph with shared parent links; witnesses materialize on demand. The layer graph is a quotient of the call and dependency graphs, with isolated groups and original node membership retained. Node identities and edge endpoints must remain stable. Cached graph accessors accept cancellation tokens and publish complete graphs only.
+`SharpView.Graph` is a small generic graph library underneath Core (it knows nothing about C#): an immutable directed multigraph (`DiGraph`) with NetworkX-style operations — out/in edges, successors/predecessors, `Where` and `Subgraph` (materialized copies sharing payload), breadth-first search with shortest paths, `ReachableFrom`, `Quotient` (collapse nodes into groups such as layers) and `StronglyConnectedComponents` (cycles). Everything keeps insertion order, so results are deterministic. Reachability searches the call graph with shared parent links; witnesses materialize on demand. The layer graph is a quotient of the call and dependency graphs, with isolated groups and original node membership retained. Node identities and edge endpoints must remain stable. Cached graph accessors accept cancellation tokens and publish complete graphs only.
 
 ## Principles
 
 1. **Declared, candidate and runtime are different things.**
    - *Declared binding* — what the source code calls, e.g. `IRepository.Read()`. Always recorded.
    - *Implementation candidate* — a source method that implements or overrides it, e.g. `SqlRepository.Read()`. Recorded separately; followed only on request and always marked "candidate".
-   - *Runtime target* — what actually runs (depends on DI, receiver type…). Sharpview never claims this.
+   - *Runtime target* — what actually runs (depends on DI, receiver type…). SharpView never claims this.
 2. **Unknown is a result, not an error.** Interface dispatch, missing bodies, catch filters, `finally`, unobserved tasks, depth limits… produce explicit Unknown/boundary entries with a reason.
 3. **Evidence everywhere.** Facts and results point at source locations; reports can be checked by hand.
 4. **Bounded and deterministic.** Depth, output and work limits are explicit flags; the same input gives byte-identical output.
@@ -59,7 +59,7 @@ Snippets below are from the sample Web API, with names and paths shortened; the 
 | Which pass through a `try` that doesn't catch them? | `exceptions --miscaught` | [exceptions-miscaught.txt](samples/exceptions-miscaught.txt) |
 | What can this action reach? | `reach` | [reach.txt](samples/reach.txt) |
 | What are all the call paths from an action (or any method)? | `paths` | [paths.txt](samples/paths.txt) |
-| What did Sharpview extract? | `inspect` (`--methods`, `--json`) | — |
+| What did SharpView extract? | `inspect` (`--methods`, `--json`) | — |
 
 ### When to use which command
 
@@ -102,11 +102,11 @@ Any *Unknown* entry says where the analysis needs a human.
 
 **`diagram` — a picture of one endpoint.** A Mermaid call graph for pull requests, design docs or onboarding notes. It stays readable where `paths` would produce thousands of paths, because shared callees are drawn once.
 
-**`inspect` — what did Sharpview extract?**
+**`inspect` — what did SharpView extract?**
 
 - *Summary (default):* a quick check after loading: each project and its framework; counts of types, callables, calls, dependencies, throws, catches, actions and gaps; call sites by dispatch kind; and the exception landscape (every explicit throw and catch, with evidence).
 - *`--methods`:* every source callable with its kind, body status and ID. Copy a `--root` from here: an ID or the exact signature, and the ID when overloads or lambdas share a signature. A method missing from the list was not extracted from source (for example, it lives only in a referenced assembly, or is generated code dropped by `--exclude-generated`). Look here first when a result seems wrong.
-- *`--json`:* the full fact snapshot (schema v3). Use it to feed scripts, agents or dashboards without writing C# against the library, or to compare snapshots across commits, since IDs are stable keys. It also answers "was this call site extracted at all?" when debugging Sharpview itself.
+- *`--json`:* the full fact snapshot (schema v3). Use it to feed scripts, agents or dashboards without writing C# against the library, or to compare snapshots across commits, since IDs are stable keys. It also answers "was this call site extracted at all?" when debugging SharpView itself.
 
 ### `projects` — the reference tree
 
@@ -190,7 +190,7 @@ static IEnumerable<Finding> NoDirectInfrastructure(ProgramIndex index, LayerMap 
 
 Even with candidates enabled, this rule uses `DirectDistance == 1` and `DirectWitness` for its violation and evidence. A candidate shortcut cannot turn a longer direct route into a direct-call violation. Candidate possibilities can be evaluated separately as Unknown; this example enforces direct calls only.
 
-Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `Sharpview.Graph` algorithms, `ProjectMap` (MSBuild references and settings), `LayerMap`/`LayerGraph` (your own layer mapping, library only), `ReachabilityQuery`, `CallChainQuery`, `ExceptionQuery` (with `ExceptionReason` codes), `ExceptionHandlingQuery` (caught/miscaught), `AspNetConventions`. Keep `Verdict.Unknown` separate from `Pass` — it is how a rule stays honest.
+Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `SharpView.Graph` algorithms, `ProjectMap` (MSBuild references and settings), `LayerMap`/`LayerGraph` (your own layer mapping, library only), `ReachabilityQuery`, `CallChainQuery`, `ExceptionQuery` (with `ExceptionReason` codes), `ExceptionHandlingQuery` (caught/miscaught), `AspNetConventions`. Keep `Verdict.Unknown` separate from `Pass` — it is how a rule stays honest.
 
 ## Glossary
 
@@ -220,7 +220,7 @@ flow use the same transfer code as detailed exception witnesses. Per-call-site c
 site from hiding effects at another. Budgets bound retained facts and transfer work; uncertainty remains explicit. Ownerless gaps stay in result-level `GlobalGaps`, separate from action effects; overall `IsComplete` accounts for them. Complexity
 depends on the number of distinct effects, call sites and fixed-point transfers, rather than just the node/edge count.
 
-`CallDiagramQuery` projects a bounded action subgraph without enumerating all paths. `MermaidExporter` in `Sharpview.Export.Mermaid` formats that projection;
+`CallDiagramQuery` projects a bounded action subgraph without enumerating all paths. `MermaidExporter` in `SharpView.Export.Mermaid` formats that projection;
 it does not infer layers or analyze exception behavior. The CLI `diagram` command supplies selection and safe file output.
 Project groups are labels for source ownership; collapsed project/layer graphs must never replace the method graph for
 reachability or exception propagation. See [the implementation change document](changes/2026-10-18-graph-analysis-and-mermaid.md)

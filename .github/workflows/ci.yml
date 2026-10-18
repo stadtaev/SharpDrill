@@ -24,4 +24,4 @@ jobs:
       - name: Test
         run: dotnet test sharpview.slnx -c Release
       - name: Pack
-        run: dotnet pack src/Sharpview.Cli -c Release
+        run: dotnet pack sharpview.slnx -c Release

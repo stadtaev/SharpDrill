@@ -1,6 +1,6 @@
 name: Release
 
-# Every push to main that changes code publishes a new version of the Sharpview tool to nuget.org.
+# Every push to main that changes code publishes a new version of the SharpView tool to nuget.org.
 # github-tag-action computes the version from Conventional Commit messages since the last v* tag:
 # patch by default, minor for feat:, major for feat!: or a BREAKING CHANGE: footer.
 on:
@@ -49,7 +49,7 @@ jobs:
 
       - name: Pack
         if: steps.version.outputs.new_tag != ''
-        run: dotnet pack src/Sharpview.Cli -c Release -p:Version="$VERSION" -p:ContinuousIntegrationBuild=true
+        run: dotnet pack sharpview.slnx -c Release -p:Version="$VERSION" -p:ContinuousIntegrationBuild=true
         env:
           VERSION: ${{ steps.version.outputs.new_version }}
 
