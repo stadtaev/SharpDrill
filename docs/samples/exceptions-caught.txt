@@ -1,0 +1,35 @@
+Caught: Research.Infrastructure.StorageException
+  Thrown: Research.Infrastructure.Repository.ReadAsync() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:8:64
+  Caught: Research.Application.Service.AwaitCaught() | catch (Research.Infrastructure.StorageException) | Project: Research.Application | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Application/Service.cs:14:84
+  Handler: handles it (recovery not proven)
+  Example path: Research.Api.OrdersController.AwaitCaught() --> Research.Application.Service.AwaitCaught() --> Research.Infrastructure.Repository.ReadAsync()
+Caught: Research.Infrastructure.StorageException
+  Thrown: Research.Infrastructure.Repository.Read() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:6:33
+  Caught: Research.Application.Service.Caught() | catch (Research.Infrastructure.StorageException) | Project: Research.Application | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Application/Service.cs:6:62
+  Handler: handles it (recovery not proven)
+  Example path: Research.Api.OrdersController.Caught() --> Research.Application.Service.Caught() --> Research.Infrastructure.Repository.Read()
+Caught: Research.Infrastructure.StorageException
+  Thrown: Research.Infrastructure.Repository.Read() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:6:33
+  Caught: Research.Application.Service.Filter(bool) | catch (Research.Infrastructure.StorageException) when (...) | Project: Research.Application | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Application/Service.cs:11:74
+  Handler: handles it (recovery not proven) | filter decides at runtime
+  Example path: Research.Api.OrdersController.Filter(bool) --> Research.Application.Service.Filter(bool) --> Research.Infrastructure.Repository.Read()
+Caught: Research.Infrastructure.StorageException
+  Thrown: Research.Infrastructure.Repository.Read() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:6:33
+  Caught: Research.Application.Service.Nested() | catch (Research.Infrastructure.StorageException) | Project: Research.Application | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Application/Service.cs:18:68
+  Handler: rethrows it
+  Example path: Research.Api.OrdersController.Nested() --> Research.Application.Service.Nested() --> Research.Infrastructure.Repository.Read()
+Caught: Research.Infrastructure.StorageException
+  Thrown: Research.Infrastructure.Repository.Read() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:6:33
+  Caught: Research.Application.Service.Nested() | catch (System.Exception) | Project: Research.Application | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Application/Service.cs:18:106
+  Handler: handles it (recovery not proven)
+  Example path: Research.Api.OrdersController.Nested() --> Research.Application.Service.Nested() --> Research.Infrastructure.Repository.Read()
+Caught: Research.Infrastructure.StorageException
+  Thrown: Research.Infrastructure.Repository.Read() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:6:33
+  Caught: Research.Application.Service.Replace() | catch (Research.Infrastructure.StorageException) | Project: Research.Application | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Application/Service.cs:10:63
+  Handler: throws a replacement
+  Example path: Research.Api.OrdersController.Replace() --> Research.Application.Service.Replace() --> Research.Infrastructure.Repository.Read()
+Caught: Research.Infrastructure.StorageException
+  Thrown: Research.Infrastructure.Repository.Read() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:6:33
+  Caught: Research.Application.Service.Rethrow() | catch (Research.Infrastructure.StorageException) | Project: Research.Application | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Application/Service.cs:9:63
+  Handler: rethrows it
+  Example path: Research.Api.OrdersController.Rethrow() --> Research.Application.Service.Rethrow() --> Research.Infrastructure.Repository.Read()

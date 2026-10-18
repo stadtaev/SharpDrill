@@ -1,13 +1,13 @@
 # Coverage and limits
 
-What Sharpview models today, and what it deliberately does not. "Boundary" and "Unknown" results are how the limits show up in reports; nothing outside the model is silently dropped.
+What SharpView models today, and what it deliberately does not. "Boundary" and "Unknown" results are how the limits show up in reports; nothing outside the model is silently dropped.
 
 ## Inputs and loading
 
 - Restored SDK-style C# projects and solutions (`.csproj`, `.sln`, `.slnx`), hosted on .NET 10, loaded through the SDK's MSBuild workspace (no Visual Studio).
 - One configuration/target-framework variant per project. An explicit `--framework` applies to the whole input and must be declared by every selected project.
 - Missing restore assets in any selected project abort loading. Workspace or compiler failures that still produce a compilation become visible gaps.
-- Project evaluation happens before the assets check, so project tooling and source generators may execute. Sharpview never builds, restores or edits the analysed source.
+- Project evaluation happens before the assets check, so project tooling and source generators may execute. SharpView never builds, restores or edits the analysed source.
 - Generated documents are included by default; `--exclude-generated` records each exclusion as evidence.
 
 ## Controller actions
@@ -45,11 +45,18 @@ Implementation candidates come from source types' interface maps and overrides; 
   - origins inside library code;
   - handler-owned throws, whose reachability depends on other exceptions.
 - **Not modelled:** implicit exceptions (from constructors, getters, framework calls) and branch feasibility. All branches and catch-body calls are structural facts.
+- **Miscaught:** reported only when every catch clause of a crossed `try` definitely does not match the exception's type at that point. A filtered or runtime-dependent clause makes the result Unknown instead.
 - **Wording:** a catch is never reported as successful recovery. "May escape" is scoped to the action under this model. Registration evidence (`UseExceptionHandler`, `AddExceptionHandler`, `UseDeveloperExceptionPage`) does not prove middleware order, environment conditions, invocation, response availability or complete coverage.
 
-## Layers and dependencies
+## Projects
 
-- Layers require explicit `project:`, `namespace:` or `type:` prefix mappings.
+- **From MSBuild:** `<ProjectReference>` items and the evaluated `TargetFramework`, `Nullable`, `TreatWarningsAsErrors` and `WarningsAsErrors` of each loaded C# project, for the selected configuration and framework.
+- **From the compiler:** warning and error counts after severity options. Analyzer, NuGet and other MSBuild warnings are not counted.
+- **Not covered:** package references, non-C# projects (reported as gaps) and references to projects outside the loaded workspace (listed as unloaded).
+
+## Layers and dependencies (library only)
+
+- Layers require explicit `project:`, `namespace:` or `type:` prefix mappings through `LayerModel`; the CLI no longer exposes them.
 - **Dependency sources:**
   - call sites;
   - signatures and inheritance, where base types contribute their type arguments;
@@ -65,4 +72,19 @@ Implementation candidates come from source types' interface maps and overrides; 
 
 ## How this is verified
 
-Tests combine independently built Core snapshots, in-memory Roslyn compilations, a three-project Web API fixture and fresh CLI processes (see [validation](validation.md)). Sharpview's own solution is used only as a loader smoke input; no external Web API analysis is claimed yet.
+Tests combine independently built Core snapshots, in-memory Roslyn compilations, a three-project Web API fixture and fresh CLI processes (see [validation](validation.md)). SharpView's own solution is used only as a loader smoke input; no external Web API analysis is claimed yet.
+
+
+## Graph analysis and diagram exports
+
+- Generic directed multigraph: both adjacency directions, parallel edges, deterministic insertion order, phased shortest-path
+  relaxation, quotient groups with original memberships (including isolated nodes), and iterative SCC discovery.
+- Reach: shared immutable parent links, lazy witness arrays, separate direct-only distance/witness and candidate-inclusive routes, per-root work
+  truncation, and explicit dispatch/unresolved/body/depth boundaries. A work stop can leave a valid nonoptimal path.
+- Exception summaries: bottom-up direct-call SCC fixed points over explicit origins, per-site transfers, finite fact identities,
+  reconstructed example witnesses, separate uncertainty and work/fact limits. Detailed witness enumeration is still available. Ownerless gaps are global caveats, not repeated root effects; owned gaps remain associated with reached methods.
+  Unknown propagation is conservative; summaries do not remove arbitrary unknown effects merely because a catch-all exists.
+- Mermaid: one controller action selected interactively or by exact signature/ID, project groups, branches/shared nodes/cycles,
+  parallel sites, escaped labels, evidence, uncertainty boundaries and visible truncation. Default limits apply after loading
+  and whole-program graph preparation. Inherited actions, minimal APIs and implicit database/framework operations remain out
+  of scope; a graph ends at the bodies/bindings the extractor can establish.

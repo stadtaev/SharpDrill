@@ -4,3 +4,5 @@
 .idea/
 *.user
 *.suo
+diagrams_exports/
+nupkg/

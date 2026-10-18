@@ -1,8 +1,0 @@
-Layers: API, Application, Infrastructure; edges: 8; external references: 77; unresolved calls: 0; rule evaluated: True; violations: 1; unknown: 0.
-Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:2:1)
-Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:3:1)
-Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:4:1)
-Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:5:1)
-Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:6:1)
-Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:7:1)
-Extraction gaps: 6. Coverage: explicit origins/direct calls; minimal APIs and inherited actions outside scope.

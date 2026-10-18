@@ -5,9 +5,11 @@
     <Platform Name="x86" />
   </Configurations>
   <Folder Name="/src/">
-    <Project Path="src/Sharpview.Cli/Sharpview.Cli.csproj" />
-    <Project Path="src/Sharpview.Core/Sharpview.Core.csproj" />
-    <Project Path="src/Sharpview.Roslyn/Sharpview.Roslyn.csproj" />
+    <Project Path="src/SharpView.Cli/SharpView.Cli.csproj" />
+    <Project Path="src/SharpView.Core/SharpView.Core.csproj" />
+    <Project Path="src/SharpView.Export.Mermaid/SharpView.Export.Mermaid.csproj" />
+    <Project Path="src/SharpView.Graph/SharpView.Graph.csproj" />
+    <Project Path="src/SharpView.Roslyn/SharpView.Roslyn.csproj" />
   </Folder>
-  <Folder Name="/tests/"><Project Path="tests/Sharpview.Tests/Sharpview.Tests.csproj" /></Folder>
+  <Folder Name="/tests/"><Project Path="tests/SharpView.Tests/SharpView.Tests.csproj" /></Folder>
 </Solution>

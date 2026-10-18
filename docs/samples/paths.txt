@@ -1,0 +1,8 @@
+Research.Api.OrdersController.Get() --> Research.Application.Service.Load() --> Research.Infrastructure.Repository.Read() --> Research.Infrastructure.StorageException..ctor() [metadata body unavailable]
+  Research.Api.OrdersController.Get() | Project: Research.Api | Type: Research.Api.OrdersController | Transitions: 0
+  Research.Application.Service.Load() | Project: Research.Application | Type: Research.Application.Service | Transitions: 1
+  Research.Infrastructure.Repository.Read() | Project: Research.Infrastructure | Type: Research.Infrastructure.Repository | Transitions: 2
+  Research.Infrastructure.StorageException..ctor() | Project: Research.Infrastructure | Type: Research.Infrastructure.StorageException | Transitions: 3
+  Evidence: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/OrdersController.cs:8:36 | Direct declared binding
+  Evidence: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Application/Service.cs:5:34 | Direct declared binding
+  Evidence: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:6:39 | Direct declared binding

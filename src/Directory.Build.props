@@ -1,0 +1,27 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <!-- Metadata shared by every package built from src/. Versions come from git tags in the publish workflow. -->
+  <PropertyGroup>
+    <Version>0.0.0-dev</Version>
+    <Authors>Stanislav Tadtaev</Authors>
+    <Copyright>Copyright (c) 2026 Stanislav Tadtaev</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/stadtaev/sharpview</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/stadtaev/sharpview</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)../nupkg</PackageOutputPath>
+  </PropertyGroup>
+
+  <!-- Libraries share one README; the tool project packs its own. -->
+  <ItemGroup Condition="'$(PackAsTool)' != 'true'">
+    <None Include="$(MSBuildThisFileDirectory)LIBRARIES.md" Pack="true" PackagePath="README.md" Visible="false" />
+  </ItemGroup>
+
+</Project>

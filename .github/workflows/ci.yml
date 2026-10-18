@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Restore
+        run: dotnet restore sharpview.slnx
+      # The tests analyse this fixture, which must be restored and built first.
+      - name: Build fixture
+        run: dotnet build tests/Fixtures/ResearchSolution/ResearchSolution.slnx
+      - name: Test
+        run: dotnet test sharpview.slnx -c Release
+      - name: Pack
+        run: dotnet pack sharpview.slnx -c Release

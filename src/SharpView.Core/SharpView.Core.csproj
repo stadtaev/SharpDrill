@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../SharpView.Graph/SharpView.Graph.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <Description>Fact model and queries behind SharpView: call-graph reachability and paths, exception throw/catch/escape analysis, MSBuild project map and layer rules, over an immutable snapshot of a C# program. No Roslyn dependency; snapshots can be loaded from JSON.</Description>
+    <PackageTags>static-analysis;call-graph;exceptions;aspnetcore;architecture;roslyn</PackageTags>
+  </PropertyGroup>
+
+</Project>

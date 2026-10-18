@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Mermaid.NET.Flowcharts" />
+    <ProjectReference Include="../SharpView.Core/SharpView.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <Description>Formats SharpView project maps and call diagrams as Mermaid flowcharts in Markdown, with source-evidence tables.</Description>
+    <PackageTags>mermaid;diagram;flowchart;markdown</PackageTags>
+  </PropertyGroup>
+
+</Project>

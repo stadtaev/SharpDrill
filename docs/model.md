@@ -1,6 +1,6 @@
 # Model reference
 
-Detailed semantics of facts, identities and queries. For the big picture start with [How Sharpview works](overview.md).
+Detailed semantics of facts, identities and queries. For the big picture start with [How SharpView works](overview.md).
 
 Core records contain immutable arrays, declaration IDs, typed uses and source evidence. Compilation identity contains project path, configuration and selected framework. Method identity uses assembly identity and canonical documentation identity, normalising generic definitions, reduced extensions and partial methods. Local/lambda identities include source position; arbitrary-edit stability is not promised. Duplicate display signatures retain distinct IDs.
 
@@ -27,6 +27,8 @@ JSON exports a schema-version-3 envelope (all IDs as plain strings), producer ve
 **Identity.** `CallableId`/`TypeId` stay local (they contain project paths and assembly versions). `Key` is portable: `<project>|<documentation ID>`, or for lambdas and local functions the nearest documented member plus name/ordinal and project-relative position. Lambdas and local functions have position-based IDs so same-shaped bodies in one type never share a fact. Caveats: when two projects share a file name (or two versions of an assembly are referenced) later keys get `#2`, `#3` suffixes in ID order, which can shift when projects are added; lambdas and local functions in source-generated files carry the generator output path, which may include configuration/framework folders when `EmitCompilerGeneratedFiles` is on. `SourceRoot` with `SourceEvidence.RelativeTo` yields repository-relative paths. All IDs, including `ThrowSiteId`, `CatchId` and `ExceptionRegionId`, are typed.
 
 **Index.** `ProgramIndex` is built once per snapshot and gives ordered lookups: callables, types, projects, outgoing/incoming call sites, throws, catches, regions, gaps, members, ancestors and implementation candidates in both directions. Queries take it directly; snapshot overloads remain.
+
+**Graphs.** `SharpView.Graph` provides a generic, immutable directed multigraph: parallel edges are kept (two call sites are two pieces of evidence), and nodes, edges and adjacency lists keep insertion order. `ProgramIndex.CallGraph` has a node per callable and an edge per resolved call site (`Direct` or `Declared`), plus `Candidate` edges from each non-direct site to its implementation candidates. A candidate edge to the declared target itself (a virtual member with a body) is flagged `IsDeclaredTargetCandidate`. Unresolved call sites are not edges; they are listed per caller, so traversals report them as boundaries. `ProgramIndex.DependencyGraph` has a node per type and an edge per dependency fact. A callable-owned fact hangs off its declaring type, base-type arguments become separate inheritance edges, and type parameters produce no edge. Both graphs are derived from the facts and built on first use. They are never serialised as a second model.
 
 **Conventions.** Controller actions are classified in Core (`AspNetConventions`) from facts, so the snapshot does not grow one array per framework concept. Boundary-handler registrations stay extracted because they need invocation binding.
 
