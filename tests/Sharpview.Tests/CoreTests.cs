@@ -144,7 +144,7 @@ public sealed class CoreTests
         Assert.False(result.IsComplete);
         Assert.Equal(2, result.Results.Length);
         Assert.All(result.Results, x => Assert.NotEqual(ExceptionReason.ExtractionGap, x.ReasonCode));
-        var limited = ExceptionQuery.Analyze(snapshot, [new("Action"), new("Other")], new(MaxChains: 1));
+        var limited = ExceptionQuery.Analyze(snapshot, [new("Action"), new("Other")], new(MaxResults: 1));
         Assert.NotNull(Assert.Single(limited.Results).Origin);
         Assert.Single(limited.GlobalGaps); Assert.True(limited.OutputLimitReached);
     }
@@ -381,17 +381,15 @@ public sealed class CoreTests
             x => x.Status == ExceptionStatus.Unknown && x.Reason.Contains("Cycle") && x.ReasonCode == ExceptionReason.Cycle);
     }
 
-    [Theory]
-    [InlineData(ChainDispatchPolicy.Declared, false)]
-    [InlineData(ChainDispatchPolicy.Direct, true)]
-    public void Dispatch_policy_preserves_binding_and_marks_excluded_target(ChainDispatchPolicy policy, bool excluded)
+    [Fact]
+    public void Paths_stop_at_dispatch_with_the_declared_binding()
     {
         var snapshot = Snapshot([Method("Action"), Method("Virtual"), Method("Leaf")],
             [Call("Action", "Virtual", "av", DispatchKind.Virtual), Call("Virtual", "Leaf", "vl")]);
-        var chain = Assert.Single(CallChainQuery.Enumerate(snapshot, [new("Action")], new(Dispatch: policy)).Chains);
+        var chain = Assert.Single(CallChainQuery.Enumerate(snapshot, [new("Action")], new()).Chains);
         var step = Assert.Single(chain.Steps);
         Assert.Equal(new CallableId("Virtual"), step.Target);
-        Assert.Equal(excluded, step.IsExcludedDispatch);
+        Assert.Equal(DispatchKind.Virtual, step.Dispatch);
         Assert.Equal(ChainEnd.DispatchBoundary, chain.End);
     }
 
@@ -403,7 +401,7 @@ public sealed class CoreTests
         Assert.Single(chains.Chains);
         Assert.False(chains.OutputLimitReached);
         Assert.False(chains.WorkLimitReached);
-        var exceptions = ExceptionQuery.Analyze(snapshot, [new("Action")], new(MaxChains: 1, MaxExpansions: 1));
+        var exceptions = ExceptionQuery.Analyze(snapshot, [new("Action")], new(MaxResults: 1, MaxExpansions: 1));
         Assert.Single(exceptions.Results);
         Assert.False(exceptions.OutputLimitReached);
         Assert.False(exceptions.WorkLimitReached);
@@ -596,7 +594,7 @@ public sealed class CoreTests
     {
         var snapshot = Snapshot([Method("Action")], []);
         Assert.Throws<ArgumentException>(() => ExceptionQuery.Analyze(snapshot, [new("Action")], new(MaxExpansions: 0)));
-        Assert.Throws<ArgumentException>(() => CallChainQuery.Enumerate(snapshot, [new("Action")], new(Dispatch: (ChainDispatchPolicy)42)));
+        Assert.Throws<ArgumentException>(() => CallChainQuery.Enumerate(snapshot, [new("Action")], new(MaxChains: 0)));
         Assert.Throws<ArgumentException>(() => CallChainQuery.Enumerate(snapshot, [new("Action")], new(MaxDepth: -1)));
         Assert.Throws<OperationCanceledException>(() => ExceptionQuery.Analyze(snapshot, [new("Action")], new(), new CancellationToken(true)));
         Assert.Throws<OperationCanceledException>(() => CallChainQuery.Enumerate(snapshot, [new("Action")], new(), new CancellationToken(true)));

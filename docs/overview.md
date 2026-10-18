@@ -53,10 +53,44 @@ Snippets below are from the sample Web API, with names and paths shortened; the 
 | Question | Command | Output (fixture sample) |
 | --- | --- | --- |
 | What can this action reach, and through which layers? | `reach` | [reach.txt](samples/reach.txt) |
-| What are all the call paths from an action? | `controllers` (actions) / `chains` (any method) | [controllers.txt](samples/controllers.txt) |
-| Which explicit exceptions can escape an action? | `exceptions` / `exceptions --summary` | [exceptions.txt](samples/exceptions.txt) |
+| What are all the call paths from an action (or any method)? | `paths` | [paths.txt](samples/paths.txt) |
+| Which explicit exceptions can escape an action? | `exceptions` (summary) / `exceptions --paths` | [exceptions.txt](samples/exceptions.txt) |
 | How do layers depend on each other; are rules broken? | `layers` (+ `--allow`) | [layers.txt](samples/layers.txt) |
-| What did Sharpview extract? | `methods`, `inspect` (`--format json`) | — |
+| What did Sharpview extract? | `inspect` (`--methods`, `--json`) | — |
+
+### When to use which command
+
+| Need | Command |
+| --- | --- |
+| Everyday analysis | `reach`, `exceptions`, `layers`, `diagram` |
+| Every route through one small endpoint, or from a method that is not an action | `paths` |
+| Lookups, coverage checks and machine-readable facts | `inspect` |
+
+**`reach` — what can this endpoint touch?** Each reachable method once, with distance and one shortest path. Its cost grows with the size of the code, not the number of paths, so it is the right default on large solutions.
+
+- *Impact analysis:* before changing `Repository.Save()`, run `reach` over all actions to see which endpoints can get to it.
+- *Architecture checks:* an Infrastructure method at distance 1 from a controller means the Application layer was skipped. The rule in [Writing your own rule](#writing-your-own-rule) is built on exactly this.
+- *Onboarding and review:* a flat list of everything an endpoint depends on, without wading through paths.
+- *Security and audit:* can any endpoint reach `File.Delete` or a raw SQL helper? Framework methods that are called directly appear too, with `Project: metadata`.
+
+**`paths` — every route through an endpoint.** All call paths from each action, with project, layer and transitions per step.
+
+- *Explaining one endpoint in full*, for example in a code review or design discussion, when the order of calls matters.
+- *Seeing where layers are crossed:* each path shows exactly where it moves from API to Application to Infrastructure.
+- *Entry points that are not controller actions:* background jobs, message handlers, `Program.Main`, library APIs and minimal-API lambdas (which are not recognised as actions). Pass any source method with `--root`.
+- *Limit:* the number of paths grows exponentially. Use it on small or medium endpoints; on anything large, use `reach` or `diagram`.
+
+**`exceptions` — what can escape an endpoint?** The default summary scales to a whole API, for example to find actions that may let a domain exception through to middleware; each escaping origin comes with one example path. Add `--paths` to review the path, handlers and status of each throw in one endpoint. Any *Unknown* entry says where the analysis needs a human.
+
+**`layers` — does the code match the intended architecture?** Without `--allow`, it prints an overview of which layers depend on which. With `--allow`, it becomes a check: violations, and unknowns for unmapped code, make the exit code 1, so it can gate CI.
+
+**`diagram` — a picture of one endpoint.** A Mermaid call graph for pull requests, design docs or onboarding notes. It stays readable where `paths` would produce thousands of paths, because shared callees are drawn once.
+
+**`inspect` — what did Sharpview extract?**
+
+- *Summary (default):* a quick check after loading: each project and its framework; counts of types, callables, calls, dependencies, throws, catches, actions and gaps; call sites by dispatch kind; and the exception landscape (every explicit throw and catch, with evidence).
+- *`--methods`:* every source callable with its kind, body status and ID. Copy a `--root` from here: an ID or the exact signature, and the ID when overloads or lambdas share a signature. A method missing from the list was not extracted from source (for example, it lives only in a referenced assembly, or is generated code dropped by `--exclude-generated`). Look here first when a result seems wrong.
+- *`--json`:* the full fact snapshot (schema v3). Use it to feed scripts, agents or dashboards without writing C# against the library, or to compare snapshots across commits, since IDs are stable keys. It also answers "was this call site extracted at all?" when debugging Sharpview itself.
 
 ### `reach` — one line per reachable method
 
@@ -67,9 +101,20 @@ Root: Research.Api.OrdersController.Get()
     Path: OrdersController.Get() --> Service.Load() --> Repository.Read()
 ```
 
-`[n]` is the number of call transitions (not stack depth). Each method appears once with one shortest allowed path after a complete search. A work-limited result retains a valid admitted path; its distance still agrees with its witness. With candidates enabled, `Distance`/`Witness` describe the shortest allowed route, while nullable `DirectDistance` and lazy `DirectWitness` preserve the direct-call-only route. `ViaCandidate` indicates no bounded direct proof was established; `WitnessUsesCandidate` describes the displayed path. Only examined sites produce per-site boundaries; a depth stop is a single boundary. Prefer `reach` over `controllers`/`chains` on large code: path enumeration grows exponentially, reachability does not.
+`[n]` is the number of call transitions (not stack depth). Each method appears once with one shortest allowed path after a complete search. A work-limited result retains a valid admitted path; its distance still agrees with its witness. With candidates enabled, `Distance`/`Witness` describe the shortest allowed route, while nullable `DirectDistance` and lazy `DirectWitness` preserve the direct-call-only route. `ViaCandidate` indicates no bounded direct proof was established; `WitnessUsesCandidate` describes the displayed path. Only examined sites produce per-site boundaries; a depth stop is a single boundary. Prefer `reach` over `paths` on large code: path enumeration grows exponentially, reachability does not.
 
 ### `exceptions` — where each explicit throw ends up
+
+The default summary, one entry per escaping origin with an example path:
+
+```text
+Exception summary: OrdersController.Get()
+  Explicit escapes: 1; unknown effects: 1; local summary complete within model: False.
+  May escape: Research.Infrastructure.StorageException | origin: … | MayEscape
+    Path: OrdersController.Get() --> Service.Load() --> Repository.Read()
+```
+
+`--paths` reports each propagation path with its handlers ([exceptions-paths.txt](samples/exceptions-paths.txt)):
 
 ```text
 Origin: Research.Infrastructure.Repository.Read()

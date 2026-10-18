@@ -24,15 +24,14 @@ public sealed class CliTests
     public async Task Help_and_invalid_arguments_do_not_load_input()
     {
         Assert.Contains("exceptions", (await Run("--help")).Out);
-        var bad = await Run("chains", "missing.slnx", "--max-depth", "-1");
+        var bad = await Run("paths", "missing.slnx", "--max-depth", "-1");
         Assert.Equal(2, bad.Exit); Assert.Contains("Depth", bad.Error);
-        Assert.Equal(2, (await Run("chains", "missing.slnx", "--dispatch", "guess")).Exit);
-        Assert.Equal(2, (await Run("chains", "missing.slnx", "--root", "a", "--root-id", "b")).Exit);
+        Assert.Equal(2, (await Run("paths", "missing.slnx", "--root", "a", "--root", "b")).Exit);
     }
     [Fact]
     public async Task Fresh_process_prints_cross_project_chain_and_evidence()
     {
-        var result = await Run("chains", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--locations");
+        var result = await Run("paths", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--locations");
         Assert.Equal(1, result.Exit);
         Assert.Contains("Research.Api.OrdersController.Get() --> Research.Application.Service.Load() --> Research.Infrastructure.Repository.Read()", result.Out);
         Assert.Contains("Repository.cs:", result.Out);
@@ -41,7 +40,7 @@ public sealed class CliTests
     [Fact]
     public async Task Json_stdout_remains_valid_and_contains_exception_regions()
     {
-        var result = await Run("inspect", ResearchFixture.Input, "--format", "json");
+        var result = await Run("inspect", ResearchFixture.Input, "--json");
         Assert.Equal(1, result.Exit);
         using var doc = JsonDocument.Parse(result.Out);
         Assert.Equal(3, doc.RootElement.GetProperty("schemaVersion").GetInt32());
@@ -50,7 +49,7 @@ public sealed class CliTests
     [Fact]
     public async Task Exceptions_report_action_escape_and_boundary_evidence_separately()
     {
-        var result = await Run("exceptions", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()");
+        var result = await Run("exceptions", ResearchFixture.Input, "--paths", "--root", "Research.Api.OrdersController.Get()");
         Assert.Equal(1, result.Exit);
         Assert.Contains("May escape the controller action", result.Out);
         Assert.Contains("Boundary handling: registration evidence", result.Out);
@@ -58,9 +57,9 @@ public sealed class CliTests
         Assert.DoesNotContain("unhandled", result.Out, StringComparison.OrdinalIgnoreCase);
     }
     [Fact]
-    public async Task Controller_layers_are_explicit_and_distance_is_transitions()
+    public async Task Path_layers_are_explicit_and_distance_is_transitions()
     {
-        var result = await Run("controllers", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--layer", "project:Research.Infrastructure=Infrastructure");
+        var result = await Run("paths", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--layer", "project:Research.Infrastructure=Infrastructure");
         Assert.Equal(1, result.Exit);
         Assert.Contains("Layer: Infrastructure", result.Out);
         Assert.Contains("Transitions: 2", result.Out);
@@ -100,7 +99,7 @@ public sealed class CliTests
     [Fact]
     public async Task Absent_root_is_an_invalid_request()
     {
-        var result = await Run("chains", ResearchFixture.Input, "--root", "Not.A.Method()");
+        var result = await Run("paths", ResearchFixture.Input, "--root", "Not.A.Method()");
         Assert.Equal(2, result.Exit); Assert.Contains("No source callable", result.Error);
     }
 }

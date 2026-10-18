@@ -4,131 +4,137 @@ using Sharpview.Roslyn;
 
 namespace Sharpview.Cli;
 
-internal sealed record Arguments(string Command, AnalysisRequest Request, ChainOptions Traversal,
-    string? Root, string? RootId, string Format, string? Output, bool Locations, ImmutableArray<LayerMapping> Layers,
-    ImmutableArray<AllowedDependency> Allowed, bool FollowCandidates = false, int MaxNodes = 200, int MaxEdges = 1000, bool Summary = false, int MaxFacts = 100000)
+internal sealed record Arguments(string Command, ICliCommand Handler, string Input)
 {
+    internal string Configuration { get; init; } = "Debug";
+    internal string? Framework { get; init; }
+    internal bool IncludeGenerated { get; init; } = true;
+    internal AnalysisRequest Request => new(Input, Configuration, Framework, IncludeGenerated);
+    internal string? Root { get; init; }
+    internal int MaxDepth { get; init; } = 20;
+    internal int MaxPaths { get; init; } = 1000;
+    internal int Budget { get; init; } = 100000;
+    internal int MaxNodes { get; init; } = 200;
+    internal int MaxEdges { get; init; } = 1000;
+    internal bool Locations { get; init; }
+    internal bool FollowCandidates { get; init; }
+    internal bool Paths { get; init; }
+    internal bool Methods { get; init; }
+    internal bool Json { get; init; }
+    internal string? Output { get; init; }
+    internal ImmutableArray<LayerMapping> Layers { get; init; } = [];
+    internal ImmutableArray<AllowedDependency> Allowed { get; init; } = [];
+    internal ImmutableHashSet<string> Given { get; init; } = [];
+
     internal const string Help = """
-        Sharpview — source-backed C# research (.NET SDK; restored inputs required)
-        Usage: sharpview <methods|chains|controllers|exceptions|reach|layers|inspect|diagram> <input.csproj|input.sln|input.slnx> [options]
-          --root <exact signature> | --root-id <id>  One source callable; defaults to all source callables
-                                                     (controllers/exceptions/reach default to controller actions).
-          --dispatch declared|direct                 Default declared; uncertain dispatch ends a path.
-          --max-depth <n>                            Call transitions, default 20; never runtime stack depth.
-          --max-chains <n>                           Global result budget, default 1000.
-          --max-expansions <n>                       Global call-site budget, default 100000.
-          --layer project:<prefix>=<layer>           Repeatable explicit architectural mapping.
-          --layer namespace:<prefix>=<layer>         Longest prefix wins; project wins a tie. Namespace prefixes
-                                                     match that namespace and nested namespaces.
-          --layer type:<prefix>=<layer>              Fully qualified type (and its nested types).
-          --allow <from>=<to>[,<to>...]              layers only; repeatable allowed cross-layer dependencies.
-                                                     Without --allow, layers prints the overview only.
-          --configuration <name>                    Default Debug.
-          --framework <tfm>                         Required for ambiguous multi-target inputs.
-          --exclude-generated                       Include generated sources by default.
-          --locations                               Print call-site evidence alongside chains and reach witnesses.
-          --max-nodes <n>                           diagram only; default 200 (including boundary nodes).
-          --max-edges <n>                           diagram only; default 1000 call-site edges.
-          --summary                                 exceptions only; bottom-up summaries with one witness per origin.
-          --max-facts <n>                           exceptions --summary only; default 100000.
-                                                     --max-expansions bounds summary transfer work (default 100000).
-          --follow-candidates                       reach/diagram; also traverse implementation candidates of
-                                                     interface/virtual calls (marked candidate, never runtime facts).
-          --format text|json                        inspect only; default text, JSON schema version 3.
-          --output <new path>                       inspect/diagram; refuses to overwrite existing files.
-          --help                                    No project load.
-        diagram lists controller actions and prompts for a number unless --root or --root-id is given.
-        It saves Markdown in diagrams_exports next to the binary and prints its full absolute path.
-        Static paths preserve declared bindings; no interface/virtual implementation guesses.
-        Explicit roots may inspect a virtual declaration's own body. Traversed virtual calls stop.
-        Exception results concern controller actions; middleware evidence is reported separately.
-        reach lists each callable reachable from a root once, with one shortest witness path.
-        layers aggregates call and type dependencies between configured layers; implementation candidates
-        are reported separately and never treated as runtime targets.
-        Minimal APIs and inherited action enumeration are outside this initial increment.
-        Exit: 0 complete, 1 usable but incomplete/gaps/limits, 2 invalid/fatal, 130 cancelled.
+        Sharpview — source-backed analysis of ASP.NET Core Web APIs (.NET SDK; restored inputs required)
+        Usage: sharpview <command> <input.csproj|input.sln|input.slnx> [options]
+
+        Commands:
+          reach       What each controller action can reach: every method once, with distance, layer and shortest path.
+                      [--root R] [--layer M]... [--follow-candidates] [--max-depth N] [--budget N] [--locations]
+          paths       Every call path from each controller action (or from any --root), with project, layer, transitions.
+                      [--root R] [--layer M]... [--max-depth N] [--max-paths N] [--budget N] [--locations]
+          exceptions  Which explicit exceptions may escape each action, with one witness path per origin.
+                      --paths lists each propagation path and its handlers instead.
+                      [--root R] [--paths [--max-depth N] [--max-paths N]] [--budget N] [--locations]
+          layers      Dependencies between your layers; with --allow, which ones break the rules.
+                      --layer M [--layer M]... [--allow FROM=TO[,TO...]]...
+          diagram     Mermaid call graph of one controller action, saved as Markdown (prompts for an action without --root).
+                      [--root R] [--follow-candidates] [--max-depth N] [--max-nodes N] [--max-edges N] [--budget N] [--output F]
+          inspect     Extraction summary; --methods lists callables and their IDs; --json writes the fact snapshot (schema v3).
+                      [--methods | --json [--output F]]
+
+        Options:
+          --root R               One root: an ID (from inspect --methods) or an exact signature. Defaults to every
+                                 controller action. reach/paths accept any source method; exceptions/diagram need an action.
+          --layer M              project:<prefix>=<layer>, namespace:<prefix>=<layer> or type:<prefix>=<layer>.
+                                 Longest prefix wins; project wins a tie.
+          --allow FROM=TO,...    layers only. Allowed cross-layer dependencies; same-layer is always allowed.
+          --follow-candidates    Also follow implementation candidates of interface/virtual calls (marked, never runtime facts).
+          --max-depth N          Call transitions (default 20), never runtime stack depth.
+          --max-paths N          Reported paths (default 1000).
+          --budget N             Examined call sites (default 100000); also bounds retained exception-summary facts.
+          --max-nodes N          diagram nodes, including boundaries (default 200).   --max-edges N  diagram edges (default 1000).
+          --locations            Print call-site evidence for paths and witnesses.
+          --output F             New file for inspect --json or diagram; existing files are never overwritten.
+          --configuration NAME   Default Debug.   --framework TFM  Required for ambiguous multi-target inputs.
+          --exclude-generated    Skip generated sources (included by default).
+          --help                 This text; no project load.
+
+        Exit: 0 complete, 1 usable but with gaps/Unknown/limits/violations, 2 invalid request or fatal, 130 cancelled.
         """;
+
+    internal static readonly ImmutableHashSet<string> LoadingOptions = ["--configuration", "--framework", "--exclude-generated"];
 
     internal static Arguments? Parse(string[] args)
     {
         if (args.Length == 0 || args.Contains("--help") || args is ["-h"]) return null;
         if (args.Length < 2) throw new ArgumentException("Provide a command and input. Use --help.");
-        var command = args[0];
-        if (command is not ("methods" or "chains" or "controllers" or "exceptions" or "reach" or "layers" or "inspect" or "diagram"))
-            throw new ArgumentException($"Unknown command: {command}");
-        var input = args[1];
-        if (input.StartsWith('-')) throw new ArgumentException("Provide an input path before options.");
-        string? root = null, rootId = null, framework = null, output = null;
-        var configuration = "Debug"; var format = "text"; var generated = true; var locations = false; var candidates = false; var summary = false;
-        var dispatch = ChainDispatchPolicy.Declared; var depth = 20; var chains = 1000; var expansions = 100000; var nodes = 200; var edges = 1000; var facts = 100000;
-        var layers = ImmutableArray.CreateBuilder<LayerMapping>();
-        var allowed = ImmutableArray.CreateBuilder<AllowedDependency>();
+        var handler = Commands.Resolve(args[0]);
+        if (args[1].StartsWith('-')) throw new ArgumentException("Provide an input path before options.");
+        var parsed = new Arguments(args[0], handler, args[1]);
         var seen = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 2; i < args.Length; i++)
         {
             var option = args[i];
-            if (option is not ("--layer" or "--allow") && !seen.Add(option)) throw new ArgumentException($"Repeated option: {option}");
+            if (!handler.Options.Contains(option) && !LoadingOptions.Contains(option))
+                throw new ArgumentException(KnownOptions.Contains(option) ? $"{args[0]} does not accept {option}." : $"Unknown option: {option}");
+            if (!seen.Add(option) && option is not ("--layer" or "--allow")) throw new ArgumentException($"Repeated option: {option}");
             string Value()
             {
                 if (++i >= args.Length || args[i].StartsWith("--", StringComparison.Ordinal)) throw new ArgumentException($"Missing value for {option}");
                 return args[i];
             }
             int Number() => int.TryParse(Value(), out var n) ? n : throw new ArgumentException($"Invalid integer for {option}");
-            switch (option)
+            parsed = option switch
             {
-                case "--root": root = Value(); break;
-                case "--root-id": rootId = Value(); break;
-                case "--configuration": configuration = Value(); break;
-                case "--framework": framework = Value(); break;
-                case "--exclude-generated": generated = false; break;
-                case "--locations": locations = true; break;
-                case "--follow-candidates": candidates = true; break;
-                case "--summary": summary = true; break;
-                case "--max-facts": facts = Number(); break;
-                case "--max-nodes": nodes = Number(); break;
-                case "--max-edges": edges = Number(); break;
-                case "--output": output = Value(); break;
-                case "--format": format = Value(); if (format is not ("text" or "json")) throw new ArgumentException("Format must be text or json."); break;
-                case "--dispatch": dispatch = Value() switch { "declared" => ChainDispatchPolicy.Declared, "direct" => ChainDispatchPolicy.Direct, _ => throw new ArgumentException("Dispatch must be declared or direct.") }; break;
-                case "--max-depth": depth = Number(); break;
-                case "--max-chains": chains = Number(); break;
-                case "--max-expansions": expansions = Number(); break;
-                case "--layer":
-                    var value = Value(); var colon = value.IndexOf(':'); var equals = value.IndexOf('=');
-                    if (colon < 1 || equals <= colon + 1 || equals == value.Length - 1 || value[..colon] is not ("project" or "namespace" or "type"))
-                        throw new ArgumentException("Layer must be project:<prefix>=<name>, namespace:<prefix>=<name> or type:<prefix>=<name>.");
-                    layers.Add(new(value[..colon] switch { "project" => LayerScope.Project, "namespace" => LayerScope.Namespace, _ => LayerScope.Type }, value[(colon + 1)..equals], value[(equals + 1)..])); break;
-                case "--allow":
-                    var rule = Value(); var separator = rule.IndexOf('=');
-                    var targets = separator < 0 ? [] : rule[(separator + 1)..].Split(',');
-                    if (separator < 1 || targets.Length == 0 || targets.Any(string.IsNullOrWhiteSpace))
-                        throw new ArgumentException("Allow must be <from>=<to>[,<to>...].");
-                    foreach (var target in targets) allowed.Add(new(rule[..separator], target)); break;
-                default: throw new ArgumentException($"Unknown option: {option}");
-            }
+                "--root" => parsed with { Root = Value() },
+                "--layer" => parsed with { Layers = parsed.Layers.Add(Layer(Value())) },
+                "--allow" => parsed with { Allowed = parsed.Allowed.AddRange(Allow(Value())) },
+                "--follow-candidates" => parsed with { FollowCandidates = true },
+                "--max-depth" => parsed with { MaxDepth = Number() },
+                "--max-paths" => parsed with { MaxPaths = Number() },
+                "--budget" => parsed with { Budget = Number() },
+                "--max-nodes" => parsed with { MaxNodes = Number() },
+                "--max-edges" => parsed with { MaxEdges = Number() },
+                "--locations" => parsed with { Locations = true },
+                "--paths" => parsed with { Paths = true },
+                "--methods" => parsed with { Methods = true },
+                "--json" => parsed with { Json = true },
+                "--output" => parsed with { Output = Value() },
+                "--configuration" => parsed with { Configuration = Value() },
+                "--framework" => parsed with { Framework = Value() },
+                "--exclude-generated" => parsed with { IncludeGenerated = false },
+                _ => throw new ArgumentException($"Unknown option: {option}"),
+            };
         }
-        if (root is not null && rootId is not null) throw new ArgumentException("--root and --root-id are mutually exclusive.");
-        if (command is "methods" or "inspect" && (root is not null || rootId is not null || locations || layers.Count > 0 || seen.Overlaps(["--dispatch", "--max-depth", "--max-chains", "--max-expansions"])))
-            throw new ArgumentException("Root, traversal, layer and location options require chains, controllers, exceptions, reach or layers.");
-        if (command != "inspect" && seen.Contains("--format")) throw new ArgumentException("--format requires inspect.");
-        if (command is not ("inspect" or "diagram") && output is not null) throw new ArgumentException("--output requires inspect or diagram.");
-        if (command != "diagram" && seen.Overlaps(["--max-nodes", "--max-edges"])) throw new ArgumentException("--max-nodes and --max-edges require diagram.");
-        if (command == "diagram" && (locations || layers.Count > 0 || seen.Overlaps(["--dispatch", "--max-chains"])))
-            throw new ArgumentException("diagram accepts root, depth, node, edge, work, candidate and output options; no layer, dispatch, chain or location options.");
-        if (seen.Contains("--max-facts") && !(summary && command == "exceptions")) throw new ArgumentException("--max-facts requires exceptions --summary.");
-        if (summary) new ExceptionSummaryOptions(expansions, facts).Validate();
-        if (summary && command != "exceptions") throw new ArgumentException("--summary requires exceptions.");
-        if (summary && seen.Overlaps(["--dispatch", "--max-depth", "--max-chains"])) throw new ArgumentException("Exception summaries accept --max-expansions, not path depth, chain or dispatch options.");
-        if (command == "layers" && (root is not null || rootId is not null || locations || seen.Overlaps(["--dispatch", "--max-depth", "--max-chains", "--max-expansions"])))
-            throw new ArgumentException("layers accepts only --layer, --allow and project-loading options.");
-        if (command == "layers" && layers.Count == 0) throw new ArgumentException("layers requires at least one --layer mapping.");
-        if (command != "layers" && allowed.Count > 0) throw new ArgumentException("--allow requires layers.");
-        if (command == "reach" && seen.Overlaps(["--dispatch", "--max-chains"])) throw new ArgumentException("reach accepts --max-depth and --max-expansions but not --dispatch or --max-chains.");
-        if (command is not ("reach" or "diagram") && candidates) throw new ArgumentException("--follow-candidates requires reach or diagram.");
-        if (string.IsNullOrWhiteSpace(configuration) || framework is not null && string.IsNullOrWhiteSpace(framework)) throw new ArgumentException("Configuration/framework cannot be empty.");
-        if (command == "diagram") new DiagramOptions(candidates, depth, nodes, edges, expansions).Validate();
-        var traversal = new ChainOptions(dispatch, depth, chains, expansions); traversal.Validate();
-        if (output is not null && File.Exists(output)) throw new ArgumentException("Output already exists; refusing to overwrite an input or other existing file.");
-        return new(command, new(input, configuration, framework, generated), traversal, root, rootId, format, output, locations, layers.ToImmutable(), allowed.ToImmutable(), candidates, nodes, edges, summary, facts);
+        if (string.IsNullOrWhiteSpace(parsed.Configuration) || parsed.Framework is not null && string.IsNullOrWhiteSpace(parsed.Framework))
+            throw new ArgumentException("Configuration/framework cannot be empty.");
+        parsed = parsed with { Given = [.. seen] };
+        handler.Validate(parsed);
+        if (parsed.Output is not null && File.Exists(parsed.Output)) throw new ArgumentException("Output already exists; refusing to overwrite an input or other existing file.");
+        return parsed;
+    }
+
+    private static readonly ImmutableHashSet<string> KnownOptions = ["--root", "--layer", "--allow", "--follow-candidates", "--max-depth", "--max-paths",
+        "--budget", "--max-nodes", "--max-edges", "--locations", "--paths", "--methods", "--json", "--output"];
+
+    private static LayerMapping Layer(string value)
+    {
+        var colon = value.IndexOf(':'); var equals = value.IndexOf('=');
+        if (colon < 1 || equals <= colon + 1 || equals == value.Length - 1 || value[..colon] is not ("project" or "namespace" or "type"))
+            throw new ArgumentException("Layer must be project:<prefix>=<name>, namespace:<prefix>=<name> or type:<prefix>=<name>.");
+        var scope = value[..colon] switch { "project" => LayerScope.Project, "namespace" => LayerScope.Namespace, _ => LayerScope.Type };
+        return new(scope, value[(colon + 1)..equals], value[(equals + 1)..]);
+    }
+
+    private static IEnumerable<AllowedDependency> Allow(string rule)
+    {
+        var separator = rule.IndexOf('=');
+        var targets = separator < 0 ? [] : rule[(separator + 1)..].Split(',');
+        if (separator < 1 || targets.Length == 0 || targets.Any(string.IsNullOrWhiteSpace))
+            throw new ArgumentException("Allow must be <from>=<to>[,<to>...].");
+        return targets.Select(target => new AllowedDependency(rule[..separator], target));
     }
 }

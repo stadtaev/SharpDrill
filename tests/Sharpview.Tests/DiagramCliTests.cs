@@ -45,7 +45,7 @@ public sealed class DiagramCliTests
     [Fact]
     public async Task Explicit_action_id_selects_without_prompt_and_preserves_dispatch_when_candidates_are_absent()
     {
-        var snapshot = await Run("", "inspect", ResearchFixture.Input, "--format", "json");
+        var snapshot = await Run("", "inspect", ResearchFixture.Input, "--json");
         using var json = JsonDocument.Parse(snapshot.Out);
         var id = json.RootElement.GetProperty("snapshot").GetProperty("callables").EnumerateArray()
             .Single(x => x.GetProperty("displaySignature").GetString() == "Research.Api.OrdersController.Interface(Research.Infrastructure.IRepository)")
@@ -53,7 +53,7 @@ public sealed class DiagramCliTests
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
         try
         {
-            var result = await Run("", "diagram", ResearchFixture.Input, "--root-id", id, "--follow-candidates", "--output", path);
+            var result = await Run("", "diagram", ResearchFixture.Input, "--root", id, "--follow-candidates", "--output", path);
             Assert.Equal(1, result.Exit); Assert.DoesNotContain("Choose an action", result.Out);
             Assert.Contains("Saved diagram: " + Path.GetFullPath(path), result.Out);
             var document = await File.ReadAllTextAsync(path);
@@ -99,37 +99,35 @@ public sealed class DiagramCliTests
     }
 
     [Fact]
-    public async Task Summary_mode_reports_known_escapes_alongside_unknowns_and_limits()
+    public async Task Summary_is_the_default_and_reports_known_escapes_alongside_unknowns_and_limits()
     {
-        var result = await Run("", "exceptions", ResearchFixture.Input, "--summary", "--root", "Research.Api.OrdersController.Get()");
+        var result = await Run("", "exceptions", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()");
         Assert.Equal(1, result.Exit);
         Assert.Contains("Exception summary: Research.Api.OrdersController.Get()", result.Out);
         Assert.Contains("May escape: Research.Infrastructure.StorageException", result.Out);
         Assert.Contains("Unknown [MissingBody]", result.Out);
         Assert.Contains("Path: Research.Api.OrdersController.Get() -->", result.Out);
-        var limited = await Run("", "exceptions", ResearchFixture.Input, "--summary", "--root", "Research.Api.OrdersController.Get()", "--max-expansions", "1");
+        var limited = await Run("", "exceptions", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--budget", "1");
         Assert.Equal(1, limited.Exit); Assert.Contains("work limit: True", limited.Error);
-        var invalid = await Run("", "reach", "missing.slnx", "--summary");
+        var invalid = await Run("", "reach", "missing.slnx", "--paths");
         Assert.Equal(2, invalid.Exit); Assert.DoesNotContain("Analysis input not found", invalid.Error);
     }
 
     [Theory]
     [InlineData("--max-depth", "1")]
-    [InlineData("--dispatch", "direct")]
-    [InlineData("--max-chains", "10")]
-    [InlineData("--max-facts", "0")]
+    [InlineData("--max-paths", "10")]
+    [InlineData("--budget", "0")]
     public async Task Invalid_summary_options_fail_before_loading(string option, string value)
     {
-        var result = await Run("", "exceptions", "missing.slnx", "--summary", option, value);
+        var result = await Run("", "exceptions", "missing.slnx", option, value);
         Assert.Equal(2, result.Exit); Assert.DoesNotContain("Analysis input not found", result.Error);
     }
 
     [Theory]
     [InlineData("--max-nodes", "0")]
     [InlineData("--max-edges", "0")]
-    [InlineData("--max-chains", "10")]
-    [InlineData("--dispatch", "direct")]
-    [InlineData("--format", "json")]
+    [InlineData("--max-paths", "10")]
+    [InlineData("--budget", "0")]
     [InlineData("--layer", "project:X=X")]
     public async Task Invalid_diagram_options_fail_before_loading(string option, string value)
     {

@@ -12,10 +12,10 @@ internal static class EntryPoint
         Console.CancelKeyPress += handler;
         try
         {
-            var options = Arguments.Parse(args);
-            if (options is null) { Console.WriteLine(Arguments.Help); return 0; }
+            var arguments = Arguments.Parse(args);
+            if (arguments is null) { Console.WriteLine(Arguments.Help); return 0; }
             MSBuildBootstrap.RegisterSdk();
-            return await Commands.RunAsync(options, cancellation.Token);
+            return await Commands.RunAsync(arguments, cancellation.Token);
         }
         catch (OperationCanceledException) { Console.Error.WriteLine("Analysis cancelled."); return 130; }
         catch (Exception e) { Console.Error.WriteLine($"Sharpview: {e.Message}"); return 2; }

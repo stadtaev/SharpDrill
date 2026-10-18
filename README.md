@@ -28,7 +28,7 @@ F=tests/Fixtures/ResearchSolution/ResearchSolution.slnx
 L=(--layer project:Research.Api=API --layer project:Research.Application=Application --layer project:Research.Infrastructure=Infrastructure)
 
 dotnet run --project src/Sharpview.Cli -- reach $F --root 'Research.Api.OrdersController.Get()' "${L[@]}"
-dotnet run --project src/Sharpview.Cli -- exceptions $F --root 'Research.Api.OrdersController.Get()' --summary
+dotnet run --project src/Sharpview.Cli -- exceptions $F --root 'Research.Api.OrdersController.Get()'
 dotnet run --project src/Sharpview.Cli -- diagram $F
 dotnet run --project src/Sharpview.Cli -- layers $F "${L[@]}" --allow API=Application --allow Application=Infrastructure
 ```
@@ -40,27 +40,25 @@ Analysing your own solution: restore it first (Sharpview never restores, builds 
 | Command | Question it answers | Default roots |
 | --- | --- | --- |
 | `reach` | What can each action reach — once per method, with distance, layer and shortest path? | controller actions (or any `--root`) |
-| `controllers` | What are all call paths from each action, with project, layer and transitions? | controller actions |
-| `chains` | All call paths from any method. | every source method |
-| `exceptions` | Where does each explicit throw end up? `--summary` computes possible escapes and uncertainty without enumerating paths. | controller actions |
+| `paths` | What are all call paths from each action (or any `--root` method), with project, layer and transitions? | controller actions |
+| `exceptions` | Which explicit exceptions may escape each action, with one witness per origin? `--paths` lists every propagation path and its handlers instead. | controller actions |
 | `diagram` | Export a Mermaid call graph in Markdown, grouped by project. | pick one controller action by number |
 | `layers` | Which layers depend on which; with `--allow`, which dependencies break the rules? | — |
-| `methods` | List extracted callables with their IDs (to pick a `--root`). | — |
-| `inspect` | Summary, or the full fact snapshot with `--format json`. | — |
+| `inspect` | Extraction summary; `--methods` lists callables with their IDs (to pick a `--root`); `--json` writes the full fact snapshot. | — |
 
-Sample outputs for each are in [docs/samples](docs/samples/README.md). Run `--help` for the complete option list.
+For practical use cases of each command, such as impact analysis, CI gating, finding roots or debugging extraction, see [When to use which command](docs/overview.md#when-to-use-which-command). Sample outputs for each are in [docs/samples](docs/samples/README.md). Run `--help` for the complete option list.
 
 ### Common options
 
 - **Input:** `.csproj`, `.sln` or `.slnx`. Use `--framework` for multi-target projects and `--configuration` (default `Debug`) when needed.
-- **Roots:** `--root '<exact signature>'` (copy it from `methods`) or `--root-id <id>` when signatures collide.
+- **Roots:** `--root <id or exact signature>`; copy either from `inspect --methods`. An exact ID match wins, so use the ID when signatures collide. `reach` and `paths` accept any source method; `exceptions` and `diagram` need a controller action.
 - **Layers:** repeatable `--layer project:<prefix>=<name>`, `--layer namespace:<prefix>=<name>` (namespaces and nested namespaces) or `--layer type:<prefix>=<name>` (a type and its nested types). Longest prefix wins; a project mapping wins a tie. Layers come only from these mappings.
 - **Layer rules:** repeatable `--allow <from>=<to>[,<to>...]` (with `layers`). Same-layer dependencies are always allowed.
-- **Dispatch:** interface, virtual, delegate, dynamic and unresolved calls are visible boundaries. `reach --follow-candidates` and `diagram --follow-candidates` also follows implementation candidates, marked `(candidate)`; `chains --dispatch direct` marks excluded dispatch while keeping its declared target.
-- **Limits:** `--max-depth` (default 20 transitions), `--max-chains` (1,000 results), `--max-expansions` (100,000 examined call sites). Reaching a limit is always reported.
-- **Summary budgets:** `exceptions --summary --max-expansions 100000 --max-facts 100000` bounds summary work and retained effects. Summary mode has no path-depth or chain-output option.
+- **Dispatch:** interface, virtual, delegate, dynamic and unresolved calls are visible boundaries. `reach --follow-candidates` and `diagram --follow-candidates` also follow implementation candidates, marked `(candidate)`. `paths` and `exceptions` stop at the declared target.
+- **Limits:** `--budget` (default 100,000 examined call sites; for exception summaries it also bounds retained facts), `--max-depth` (default 20 transitions) and `--max-paths` (default 1,000 reported paths, on `paths` and `exceptions --paths`). Reaching a limit is always reported. Exception summaries take `--budget` only.
+- **Strict options:** each command accepts only its own options (`--help` lists them per command). Anything else fails before loading, naming the command.
 - **Evidence:** `--locations` prints call-site locations for paths and reach witnesses.
-- **Output:** `inspect --format json` writes schema version 3 (IDs are plain strings) to stdout or `--output <new file>` (never overwrites). Diagnostics go to stderr. Ctrl+C cancels cleanly.
+- **Output:** `inspect --json` writes schema version 3 (IDs are plain strings) to stdout or `--output <new file>` (never overwrites). Diagnostics go to stderr. Ctrl+C cancels cleanly.
 
 ### Export a diagram
 
@@ -68,7 +66,7 @@ Sample outputs for each are in [docs/samples](docs/samples/README.md). Run `--he
 # Lists numbered controller actions; enter a number, or q to cancel.
 dotnet run --project src/Sharpview.Cli -- diagram tests/Fixtures/ResearchSolution/ResearchSolution.slnx
 
-# Select directly for scripts. --root-id also accepts an action ID from inspect/methods.
+# Select directly for scripts. --root also accepts an action ID from inspect --methods.
 dotnet run --project src/Sharpview.Cli -- diagram tests/Fixtures/ResearchSolution/ResearchSolution.slnx \
   --root 'Research.Api.OrdersController.Get()' --output /tmp/orders-get.md
 ```
@@ -84,7 +82,7 @@ architectural layers or exact runtime ordering. Flowchart markup is generated wi
 Display names are escaped before being used as diagram labels, with extra handling to protect the Markdown fence.
 
 Defaults are 20 call transitions, 200 nodes, 1,000 edges and 100,000 examined sites. Adjust `--max-depth`, `--max-nodes`,
-`--max-edges` or `--max-expansions`; truncation is visible in both Markdown and stdout. Boundary nodes count toward the node
+`--max-edges` or `--budget`; truncation is visible in both Markdown and stdout. Boundary nodes count toward the node
 budget. These limits apply to the export projection; Roslyn loading and whole-program graph construction occur first.
 A saved file can return exit code 1 because it contains useful but partial results.
 
@@ -111,10 +109,10 @@ A saved file can return exit code 1 because it contains useful but partial resul
     - **Unknown**, with a reason. Causes include dispatch, missing bodies, filters, `finally`, async void, unobserved or aliased tasks, and depth limits.
   - Directly awaited task-producing calls propagate.
   - One action can show an intercepted origin next to Unknown results for other calls; each witness stands alone.
-  - `--summary` computes a finite fixed point over direct-call strongly connected components. Recursion alone does not make a summary unknown. Origins remain distinct even when their exception types match; call-site catches transform each incoming effect separately.
+  - The default summary mode computes a finite fixed point over direct-call strongly connected components. Recursion alone does not make a summary unknown. Origins remain distinct even when their exception types match; call-site catches transform each incoming effect separately.
   - Ownerless extraction gaps are returned once in `GlobalGaps` and reported as global caveats on stderr, not repeated as action witnesses/unknown effects. Overall `IsComplete` stays false when global caveats exist; summary method/root completeness is local to its known effects.
   - Summary effects and uncertainty coexist. Unknown effects propagate conservatively, including through catch-all handlers, because a missing body or extraction gap may represent more than a normally thrown exception. A summary does not prove the absence of runtime exceptions.
-  - A summary witness is one example for an escaping effect, reconstructed on demand. Detailed mode still reports intercepted origins and individual paths under its own bounds.
+  - A summary witness is one example for an escaping effect, reconstructed on demand. `exceptions --paths` still reports intercepted origins and individual paths under its own bounds.
   - Implicit exceptions and branch feasibility are not modelled.
   - `UseExceptionHandler`, `AddExceptionHandler` and `UseDeveloperExceptionPage` registrations are listed separately as *boundary evidence*. They do not prove middleware order or coverage; see Microsoft's [exception-handling documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling?view=aspnetcore-10.0).
 - **Layer edges.**
@@ -141,7 +139,7 @@ var index = new ProgramIndex(snapshot); // build once; queries and rules share i
 var actions = AspNetConventions.ControllerActions(index, cancellationToken).Select(x => x.Method).ToImmutableArray();
 var reach = ReachabilityQuery.Analyze(index, actions, new ReachOptions(), cancellationToken);
 var paths = CallChainQuery.Enumerate(index, actions, new ChainOptions(), cancellationToken);
-var exceptions = ExceptionQuery.Analyze(index, actions, new ChainOptions(), cancellationToken);
+var exceptions = ExceptionQuery.Analyze(index, actions, new ExceptionOptions(), cancellationToken);
 var summaries = ExceptionSummaryQuery.Analyze(index, actions, new ExceptionSummaryOptions(), cancellationToken);
 if (!actions.IsEmpty)
 {
@@ -166,7 +164,7 @@ var findings = LayerRules.AllowedDependencies(graph, model); // Finding(RuleId, 
 - Exception witnesses carry a machine-readable `ExceptionReason` next to the human-readable `Reason`.
 - MSBuild Locator finds an installed SDK. Host selection and the input's `global.json` are not guaranteed to match every shell configuration.
 
-To analyse an existing `inspect --format json` export without loading Roslyn, reference only `Sharpview.Core`:
+To analyse an existing `inspect --json` export without loading Roslyn, reference only `Sharpview.Core`:
 
 ```csharp
 await using var input = File.OpenRead("snapshot.json");

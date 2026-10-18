@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 using Sharpview.Core;
@@ -5,20 +6,21 @@ using Sharpview.Export.Mermaid;
 
 namespace Sharpview.Cli;
 
-internal static class DiagramCommand
+internal sealed class DiagramCommand(TextReader input, TextWriter output) : ICliCommand
 {
-    internal static async Task<int> RunAsync(ProgramIndex index, Arguments options, TextReader input, TextWriter output, CancellationToken token)
+    public ImmutableHashSet<string> Options { get; } = ["--root", "--follow-candidates", "--max-depth", "--max-nodes", "--max-edges", "--budget", "--output"];
+
+    public void Validate(Arguments arguments) => Query(arguments).Validate();
+
+    private static DiagramOptions Query(Arguments arguments) =>
+        new(arguments.FollowCandidates, arguments.MaxDepth, arguments.MaxNodes, arguments.MaxEdges, arguments.Budget);
+
+    public async Task<int> RunAsync(ProgramIndex index, Arguments arguments, CancellationToken token)
     {
         var actions = AspNetConventions.ControllerActions(index, token).Select(x => index.Callable(x.Method))
             .OrderBy(x => x.DisplaySignature, StringComparer.Ordinal).ThenBy(x => x.Id.Value, StringComparer.Ordinal).ToArray();
         CallableFact? selected;
-        if (options.Root is not null || options.RootId is not null)
-        {
-            var matches = actions.Where(x => options.RootId is not null ? x.Id.Value == options.RootId : x.DisplaySignature == options.Root).ToArray();
-            if (matches.Length == 0) throw new ArgumentException("No source callable matches the selected root (diagram requires a recognised action).");
-            if (matches.Length > 1) throw new ArgumentException("Ambiguous signature; use --root-id:\n" + string.Join("\n", matches.Select(x => x.Id.Value)));
-            selected = matches[0];
-        }
+        if (arguments.Root is not null) selected = Roots.Match(actions, arguments, "diagram requires a recognised action");
         else
         {
             if (actions.Length == 0) { await output.WriteLineAsync("No recognised controller actions. No diagram saved."); return 0; }
@@ -37,10 +39,9 @@ internal static class DiagramCommand
                 await output.WriteLineAsync($"Choose a number from 1 to {actions.Length}, or q to cancel:");
             }
         }
-        var diagram = CallDiagramQuery.Build(index, selected.Id,
-            new(options.FollowCandidates, options.Traversal.MaxDepth, options.MaxNodes, options.MaxEdges, options.Traversal.MaxExpansions), token);
+        var diagram = CallDiagramQuery.Build(index, selected.Id, Query(arguments), token);
         var document = MermaidExporter.Markdown(diagram);
-        var path = options.Output is null ? DefaultPath(selected.DisplaySignature) : Path.GetFullPath(options.Output);
+        var path = arguments.Output is null ? DefaultPath(selected.DisplaySignature) : Path.GetFullPath(arguments.Output);
         token.ThrowIfCancellationRequested();
         // CreateNew protects against races as well as accidental input-file overwrites.
         await using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, true))

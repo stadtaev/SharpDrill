@@ -1,4 +1,4 @@
-Policy: Declared; roots: 1; chains: 1; examined sites: 3; uncertain boundaries: 0; depth limits: 0; output limit: False; work limit: False.
+Action roots: 1; witnesses: 2; unknown: 1; examined sites: 3; depth limit: False; output limit: False; work limit: False; global caveats: 6.
 Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:2:1)
 Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:3:1)
 Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:4:1)

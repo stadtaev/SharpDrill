@@ -27,12 +27,21 @@ public sealed record ExceptionSearchResult(ImmutableArray<ExceptionWitness> Resu
         && Results.All(x => x.Status != ExceptionStatus.Unknown && x.SubsequentStatus != ExceptionStatus.Unknown);
 }
 
+// Bounds for detailed witness enumeration: call transitions, reported witnesses and examined call sites.
+public sealed record ExceptionOptions(int MaxDepth = 20, int MaxResults = 1000, int MaxExpansions = 100000)
+{
+    public void Validate()
+    {
+        if (MaxDepth < 0 || MaxResults < 1 || MaxExpansions < 1) throw new ArgumentException("Depth must be nonnegative; work and output limits must be positive.");
+    }
+}
+
 public static class ExceptionQuery
 {
     public static ExceptionSearchResult Analyze(ProgramSnapshot snapshot, ImmutableArray<CallableId> actions,
-        ChainOptions options, CancellationToken cancellationToken = default) => Analyze(new ProgramIndex(snapshot), actions, options, cancellationToken);
+        ExceptionOptions options, CancellationToken cancellationToken = default) => Analyze(new ProgramIndex(snapshot), actions, options, cancellationToken);
     public static ExceptionSearchResult Analyze(ProgramIndex program, ImmutableArray<CallableId> actions,
-        ChainOptions options, CancellationToken cancellationToken = default)
+        ExceptionOptions options, CancellationToken cancellationToken = default)
     {
         options.Validate(); cancellationToken.ThrowIfCancellationRequested();
         foreach (var action in actions) if (!program.ContainsCallable(action)) throw new ArgumentException($"Unknown root: {action.Value}");
@@ -42,7 +51,7 @@ public static class ExceptionQuery
         var work = 0; var outputLimit = false; var workLimit = false; var depthLimit = false;
         bool Add(ExceptionWitness witness)
         {
-            if (results.Count >= options.MaxChains) { outputLimit = true; return false; }
+            if (results.Count >= options.MaxResults) { outputLimit = true; return false; }
             results.Add(witness); return true;
         }
         ExceptionWitness Unknown(CallableId root, ImmutableArray<CallableId> path, ExceptionReason code, string reason, SourceEvidence? evidence, DispatchKind? dispatch = null) =>

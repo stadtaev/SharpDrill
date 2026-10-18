@@ -2,10 +2,10 @@ using Sharpview.Core;
 
 namespace Sharpview.Cli;
 
-internal sealed class TextReport(ProgramIndex index, TextWriter output, Arguments options)
+internal sealed class TextReport(ProgramIndex index, TextWriter output, Arguments arguments)
 {
     private readonly ProgramSnapshot snapshot = index.Snapshot;
-    internal LayerMap Layers { get; } = new(index, new LayerModel(options.Layers, options.Allowed));
+    internal LayerMap Layers { get; } = new(index, new LayerModel(arguments.Layers, arguments.Allowed));
     private readonly HashSet<string> ambiguous = index.Snapshot.Callables.GroupBy(x => x.DisplaySignature)
         .Where(x => x.Count() > 1).Select(x => x.Key).ToHashSet(StringComparer.Ordinal);
     internal string Name(CallableId id)
@@ -21,12 +21,11 @@ internal sealed class TextReport(ProgramIndex index, TextWriter output, Argument
         var type = index.DeclaringType(id)?.DisplayName ?? "<no containing type>";
         output.WriteLine($"  {Name(id)} | Project: {Project(method)} | Type: {type} | Layer: {Layers.LayerOf(id) ?? "unconfigured"} | Transitions: {transitions}");
     }
-    internal void Chain(CallChain chain, bool details)
+    internal void Chain(CallChain chain)
     {
         var names = new List<string> { Name(chain.Root) };
         foreach (var step in chain.Steps)
-            names.Add(step.IsExcludedDispatch ? $"[{step.Dispatch.ToString().ToLowerInvariant()} call: {step.TargetDisplay}]"
-                : step.Target is { } target ? Name(target) : $"[{step.Dispatch.ToString().ToLowerInvariant()} invocation: {step.TargetDisplay}]");
+            names.Add(step.Target is { } target ? Name(target) : $"[{step.Dispatch.ToString().ToLowerInvariant()} invocation: {step.TargetDisplay}]");
         var marker = chain.End switch
         {
             ChainEnd.Leaf => " [no outgoing calls]",
@@ -35,17 +34,13 @@ internal sealed class TextReport(ProgramIndex index, TextWriter output, Argument
             ChainEnd.UnknownTarget => " [unresolved target]",
             ChainEnd.Cycle => " [cycle]",
             ChainEnd.DepthLimit => " [max depth]",
-            ChainEnd.DispatchBoundary when chain.Steps[^1].IsExcludedDispatch => "",
             ChainEnd.DispatchBoundary => $" [{chain.Steps[^1].Dispatch.ToString().ToLowerInvariant()} target]",
             _ => ""
         };
         output.WriteLine(string.Join(" --> ", names) + marker);
-        if (details)
-        {
-            MethodDetails(chain.Root, 0);
-            for (var i = 0; i < chain.Steps.Length; i++) if (chain.Steps[i].Target is { } target) MethodDetails(target, i + 1);
-        }
-        if (options.Locations)
+        MethodDetails(chain.Root, 0);
+        for (var i = 0; i < chain.Steps.Length; i++) if (chain.Steps[i].Target is { } target) MethodDetails(target, i + 1);
+        if (arguments.Locations)
             foreach (var step in chain.Steps)
                 foreach (var site in step.EvidenceSites) output.WriteLine($"  Evidence: {Location(index.CallSite(site).Evidence)} | {step.Dispatch} declared binding");
     }
@@ -112,17 +107,17 @@ internal sealed class TextReport(ProgramIndex index, TextWriter output, Argument
             var method = index.Callable(reached.Callable);
             output.WriteLine($"  [{reached.Distance}] {Name(reached.Callable)} | Project: {Project(method)} | Layer: {Layers.LayerOf(reached.Callable) ?? "unconfigured"}{(reached.ViaCandidate ? " (candidate)" : "")}");
             if (reached.Distance >= 2 || reached.WitnessUsesCandidate) output.WriteLine($"    Path: {Name(reach.Root)}{string.Concat(reached.Witness.Select(x => (x.Candidate ? " -[candidate]-> " : " --> ") + Name(x.Target)))}");
-            if (options.FollowCandidates)
+            if (arguments.FollowCandidates)
             {
                 output.WriteLine($"    Direct distance: {reached.DirectDistance?.ToString() ?? "not established"}");
                 if (reached.DirectDistance is not null && reached.WitnessUsesCandidate)
                 {
                     output.WriteLine($"    Direct path: {string.Join(" --> ", reached.DirectWitness.Select(x => Name(x.Target)).Prepend(Name(reach.Root)))}");
-                    if (options.Locations) foreach (var step in reached.DirectWitness)
+                    if (arguments.Locations) foreach (var step in reached.DirectWitness)
                         output.WriteLine($"    Direct evidence: {Location(index.CallSite(step.Site).Evidence)}");
                 }
             }
-            if (options.Locations)
+            if (arguments.Locations)
                 foreach (var step in reached.Witness)
                     output.WriteLine($"    Evidence: {Location(index.CallSite(step.Site).Evidence)} | {(step.Candidate ? "implementation candidate" : "direct call")}");
         }
