@@ -3,7 +3,7 @@ using Sharpview.Core;
 
 namespace Sharpview.Cli;
 
-internal sealed record ReportContext(ProgramIndex Index, Arguments Arguments, TextWriter Output, Stream? OutputFile, TextReport Report)
+internal sealed record ReportContext(ProgramIndex Index, Arguments Arguments, TextWriter Output, Stream? OutputFile, Display Display)
 {
     internal ProgramSnapshot Snapshot => Index.Snapshot;
 }
@@ -19,7 +19,7 @@ internal abstract class ReportCommand : ICliCommand
     {
         using var file = arguments.Output is null ? null : new StreamWriter(new FileStream(arguments.Output, FileMode.CreateNew, FileAccess.Write));
         var output = (TextWriter?)file ?? Console.Out;
-        var context = new ReportContext(index, arguments, output, file?.BaseStream, new TextReport(index, output, arguments));
+        var context = new ReportContext(index, arguments, output, file?.BaseStream, new Display(index));
         var incomplete = await ExecuteAsync(context, token) | !index.Snapshot.Gaps.IsEmpty;
         WriteGaps(index.Snapshot.Gaps);
         token.ThrowIfCancellationRequested();
@@ -31,7 +31,7 @@ internal abstract class ReportCommand : ICliCommand
 
     private static void WriteGaps(IReadOnlyList<AnalysisGap> gaps)
     {
-        foreach (var gap in gaps.Take(20)) Console.Error.WriteLine($"Gap [{gap.Kind}]: {gap.Message}" + (gap.Evidence is null ? "" : $" ({TextReport.Location(gap.Evidence)})"));
+        foreach (var gap in gaps.Take(20)) Console.Error.WriteLine($"Gap [{gap.Kind}]: {gap.Message}" + (gap.Evidence is null ? "" : $" ({Display.Location(gap.Evidence)})"));
         if (gaps.Count > 20) Console.Error.WriteLine($"Further gaps: {gaps.Count - 20}; inspect JSON for full evidence.");
         Console.Error.WriteLine($"Extraction gaps: {gaps.Count}. Coverage: explicit origins/direct calls; minimal APIs and inherited actions outside scope.");
     }
