@@ -15,7 +15,7 @@ internal sealed class InspectCommand : ReportCommand
 
     protected override async ValueTask<bool> ExecuteAsync(ReportContext context, CancellationToken token)
     {
-        if (context.Arguments.Json) await SnapshotJson.WriteAsync(context.OutputFile ?? Console.OpenStandardOutput(), context.Snapshot, "0.1.0", token);
+        if (context.Arguments.Json) await SnapshotJson.WriteAsync(context.OutputFile ?? Console.OpenStandardOutput(), context.Snapshot, EntryPoint.Version, token);
         else if (context.Arguments.Methods) Methods(context, token);
         else Summary(context, token);
         return false;

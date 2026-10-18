@@ -24,6 +24,8 @@ public sealed class CliTests
     public async Task Help_and_invalid_arguments_do_not_load_input()
     {
         Assert.Contains("exceptions", (await Run("--help")).Out);
+        var version = await Run("--version");
+        Assert.Equal(0, version.Exit); Assert.Matches(@"^\d+\.\d+\.\d+\S*\s*$", version.Out);
         var bad = await Run("paths", "missing.slnx", "--max-depth", "-1");
         Assert.Equal(2, bad.Exit); Assert.Contains("Depth", bad.Error);
         Assert.Equal(2, (await Run("paths", "missing.slnx", "--root", "a", "--root", "b")).Exit);

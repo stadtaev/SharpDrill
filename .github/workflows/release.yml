@@ -1,0 +1,69 @@
+name: Release
+
+# Every push to main that changes code publishes a new version of the Sharpview tool to nuget.org.
+# github-tag-action computes the version from Conventional Commit messages since the last v* tag:
+# patch by default, minor for feat:, major for feat!: or a BREAKING CHANGE: footer.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - '.idea/**'
+      - '.superpowers/**'
+  workflow_dispatch:
+
+# Releases run one at a time so two pushes cannot claim the same version.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create the version tag and the GitHub release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history: the version action falls back to it when the compare API is unavailable
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Restore
+        run: dotnet restore sharpview.slnx
+      - name: Build fixture
+        run: dotnet build tests/Fixtures/ResearchSolution/ResearchSolution.slnx
+      - name: Test
+        run: dotnet test sharpview.slnx -c Release
+
+      # Calculate only; the tag is created after nuget.org accepts the package, so a failed push never burns a version.
+      - name: Next version
+        id: version
+        uses: mathieudutour/github-tag-action@af99e60ce8132224b8e6ebab5023449fe256ed46 # v7.0.0
+        with:
+          github_token: ${{ github.token }}
+          default_bump: patch
+          dry_run: true
+
+      - name: Pack
+        if: steps.version.outputs.new_tag != ''
+        run: dotnet pack src/Sharpview.Cli -c Release -p:Version="$VERSION" -p:ContinuousIntegrationBuild=true
+        env:
+          VERSION: ${{ steps.version.outputs.new_version }}
+
+      - name: Publish to nuget.org
+        if: steps.version.outputs.new_tag != ''
+        run: dotnet nuget push "nupkg/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+
+      # gh creates the tag at the tested commit together with the release.
+      - name: GitHub release
+        if: steps.version.outputs.new_tag != ''
+        run: gh release create "$TAG" nupkg/*.nupkg --target "$GITHUB_SHA" --title "$TAG" --notes "$CHANGELOG"
+        env:
+          TAG: ${{ steps.version.outputs.new_tag }}
+          CHANGELOG: ${{ steps.version.outputs.changelog }}
+          GH_TOKEN: ${{ github.token }}

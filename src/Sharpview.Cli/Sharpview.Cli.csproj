@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
 <PackageReference Include="Microsoft.Build" ExcludeAssets="runtime" PrivateAssets="all" />
@@ -13,6 +13,32 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- MSBuild is loaded from the user's newest installed SDK, so run on the newest runtime too. -->
+    <RollForward>LatestMajor</RollForward>
   </PropertyGroup>
+
+  <!-- .NET tool package: dotnet tool install -g Sharpview. Released versions come from git tags (release workflow). -->
+  <PropertyGroup>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>sharpview</ToolCommandName>
+    <PackageId>Sharpview</PackageId>
+    <Version>0.0.0-dev</Version>
+    <Authors>Stanislav Tadtaev</Authors>
+    <Description>Source-backed analysis of ASP.NET Core Web APIs for people and agents: the MSBuild project reference map with build settings, where exceptions are thrown, caught, miscaught or may escape an action, call paths and reachability from controller actions, and Mermaid diagrams. Uses Roslyn and your installed .NET SDK; never builds or edits the analysed code.</Description>
+    <PackageTags>roslyn;static-analysis;aspnetcore;exceptions;call-graph;mermaid;dotnet-tool;architecture</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/stadtaev/sharpview</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/stadtaev/sharpview</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <Copyright>Copyright (c) 2026 Stanislav Tadtaev</Copyright>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)../../nupkg</PackageOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="PACKAGE.md" Pack="true" PackagePath="README.md" />
+    <None Include="../../LICENSE" Pack="true" PackagePath="" />
+  </ItemGroup>
 
 </Project>

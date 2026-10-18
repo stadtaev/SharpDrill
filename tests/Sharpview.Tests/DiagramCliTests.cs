@@ -6,11 +6,13 @@ namespace Sharpview.Tests;
 
 public sealed class DiagramCliTests
 {
-    private static async Task<(int Exit, string Out, string Error)> Run(string input, params string[] args)
+    private static Task<(int Exit, string Out, string Error)> Run(string input, params string[] args) => RunIn(ResearchFixture.Root, input, args);
+
+    private static async Task<(int Exit, string Out, string Error)> RunIn(string directory, string input, params string[] args)
     {
         var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
         var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet")
-        { RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = ResearchFixture.Root };
+        { RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = directory };
         start.ArgumentList.Add(Path.Combine(ResearchFixture.Root, $"src/Sharpview.Cli/bin/{configuration}/net10.0/Sharpview.Cli.dll"));
         foreach (var arg in args) start.ArgumentList.Add(arg);
         using var process = Process.Start(start)!;
@@ -23,9 +25,10 @@ public sealed class DiagramCliTests
     }
 
     [Fact]
-    public async Task Picker_retries_invalid_input_saves_beside_binary_and_prints_absolute_path()
+    public async Task Picker_retries_invalid_input_saves_under_current_directory_and_prints_absolute_path()
     {
-        var result = await Run("invalid\n0\n1\n", "diagram", ResearchFixture.Input);
+        var directory = Directory.CreateTempSubdirectory("sharpview-diagram-").FullName;
+        var result = await RunIn(directory, "invalid\n0\n1\n", "diagram", ResearchFixture.Input);
         Assert.Equal(1, result.Exit); // fixture has intentional extraction gaps
         Assert.Contains("1. Research.Api.OrdersController.", result.Out);
         Assert.Contains("Choose a number", result.Out);
@@ -35,11 +38,11 @@ public sealed class DiagramCliTests
         {
             Assert.True(Path.IsPathFullyQualified(path));
             Assert.Equal("diagrams_exports", new FileInfo(path).Directory!.Name);
-            Assert.Equal(Path.Combine(ResearchFixture.Root, $"src/Sharpview.Cli/bin/{new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name}/net10.0/diagrams_exports"), Path.GetDirectoryName(path));
+            Assert.Equal(Path.Combine(directory, "diagrams_exports"), Path.GetDirectoryName(path));
             Assert.True(File.Exists(path));
             Assert.Contains("```mermaid", await File.ReadAllTextAsync(path));
         }
-        finally { File.Delete(path); }
+        finally { Directory.Delete(directory, true); }
     }
 
     [Fact]

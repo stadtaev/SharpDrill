@@ -11,7 +11,16 @@ Results carry source evidence (file:line:column), and anything the analysis cann
 
 **New here? Read [How Sharpview works](docs/overview.md)** — pipeline, principles, what each command answers, and how to write your own rule.
 
-## Quick start
+## Install
+
+```sh
+dotnet tool install -g Sharpview   # requires a .NET 10 or newer SDK
+sharpview projects MyApi.slnx
+```
+
+Update with `dotnet tool update -g Sharpview`. The examples below run from source with `dotnet run --project src/Sharpview.Cli --`; with the tool installed, use `sharpview` instead.
+
+## Quick start (from source)
 
 Requires a .NET 10 SDK compatible with `global.json`.
 
@@ -72,8 +81,7 @@ dotnet run --project src/Sharpview.Cli -- diagram tests/Fixtures/ResearchSolutio
   --root 'Research.Api.OrdersController.Get()' --output /tmp/orders-get.md
 ```
 
-Default exports go to `diagrams_exports` beside `Sharpview.Cli.dll` (or the published binary), independently of the
-terminal's working directory. After the write succeeds, stdout contains `Saved diagram: /full/absolute/path.md`.
+Default exports go to `diagrams_exports` in the current directory (created if needed). After the write succeeds, stdout contains `Saved diagram: /full/absolute/path.md`.
 Existing files are never overwritten. EOF or `q` exits without exporting. Custom output paths require an existing parent directory.
 
 The Markdown contains a Mermaid `flowchart TB`, project groups, call-site evidence, and analysis boundaries. Direct calls
@@ -125,6 +133,22 @@ A saved file can return exit code 1 because it contains useful but partial resul
   - A summary witness is one example for an escaping effect, reconstructed on demand.
   - Implicit exceptions and branch feasibility are not modelled.
   - `UseExceptionHandler`, `AddExceptionHandler` and `UseDeveloperExceptionPage` registrations are listed separately as *boundary evidence*. They do not prove middleware order or coverage; see Microsoft's [exception-handling documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling?view=aspnetcore-10.0).
+
+## Releasing
+
+Every push to `main` that changes code runs [release.yml](.github/workflows/release.yml): restore, build the fixture, test, then publish the `Sharpview` tool to nuget.org, tag `v<version>` and create a GitHub release with the package attached. Pull requests and other branches run [ci.yml](.github/workflows/ci.yml) (test and pack only). Changes limited to `docs/` or `README.md` do not publish; they ship with the next code change.
+
+The version is computed by [github-tag-action](https://github.com/mathieudutour/github-tag-action) (pinned to a commit) from [Conventional Commit](https://www.conventionalcommits.org/) subjects since the last `v*` tag. The tag is created only after nuget.org accepts the package:
+
+| Commit message | Bump | Example |
+| --- | --- | --- |
+| anything (`fix:`, `chore:`, `docs:`, untyped) | patch | `fix: handle unloaded project references` → 0.1.0 → 0.1.1 |
+| `feat:` or `feat(scope):` | minor | `feat(exceptions): add --miscaught` → 0.1.1 → 0.2.0 |
+| `!` after the type, or a `BREAKING CHANGE:` footer | major | `feat!: remove layers command` → 0.2.0 → 1.0.0 |
+
+The highest bump among the new commits wins. Before the first tag the baseline is 0.0.0, so a `feat:` commit makes the first release 0.1.0. The subject must start with the type: `feat: ...` counts, while "feat" only in the description does not. Add `[skip-release]` to a commit message to leave it out of the version calculation. Local builds report `0.0.0-dev`.
+
+One-time setup: create an API key on nuget.org (scope *Push*, glob pattern `Sharpview`) and add it as the repository secret `NUGET_API_KEY`.
 
 ## Library use
 

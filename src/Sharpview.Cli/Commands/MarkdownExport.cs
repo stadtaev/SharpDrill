@@ -4,7 +4,7 @@ namespace Sharpview.Cli;
 
 internal static class MarkdownExport
 {
-    /// <summary>Writes a new file (never overwrites) at output, or in diagrams_exports next to the binary; returns its full path.</summary>
+    /// <summary>Writes a new file (never overwrites) at output, or in diagrams_exports under the current directory; returns its full path.</summary>
     internal static async Task<string> SaveAsync(string document, string? output, string name, CancellationToken token)
     {
         var path = output is null ? DefaultPath(name) : Path.GetFullPath(output);
@@ -29,7 +29,7 @@ internal static class MarkdownExport
 
     private static string DefaultPath(string name)
     {
-        var directory = Path.Combine(AppContext.BaseDirectory, "diagrams_exports");
+        var directory = Path.GetFullPath("diagrams_exports");
         Directory.CreateDirectory(directory);
         var slug = new string(name.Select(c => char.IsAsciiLetterOrDigit(c) ? c : '-').ToArray()).Trim('-');
         if (slug.Length == 0) slug = "diagram";

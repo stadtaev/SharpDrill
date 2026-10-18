@@ -60,9 +60,10 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
           --locations            Print call-site evidence for paths and witnesses.
           --mermaid              projects: also save the tree as a Mermaid diagram in Markdown.
           --output F             New file for inspect --json, diagram or projects --mermaid; existing files are never overwritten.
-                                 Diagrams default to diagrams_exports next to the binary.
+                                 Diagrams default to ./diagrams_exports in the current directory.
           --configuration NAME   Default Debug.   --framework TFM  Required for ambiguous multi-target inputs.
           --exclude-generated    Skip generated sources (included by default).
+          --version              Print the version; no project load.
           --help                 This text; no project load.
 
         Exit: 0 complete, 1 usable but with gaps/Unknown/limits, 2 invalid request or fatal, 130 cancelled.
