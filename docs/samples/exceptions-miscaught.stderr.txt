@@ -1,4 +1,4 @@
-Layers: API, Application, Infrastructure; edges: 8; external references: 77; unresolved calls: 0; rule evaluated: True; violations: 1; unknown: 0.
+Action roots: 12; miscaught: 1; witnesses: 26; unknown: 18; examined sites: 38; depth limit: False; output limit: False; work limit: False; global caveats: 6.
 Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:2:1)
 Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:3:1)
 Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:4:1)

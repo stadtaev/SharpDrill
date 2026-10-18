@@ -5,7 +5,6 @@ namespace Sharpview.Cli;
 internal sealed class TextReport(ProgramIndex index, TextWriter output, Arguments arguments)
 {
     private readonly ProgramSnapshot snapshot = index.Snapshot;
-    internal LayerMap Layers { get; } = new(index, new LayerModel(arguments.Layers, arguments.Allowed));
     private readonly HashSet<string> ambiguous = index.Snapshot.Callables.GroupBy(x => x.DisplaySignature)
         .Where(x => x.Count() > 1).Select(x => x.Key).ToHashSet(StringComparer.Ordinal);
     internal string Name(CallableId id)
@@ -19,7 +18,7 @@ internal sealed class TextReport(ProgramIndex index, TextWriter output, Argument
     {
         if (!index.TryGetCallable(id, out var method)) return;
         var type = index.DeclaringType(id)?.DisplayName ?? "<no containing type>";
-        output.WriteLine($"  {Name(id)} | Project: {Project(method)} | Type: {type} | Layer: {Layers.LayerOf(id) ?? "unconfigured"} | Transitions: {transitions}");
+        output.WriteLine($"  {Name(id)} | Project: {Project(method)} | Type: {type} | Transitions: {transitions}");
     }
     internal void Chain(CallChain chain)
     {
@@ -76,28 +75,6 @@ internal sealed class TextReport(ProgramIndex index, TextWriter output, Argument
         foreach (var boundary in snapshot.BoundaryHandling)
             output.WriteLine($"  {boundary.Registration} | Project: {index.ProjectName(boundary.Compilation)} | {boundary.BoundMethod} | {Location(boundary.Evidence)}");
         if (snapshot.BoundaryHandling.IsEmpty) output.WriteLine("  No supported registration evidence found; boundary handling unknown.");
-        output.WriteLine("Controller exception witnesses:");
-    }
-    internal void Witness(ExceptionWitness witness)
-    {
-        var origin = witness.Origin is { } id && index.TryGetThrowSite(id, out var fact) ? fact : null;
-        output.WriteLine($"Project: {Project(index.Callable(origin?.Owner ?? witness.Action))}");
-        output.WriteLine($"Origin: {(origin is null ? "Unknown" : Name(origin.Owner))}");
-        output.WriteLine($"Exception: {witness.ExceptionType ?? "Unknown"} ({(witness.IsExactType ? "exact construction" : "static; runtime type may differ")})");
-        output.WriteLine($"Static exception type: {witness.StaticExceptionType ?? witness.ExceptionType ?? "Unknown"}");
-        output.WriteLine($"Exact construction type: {witness.ExactExceptionType ?? (witness.IsExactType ? witness.ExceptionType : null) ?? "Unknown"}");
-        output.WriteLine($"Path: {string.Join(" --> ", witness.Path.Select(Name))}");
-        output.WriteLine($"Status: {Status(witness.Status)}\nReason: {witness.Reason}");
-        if (witness.SubsequentOrigin is { } next && index.TryGetThrowSite(next, out var subsequent))
-            output.WriteLine($"Subsequent origin: {Name(subsequent.Owner)} at {Location(subsequent.Evidence)} | {next.Value}");
-        if (witness.SubsequentStatus is { } nextStatus) output.WriteLine($"Subsequent status: {Status(nextStatus)}");
-        foreach (var evidence in witness.Evidence) output.WriteLine($"Evidence: {Location(evidence)}");
-        var action = index.Callable(witness.Action);
-        var boundaries = snapshot.BoundaryHandling.Where(x => x.Compilation == action.Compilation).ToArray();
-        output.WriteLine(boundaries.Length == 0 ? "Boundary handling: Unknown (no supported registration evidence in action project)"
-            : "Boundary handling: registration evidence; action interception and middleware coverage unknown");
-        foreach (var boundary in boundaries) output.WriteLine($"  {boundary.Registration}: {Location(boundary.Evidence)}");
-        output.WriteLine();
     }
     internal void Reach(RootReach reach)
     {
@@ -105,7 +82,7 @@ internal sealed class TextReport(ProgramIndex index, TextWriter output, Argument
         foreach (var reached in reach.Reached)
         {
             var method = index.Callable(reached.Callable);
-            output.WriteLine($"  [{reached.Distance}] {Name(reached.Callable)} | Project: {Project(method)} | Layer: {Layers.LayerOf(reached.Callable) ?? "unconfigured"}{(reached.ViaCandidate ? " (candidate)" : "")}");
+            output.WriteLine($"  [{reached.Distance}] {Name(reached.Callable)} | Project: {Project(method)}{(reached.ViaCandidate ? " (candidate)" : "")}");
             if (reached.Distance >= 2 || reached.WitnessUsesCandidate) output.WriteLine($"    Path: {Name(reach.Root)}{string.Concat(reached.Witness.Select(x => (x.Candidate ? " -[candidate]-> " : " --> ") + Name(x.Target)))}");
             if (arguments.FollowCandidates)
             {
@@ -133,18 +110,66 @@ internal sealed class TextReport(ProgramIndex index, TextWriter output, Argument
             });
         }
     }
-    internal void LayerOverview(LayerGraph graph, IEnumerable<Finding> findings)
+    // Where an exception is raised: method, declaring type, project and source location.
+    private void Origin(string label, ThrowSiteFact origin)
     {
-        foreach (var edge in graph.Edges)
-            output.WriteLine($"Layer edge: {edge.From} --> {edge.To} | {edge.Kind} | {edge.Count} | Evidence: {(edge.Evidence is null ? "none" : Location(edge.Evidence))} | Witness: {edge.WitnessSource} --> {edge.WitnessTarget}");
-        foreach (var finding in findings)
-            output.WriteLine($"Finding [{finding.RuleId}] {finding.Verdict}: {finding.Subject} | {finding.Message}" + (finding.Evidence.IsEmpty ? "" : $" | Evidence: {Location(finding.Evidence[0])}"));
+        var method = index.Callable(origin.Owner);
+        output.WriteLine($"  {label}: {Name(origin.Owner)} | Type: {index.DeclaringType(method.Id)?.DisplayName ?? "<no containing type>"} | Project: {Project(method)} | {Location(origin.Evidence)}");
     }
+    private static string Thrown(ThrowSiteFact origin) => origin.Kind == ThrowKind.Rethrow ? "rethrow of the caught exception"
+        : (origin.ExactExceptionType ?? origin.StaticExceptionType)?.DisplayName is { } type
+            ? type + (origin.IsExactType || origin.ExactExceptionType is not null ? "" : " (static type; runtime type may differ)")
+            : "unknown type";
+    private void ExamplePath(ExceptionWitness witness)
+    {
+        output.WriteLine($"  Example path: {string.Join(" --> ", witness.Path.Select(Name))}");
+        if (arguments.Locations) foreach (var evidence in witness.Evidence) output.WriteLine($"    Evidence: {Location(evidence)}");
+    }
+    internal void Throw(ThrowSiteFact origin)
+    {
+        output.WriteLine($"Throw: {Thrown(origin)}");
+        Origin("At", origin);
+        output.WriteLine($"  Inside try in the same method: {(origin.ProtectedRegions.IsEmpty ? "no" : "yes")}");
+    }
+    internal void Caught(CaughtException caught)
+    {
+        var origin = index.ThrowSite(caught.Origin);
+        var handler = index.Catch(caught.Catch);
+        output.WriteLine($"Caught: {Thrown(origin)}");
+        Origin("Thrown", origin);
+        output.WriteLine($"  Caught: {Name(handler.Owner)} | catch ({handler.CaughtType?.DisplayName ?? "all exceptions"}){(handler.Filter is null ? "" : " when (...)")} | Project: {Project(index.Callable(handler.Owner))} | {Location(handler.Evidence)}");
+        output.WriteLine($"  Handler: {Outcome(handler.Outcome)}{caught.Certainty switch
+        {
+            CatchCertainty.TypeUncertain => " | match uncertain: the runtime type may not be caught",
+            CatchCertainty.Filtered => " | filter decides at runtime",
+            _ => "",
+        }}");
+        ExamplePath(caught.Example);
+    }
+    internal void Miscaught(MiscaughtException miscaught)
+    {
+        var origin = index.ThrowSite(miscaught.Origin);
+        var region = index.Region(miscaught.Missed.Region);
+        var clauses = region.Catches.Select(x => index.Catch(x).CaughtType?.DisplayName ?? "all exceptions");
+        output.WriteLine($"Miscaught: {miscaught.Missed.ExceptionType ?? Thrown(origin)}");
+        Origin("Thrown", origin);
+        output.WriteLine($"  Passed through: try in {Name(region.Owner)} | Project: {Project(index.Callable(region.Owner))} | {Location(region.ProtectedBlock)}");
+        output.WriteLine($"  Catch clauses (none match): {string.Join(", ", clauses)}");
+        output.WriteLine($"  Then: {string.Join("; ", miscaught.Outcomes.Select(Status))}");
+        ExamplePath(miscaught.Example);
+    }
+    private static string Outcome(HandlerOutcome outcome) => outcome switch
+    {
+        HandlerOutcome.Intercepts => "handles it (recovery not proven)",
+        HandlerOutcome.Rethrows => "rethrows it",
+        HandlerOutcome.Replaces => "throws a replacement",
+        _ => "unsupported handler flow; outcome unknown",
+    };
     private static string Status(ExceptionStatus status) => status switch
     {
-        ExceptionStatus.Intercepted => "Intercepted by a matching handler",
-        ExceptionStatus.RethrownOrReplaced => "Rethrown or replaced",
-        ExceptionStatus.MayEscape => "May escape the controller action under the supported analysis model",
-        _ => "Unknown"
+        ExceptionStatus.Intercepted => "caught further up",
+        ExceptionStatus.RethrownOrReplaced => "rethrown or replaced further up",
+        ExceptionStatus.MayEscape => "may escape the controller action",
+        _ => "unknown",
     };
 }

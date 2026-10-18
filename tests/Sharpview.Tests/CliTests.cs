@@ -49,46 +49,29 @@ public sealed class CliTests
     [Fact]
     public async Task Exceptions_report_action_escape_and_boundary_evidence_separately()
     {
-        var result = await Run("exceptions", ResearchFixture.Input, "--paths", "--root", "Research.Api.OrdersController.Get()");
+        var result = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Get()");
         Assert.Equal(1, result.Exit);
-        Assert.Contains("May escape the controller action", result.Out);
-        Assert.Contains("Boundary handling: registration evidence", result.Out);
+        Assert.Contains("May escape: Research.Infrastructure.StorageException", result.Out);
+        Assert.Contains("Boundary registration evidence (runtime coverage unknown)", result.Out);
         Assert.Contains("UseExceptionHandler", result.Out);
         Assert.DoesNotContain("unhandled", result.Out, StringComparison.OrdinalIgnoreCase);
     }
     [Fact]
-    public async Task Path_layers_are_explicit_and_distance_is_transitions()
+    public async Task Paths_show_projects_and_distance_is_transitions()
     {
-        var result = await Run("paths", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--layer", "project:Research.Infrastructure=Infrastructure");
+        var result = await Run("paths", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()");
         Assert.Equal(1, result.Exit);
-        Assert.Contains("Layer: Infrastructure", result.Out);
+        Assert.Contains("Project: Research.Infrastructure | Type: Research.Infrastructure.Repository", result.Out);
         Assert.Contains("Transitions: 2", result.Out);
-    }
-    [Fact]
-    public async Task Layer_overview_aggregates_paths_and_evaluates_allowed_dependencies()
-    {
-        string[] layers = ["--layer", "project:Research.Api=API", "--layer", "project:Research.Application=Application", "--layer", "project:Research.Infrastructure=Infrastructure"];
-        var overview = await Run(["layers", ResearchFixture.Input, .. layers]);
-        Assert.Contains("Layer edge: API --> Application | DirectCall |", overview.Out);
-        Assert.Contains("Layer edge: Application --> Infrastructure | DirectCall |", overview.Out);
-        Assert.Contains("Layer edge: Application --> Infrastructure | DeclaredCall |", overview.Out);
-        Assert.DoesNotContain("Finding [", overview.Out);
-        Assert.Contains("rule evaluated: False", overview.Error);
-        var evaluated = await Run(["layers", ResearchFixture.Input, .. layers, "--allow", "API=Application", "--allow", "Application=Infrastructure"]);
-        Assert.Equal(1, evaluated.Exit);
-        // The fixture's IRepository parameter on a controller action is a real API --> Infrastructure type dependency.
-        Assert.Contains("Finding [layer-dependency] Violation: API --> Infrastructure (TypeDependency)", evaluated.Out);
-        Assert.DoesNotContain("Violation: API --> Application", evaluated.Out);
-        Assert.Contains("violations: 1", evaluated.Error);
     }
     [Fact]
     public async Task Reach_lists_each_callable_once_with_a_shortest_witness()
     {
-        var result = await Run("reach", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--layer", "project:Research.Infrastructure=Infrastructure", "--locations");
+        var result = await Run("reach", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--locations");
         Assert.Equal(1, result.Exit);
         Assert.Contains("Root: Research.Api.OrdersController.Get()", result.Out);
-        Assert.Contains("  [1] Research.Application.Service.Load() | Project: Research.Application | Layer: unconfigured", result.Out);
-        Assert.Contains("  [2] Research.Infrastructure.Repository.Read() | Project: Research.Infrastructure | Layer: Infrastructure", result.Out);
+        Assert.Contains("  [1] Research.Application.Service.Load() | Project: Research.Application", result.Out);
+        Assert.Contains("  [2] Research.Infrastructure.Repository.Read() | Project: Research.Infrastructure", result.Out);
         Assert.Contains("    Path: Research.Api.OrdersController.Get() --> Research.Application.Service.Load() --> Research.Infrastructure.Repository.Read()", result.Out);
         Assert.Contains("| direct call", result.Out);
         var service = await Run("reach", ResearchFixture.Input, "--root", "Research.Application.Service.Load()");

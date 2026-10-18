@@ -521,10 +521,16 @@ public sealed class ExtractionTests
             File.WriteAllText(path, """
                 <Project><PropertyGroup><TargetFrameworks>net9.0;net10.0</TargetFrameworks>
                 <ProjectAssetsFile Condition="'$(TargetFramework)' == 'net10.0'">net10.assets.json</ProjectAssetsFile>
-                </PropertyGroup></Project>
+                <Nullable>enable</Nullable><TreatWarningsAsErrors>True</TreatWarningsAsErrors><WarningsAsErrors>NU1605; nullable</WarningsAsErrors>
+                </PropertyGroup><ItemGroup><ProjectReference Include="../Other/Other.csproj" /></ItemGroup></Project>
                 """);
             File.WriteAllText(Path.Combine(directory, "net10.assets.json"), "{}");
-            Assert.Equal("net10.0", ProjectSelection.Read(path, new(path, TargetFramework: "net10.0")));
+            var settings = ProjectSelection.Read(path, new(path, TargetFramework: "net10.0"));
+            Assert.Equal("net10.0", settings.Framework);
+            Assert.Equal("enable", settings.Nullable);
+            Assert.True(settings.TreatWarningsAsErrors);
+            Assert.Equal(["NU1605", "nullable"], settings.WarningsAsErrors);
+            Assert.Equal([Path.GetFullPath(Path.Combine(directory, "..", "Other", "Other.csproj"))], settings.ProjectReferences);
             Assert.Contains("choices: net9.0, net10.0", Assert.Throws<ArgumentException>(() => ProjectSelection.Read(path, new(path))).Message);
             Assert.Contains("not declared", Assert.Throws<ArgumentException>(() => ProjectSelection.Read(path, new(path, TargetFramework: "net8.0"))).Message);
             Assert.Contains("not restored", Assert.Throws<ArgumentException>(() => ProjectSelection.Read(path, new(path, TargetFramework: "net9.0"))).Message);

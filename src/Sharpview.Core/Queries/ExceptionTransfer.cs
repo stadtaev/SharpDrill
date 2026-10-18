@@ -8,6 +8,8 @@ internal sealed record ExceptionFlow(ThrowSiteId Origin, ThrowSiteId? Subsequent
     ImmutableList<SourceEvidence> Evidence, ImmutableList<CatchId> Handlers)
 {
     public TypeUse? Type => ExactType ?? StaticType;
+    // Protected regions crossed whose catch clauses definitely do not match; collected with evidence only.
+    public ImmutableList<MissedRegion> Missed { get; init; } = ImmutableList<MissedRegion>.Empty;
 }
 
 internal sealed record ExceptionTransferResult(ExceptionFlow Flow, ExceptionStatus? Status = null,
@@ -57,11 +59,13 @@ internal static class ExceptionTransfer
             var region = program.Region(regionId);
             if (region.HasFinally)
                 return Unknown(flow, ExceptionReason.FinallyUnsupported, "Finally may change propagation; its execution is outside the supported model.");
+            var matched = false;
             foreach (var catchId in region.Catches)
             {
                 var handler = program.Catch(catchId);
                 var match = Matches(program.Types, flow.Type, flow.Exact, handler.CaughtType, token);
                 if (match == false) continue;
+                matched = true;
                 if (collectEvidence)
                     flow = flow with { Evidence = flow.Evidence.Add(handler.Evidence), Handlers = flow.Handlers.Add(handler.Id) };
                 if (match is null)
@@ -94,6 +98,8 @@ internal static class ExceptionTransfer
                 }
                 break;
             }
+            if (!matched && !region.Catches.IsEmpty && collectEvidence)
+                flow = flow with { Missed = flow.Missed.Add(new(region.Id, flow.Type?.DisplayName)) };
         }
         return new(flow);
     }

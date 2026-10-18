@@ -17,7 +17,13 @@ public sealed record ExceptionWitness(CallableId Action, ThrowSiteId? Origin, Th
     ExceptionStatus Status, string Reason, ImmutableArray<SourceEvidence> Evidence,
     ImmutableArray<CatchId> HandlerIds, ExceptionStatus? SubsequentStatus = null,
     string? StaticExceptionType = null, string? ExactExceptionType = null,
-    ExceptionReason ReasonCode = ExceptionReason.Unspecified, DispatchKind? Dispatch = null);
+    ExceptionReason ReasonCode = ExceptionReason.Unspecified, DispatchKind? Dispatch = null)
+{
+    // try/catch blocks the exception passed through because no catch clause matched its type, innermost first.
+    public ImmutableArray<MissedRegion> MissedRegions { get; init; } = [];
+}
+// A protected region with catch clauses, none of which matches ExceptionType (the type at that point of propagation).
+public sealed record MissedRegion(ExceptionRegionId Region, string? ExceptionType);
 public sealed record ExceptionSearchResult(ImmutableArray<ExceptionWitness> Results, bool OutputLimitReached,
     bool WorkLimitReached, bool DepthLimitReached, int ExpandedSites)
 {
@@ -126,6 +132,7 @@ public static class ExceptionQuery
         return new(root, flow.Origin, flow.SubsequentOrigin, flow.Type?.DisplayName, flow.Exact, path,
             flow.Changed ? ExceptionStatus.RethrownOrReplaced : status, message,
             flow.Evidence.ToImmutableArray(), flow.Handlers.ToImmutableArray(),
-            flow.Changed ? status : null, flow.StaticType?.DisplayName, flow.ExactType?.DisplayName, reason);
+            flow.Changed ? status : null, flow.StaticType?.DisplayName, flow.ExactType?.DisplayName, reason)
+        { MissedRegions = [.. flow.Missed] };
     }
 }

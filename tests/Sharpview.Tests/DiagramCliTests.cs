@@ -99,17 +99,17 @@ public sealed class DiagramCliTests
     }
 
     [Fact]
-    public async Task Summary_is_the_default_and_reports_known_escapes_alongside_unknowns_and_limits()
+    public async Task Uncaught_reports_known_escapes_alongside_unknowns_and_limits()
     {
-        var result = await Run("", "exceptions", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()");
+        var result = await Run("", "exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Get()");
         Assert.Equal(1, result.Exit);
         Assert.Contains("Exception summary: Research.Api.OrdersController.Get()", result.Out);
         Assert.Contains("May escape: Research.Infrastructure.StorageException", result.Out);
         Assert.Contains("Unknown [MissingBody]", result.Out);
         Assert.Contains("Path: Research.Api.OrdersController.Get() -->", result.Out);
-        var limited = await Run("", "exceptions", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--budget", "1");
+        var limited = await Run("", "exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Get()", "--budget", "1");
         Assert.Equal(1, limited.Exit); Assert.Contains("work limit: True", limited.Error);
-        var invalid = await Run("", "reach", "missing.slnx", "--paths");
+        var invalid = await Run("", "reach", "missing.slnx", "--uncaught");
         Assert.Equal(2, invalid.Exit); Assert.DoesNotContain("Analysis input not found", invalid.Error);
     }
 
@@ -119,7 +119,7 @@ public sealed class DiagramCliTests
     [InlineData("--budget", "0")]
     public async Task Invalid_summary_options_fail_before_loading(string option, string value)
     {
-        var result = await Run("", "exceptions", "missing.slnx", option, value);
+        var result = await Run("", "exceptions", "missing.slnx", "--uncaught", option, value);
         Assert.Equal(2, result.Exit); Assert.DoesNotContain("Analysis input not found", result.Error);
     }
 

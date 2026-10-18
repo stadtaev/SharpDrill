@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Globalization;
-using System.Text;
 using Sharpview.Core;
 using Sharpview.Export.Mermaid;
 
@@ -41,36 +40,9 @@ internal sealed class DiagramCommand(TextReader input, TextWriter output) : ICli
         }
         var diagram = CallDiagramQuery.Build(index, selected.Id, Query(arguments), token);
         var document = MermaidExporter.Markdown(diagram);
-        var path = arguments.Output is null ? DefaultPath(selected.DisplaySignature) : Path.GetFullPath(arguments.Output);
-        token.ThrowIfCancellationRequested();
-        // CreateNew protects against races as well as accidental input-file overwrites.
-        await using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, true))
-        {
-            try
-            {
-                var bytes = Encoding.UTF8.GetBytes(document);
-                await file.WriteAsync(bytes, token);
-                await file.FlushAsync(token);
-            }
-            catch
-            {
-                await file.DisposeAsync();
-                File.Delete(path);
-                throw;
-            }
-        }
+        var path = await MarkdownExport.SaveAsync(document, arguments.Output, selected.DisplaySignature, token);
         await output.WriteLineAsync("Saved diagram: " + path);
         await output.WriteLineAsync($"Nodes: {diagram.Nodes.Length}; edges: {diagram.Edges.Length}; boundaries: {diagram.Boundaries.Length}; extraction gaps: {diagram.Gaps.Length}; limits: {(diagram.Limits.IsEmpty ? "none" : string.Join(", ", diagram.Limits))}.");
         return diagram.IsComplete ? 0 : 1;
-    }
-
-    private static string DefaultPath(string signature)
-    {
-        var directory = Path.Combine(AppContext.BaseDirectory, "diagrams_exports");
-        Directory.CreateDirectory(directory);
-        var slug = new string(signature.Select(c => char.IsAsciiLetterOrDigit(c) ? c : '-').ToArray()).Trim('-');
-        if (slug.Length == 0) slug = "action";
-        if (slug.Length > 80) slug = slug[..80];
-        return Path.GetFullPath(Path.Combine(directory, $"{slug}-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.md"));
     }
 }

@@ -1,9 +1,13 @@
 using Microsoft.Build.Evaluation;
 namespace Sharpview.Roslyn;
 
+// Evaluated MSBuild values for the selected framework; these are the project's real settings, not inferred ones.
+internal sealed record ProjectSettings(string Framework, string Nullable, bool TreatWarningsAsErrors,
+    IReadOnlyList<string> WarningsAsErrors, IReadOnlyList<string> ProjectReferences);
+
 internal static class ProjectSelection
 {
-    public static string Read(string path, AnalysisRequest request)
+    public static ProjectSettings Read(string path, AnalysisRequest request)
     {
         var properties = new Dictionary<string, string> { ["Configuration"] = request.Configuration };
         using var collection = new ProjectCollection(properties);
@@ -22,6 +26,10 @@ internal static class ProjectSelection
         if (string.IsNullOrEmpty(assets)) assets = Path.Combine(Path.GetDirectoryName(path)!, "obj", "project.assets.json");
         if (!Path.IsPathRooted(assets)) assets = Path.Combine(Path.GetDirectoryName(path)!, assets);
         if (!File.Exists(assets)) throw new ArgumentException($"Dependencies are not restored for {path}. Restore the input explicitly before analysis.");
-        return selected;
+        var directory = Path.GetDirectoryName(path)!;
+        return new(selected, project.GetPropertyValue("Nullable"),
+            string.Equals(project.GetPropertyValue("TreatWarningsAsErrors"), "true", StringComparison.OrdinalIgnoreCase),
+            [.. project.GetPropertyValue("WarningsAsErrors").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)],
+            [.. project.GetItems("ProjectReference").Select(x => Path.GetFullPath(Path.Combine(directory, x.EvaluatedInclude.Replace('\\', Path.DirectorySeparatorChar)))).Order(StringComparer.Ordinal)]);
     }
 }

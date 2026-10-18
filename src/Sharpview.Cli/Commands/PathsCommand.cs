@@ -5,7 +5,7 @@ namespace Sharpview.Cli;
 
 internal sealed class PathsCommand : ReportCommand
 {
-    public override ImmutableHashSet<string> Options { get; } = ["--root", "--layer", "--max-depth", "--max-paths", "--budget", "--locations"];
+    public override ImmutableHashSet<string> Options { get; } = ["--root", "--max-depth", "--max-paths", "--budget", "--locations"];
 
     public override void Validate(Arguments arguments) => Query(arguments).Validate();
 

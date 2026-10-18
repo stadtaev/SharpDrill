@@ -32,8 +32,7 @@ public sealed class CliContractTests
     [InlineData("--budget", "-1")]
     [InlineData("--max-depth", "oops")]
     [InlineData("--format", "yaml")]
-    [InlineData("--layer", "API")]
-    [InlineData("--layer", "class:Orders=API")]
+    [InlineData("--layer", "project:Orders=API")]
     [InlineData("--unknown", "x")]
     public async Task Invalid_options_fail_before_loading(string option, string value)
     {
@@ -43,19 +42,18 @@ public sealed class CliContractTests
         Assert.DoesNotContain("Analysis input not found", result.Error);
     }
     [Theory]
-    [InlineData("layers")]
-    [InlineData("layers", "--layer", "project:Orders=API", "--root", "X()")]
-    [InlineData("layers", "--layer", "project:Orders=API", "--max-depth", "3")]
-    [InlineData("layers", "--layer", "project:Orders=API", "--allow", "API")]
-    [InlineData("layers", "--layer", "project:Orders=API", "--allow", "API=")]
-    [InlineData("layers", "--layer", "project:Orders=API", "--allow", "API=Application,")]
-    [InlineData("paths", "--allow", "API=Application")]
+    [InlineData("projects", "--root", "X()")]
+    [InlineData("projects", "--output", "x.md")]
     [InlineData("paths", "--follow-candidates")]
+    [InlineData("exceptions", "--root", "X()")]
+    [InlineData("exceptions", "--uncaught", "--caught")]
+    [InlineData("exceptions", "--uncaught", "--max-depth", "3")]
+    [InlineData("exceptions", "--caught", "--max-paths", "0")]
     [InlineData("reach", "--max-paths", "5")]
     [InlineData("inspect", "--methods", "--json")]
     [InlineData("inspect", "--output", "x.json")]
     [InlineData("inspect", "--root", "X()")]
-    public async Task Invalid_layer_requests_fail_before_loading(string command, params string[] options)
+    public async Task Invalid_requests_fail_before_loading(string command, params string[] options)
     {
         var result = await Run([command, "missing.slnx", .. options]);
         Assert.Equal(2, result.Exit);
@@ -80,6 +78,7 @@ public sealed class CliContractTests
     [InlineData("chains")]
     [InlineData("controllers")]
     [InlineData("methods")]
+    [InlineData("layers")]
     public async Task Removed_commands_are_rejected(string command)
     {
         var result = await Run(command, "missing.slnx");
@@ -88,6 +87,9 @@ public sealed class CliContractTests
     [Theory]
     [InlineData("exceptions", "--dispatch", "direct")]
     [InlineData("exceptions", "--summary")]
+    [InlineData("exceptions", "--paths")]
+    [InlineData("paths", "--layer", "project:X=X")]
+    [InlineData("reach", "--allow", "A=B")]
     [InlineData("exceptions", "--max-facts", "5")]
     [InlineData("paths", "--max-chains", "5")]
     [InlineData("reach", "--max-expansions", "5")]
@@ -101,8 +103,8 @@ public sealed class CliContractTests
     [Fact]
     public async Task Option_of_another_command_names_the_command()
     {
-        var result = await Run("layers", "missing.slnx", "--layer", "project:X=X", "--follow-candidates");
-        Assert.Equal(2, result.Exit); Assert.Contains("layers does not accept --follow-candidates", result.Error);
+        var result = await Run("projects", "missing.slnx", "--follow-candidates");
+        Assert.Equal(2, result.Exit); Assert.Contains("projects does not accept --follow-candidates", result.Error);
     }
     [Fact]
     public async Task Snapshot_ids_round_trip_and_json_is_deterministic()
@@ -133,15 +135,70 @@ public sealed class CliContractTests
         Assert.Equal(before, await File.ReadAllBytesAsync(ResearchFixture.Input));
     }
     [Fact]
-    public async Task Complete_landscape_includes_catch_protected_regions_and_static_types()
+    public async Task Inspect_landscape_includes_catch_protected_regions_and_static_types()
     {
-        var result = await Run("exceptions", ResearchFixture.Input, "--paths", "--root", "Research.Api.OrdersController.Replace()");
+        var result = await Run("inspect", ResearchFixture.Input);
         Assert.Equal(1, result.Exit);
-        Assert.Contains("Rethrown or replaced", result.Out);
         Assert.Contains("Subsequent origin:", result.Out);
         Assert.Contains("Protected region:", result.Out);
         Assert.Contains("Filter: enabled", result.Out);
         Assert.Contains("static; runtime type may differ", result.Out);
+    }
+    [Fact]
+    public async Task Default_lists_every_throw_with_method_type_and_project()
+    {
+        var result = await Run("exceptions", ResearchFixture.Input);
+        Assert.Equal(1, result.Exit);
+        Assert.Contains("Throw: Research.Infrastructure.StorageException\n  At: Research.Infrastructure.Repository.Read() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure |", result.Out.Replace("\r\n", "\n"));
+        Assert.Contains("Throw: rethrow of the caught exception", result.Out);
+        Assert.Contains("Inside try in the same method: yes", result.Out);
+        Assert.Contains("Throws: ", result.Error);
+    }
+    [Fact]
+    public async Task Caught_reports_where_thrown_and_where_caught_with_the_handler_outcome()
+    {
+        var result = await Run("exceptions", ResearchFixture.Input, "--caught");
+        Assert.Equal(1, result.Exit);
+        var text = result.Out.Replace("\r\n", "\n");
+        Assert.Contains("  Caught: Research.Application.Service.Caught() | catch (Research.Infrastructure.StorageException) | Project: Research.Application |", text);
+        Assert.Contains("  Thrown: Research.Infrastructure.Repository.Read() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure |", text);
+        Assert.Contains("Handler: rethrows it", text);
+        Assert.Contains("Handler: throws a replacement", text);
+        Assert.Contains("filter decides at runtime", text);
+        Assert.DoesNotContain("Service.Incompatible()", text);
+    }
+    [Fact]
+    public async Task Miscaught_reports_the_try_whose_clauses_do_not_match_and_what_happens_next()
+    {
+        var result = await Run("exceptions", ResearchFixture.Input, "--miscaught");
+        Assert.Equal(1, result.Exit);
+        var text = result.Out.Replace("\r\n", "\n");
+        Assert.Contains("Miscaught: Research.Infrastructure.StorageException", text);
+        Assert.Contains("  Passed through: try in Research.Application.Service.Incompatible() | Project: Research.Application |", text);
+        Assert.Contains("  Catch clauses (none match): System.ArgumentException", text);
+        Assert.Contains("  Then: may escape the controller action", text);
+        Assert.Contains("miscaught: 1;", result.Error);
+    }
+    [Fact]
+    public async Task Projects_print_the_reference_tree_with_build_settings()
+    {
+        var result = await Run("projects", ResearchFixture.Input);
+        Assert.Equal(0, result.Exit);
+        var text = result.Out.Replace("\r\n", "\n");
+        Assert.Contains("Research.Api [net10.0 | Nullable: enable | Nullable warnings as errors: no | All warnings as errors: no | Compiler warnings: 0 | Errors: 0]\n└── Research.Application [", text);
+        Assert.Contains("\n    └── Research.Infrastructure [net10.0 | Nullable: enable | Nullable warnings as errors: yes |", text);
+        Assert.Contains("references: 2; unloaded references: 0", result.Error);
+        var path = Path.Combine(Path.GetTempPath(), $"sharpview-projects-{Guid.NewGuid():N}.md");
+        try
+        {
+            var saved = await Run("projects", ResearchFixture.Input, "--mermaid", "--output", path);
+            Assert.Contains("Saved diagram: " + Path.GetFullPath(path), saved.Out);
+            var document = await File.ReadAllTextAsync(path);
+            Assert.Contains("```mermaid", document);
+            Assert.Contains("p1 ---> p2", document);
+            Assert.Contains("| Research.Infrastructure | net10.0 | enable | yes | no | 0 | 0 |", document);
+        }
+        finally { File.Delete(path); }
     }
 
     [Theory]
@@ -149,7 +206,7 @@ public sealed class CliContractTests
     [InlineData(true)]
     public async Task Ownerless_exception_gaps_are_reported_once_as_global_caveats(bool summary)
     {
-        var result = await Run(summary ? ["exceptions", ResearchFixture.Input] : ["exceptions", ResearchFixture.Input, "--paths"]);
+        var result = await Run(summary ? ["exceptions", ResearchFixture.Input, "--uncaught"] : ["exceptions", ResearchFixture.Input, "--caught"]);
         Assert.Equal(1, result.Exit);
         Assert.Equal(6, result.Error.Split('\n').Count(x => x.StartsWith("Gap [", StringComparison.Ordinal)));
         Assert.Contains("global caveats: 6", result.Error);

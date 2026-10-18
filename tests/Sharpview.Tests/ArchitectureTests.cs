@@ -154,4 +154,25 @@ public sealed class ArchitectureTests
         var allowed = LayerRules.AllowedDependencies(graph, new(Mappings, [new("API", "Application"), new("Infrastructure", "Application")]));
         Assert.Equal(Verdict.Unknown, Assert.Single(allowed).Verdict);
     }
+
+    [Fact]
+    public void Project_map_follows_msbuild_references_and_reports_settings()
+    {
+        var snapshot = new ProgramSnapshot
+        {
+            Compilations = [
+                Project(Api, "Api") with { ProjectReferences = ["/repo/App/App.csproj", "/repo/Infra/Infra.csproj"], NullableSetting = "enable", WarningCount = 3 },
+                Project(App, "App") with { ProjectReferences = ["/repo/Infra/Infra.csproj", "/elsewhere/Shared.csproj"], WarningsAsErrors = ["NU1605", "Nullable"] },
+                Project(Infra, "Infra") with { TreatWarningsAsErrors = true, ErrorCount = 1 },
+            ]
+        };
+        var map = ProjectMap.Build(snapshot);
+        Assert.Equal([Api], map.Roots.AsEnumerable());
+        Assert.Equal([(Api, App), (Api, Infra), (App, Infra)], map.Graph.Edges.Select(x => (x.Source, x.Target)));
+        Assert.Equal([(App, "/elsewhere/Shared.csproj")], map.Unloaded.AsEnumerable());
+        Assert.Equal(("Api", "enable", WarningsAsErrorsLevel.None, 3), (map.Projects[Api].Name, map.Projects[Api].Nullable, map.Projects[Api].WarningsAsErrors, map.Projects[Api].Warnings));
+        Assert.Equal(WarningsAsErrorsLevel.Nullable, map.Projects[App].WarningsAsErrors);
+        Assert.Equal("disable", map.Projects[App].Nullable);
+        Assert.Equal((WarningsAsErrorsLevel.All, 1), (map.Projects[Infra].WarningsAsErrors, map.Projects[Infra].Errors));
+    }
 }

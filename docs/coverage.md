@@ -45,11 +45,18 @@ Implementation candidates come from source types' interface maps and overrides; 
   - origins inside library code;
   - handler-owned throws, whose reachability depends on other exceptions.
 - **Not modelled:** implicit exceptions (from constructors, getters, framework calls) and branch feasibility. All branches and catch-body calls are structural facts.
+- **Miscaught:** reported only when every catch clause of a crossed `try` definitely does not match the exception's type at that point. A filtered or runtime-dependent clause makes the result Unknown instead.
 - **Wording:** a catch is never reported as successful recovery. "May escape" is scoped to the action under this model. Registration evidence (`UseExceptionHandler`, `AddExceptionHandler`, `UseDeveloperExceptionPage`) does not prove middleware order, environment conditions, invocation, response availability or complete coverage.
 
-## Layers and dependencies
+## Projects
 
-- Layers require explicit `project:`, `namespace:` or `type:` prefix mappings.
+- **From MSBuild:** `<ProjectReference>` items and the evaluated `TargetFramework`, `Nullable`, `TreatWarningsAsErrors` and `WarningsAsErrors` of each loaded C# project, for the selected configuration and framework.
+- **From the compiler:** warning and error counts after severity options. Analyzer, NuGet and other MSBuild warnings are not counted.
+- **Not covered:** package references, non-C# projects (reported as gaps) and references to projects outside the loaded workspace (listed as unloaded).
+
+## Layers and dependencies (library only)
+
+- Layers require explicit `project:`, `namespace:` or `type:` prefix mappings through `LayerModel`; the CLI no longer exposes them.
 - **Dependency sources:**
   - call sites;
   - signatures and inheritance, where base types contribute their type arguments;

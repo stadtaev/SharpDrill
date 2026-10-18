@@ -2,10 +2,10 @@
 
 Sharpview is a C# research tool for understanding ASP.NET Core Web APIs from source:
 
-- **Call paths** from controller actions down through your architectural layers.
-- **Explicit exceptions** that may escape an action, and the handlers in between.
-- **Mermaid diagrams** for a selected controller action, grouped by project.
-- **Layer dependencies**, checked against the architecture you declare.
+- **Project map:** the real `<ProjectReference>` tree, with each project's framework, nullable settings and compiler warnings.
+- **Exceptions:** every explicit throw, and which ones go uncaught, get caught, or pass through a `try` whose catches don't match them.
+- **Call paths and reachability** from controller actions, project by project.
+- **Mermaid diagrams** of the project tree or of one controller action.
 
 Results carry source evidence (file:line:column), and anything the analysis cannot decide is reported as *Unknown* instead of being hidden. It uses the .NET SDK and Roslyn; Visual Studio is not required.
 
@@ -21,16 +21,16 @@ dotnet build tests/Fixtures/ResearchSolution/ResearchSolution.slnx   # sample We
 dotnet test sharpview.slnx
 ```
 
-Try it on the sample (`F` is the input, `L` the layer mapping; works in bash and zsh):
+Try it on the sample (`F` is the input):
 
 ```sh
 F=tests/Fixtures/ResearchSolution/ResearchSolution.slnx
-L=(--layer project:Research.Api=API --layer project:Research.Application=Application --layer project:Research.Infrastructure=Infrastructure)
 
-dotnet run --project src/Sharpview.Cli -- reach $F --root 'Research.Api.OrdersController.Get()' "${L[@]}"
-dotnet run --project src/Sharpview.Cli -- exceptions $F --root 'Research.Api.OrdersController.Get()'
+dotnet run --project src/Sharpview.Cli -- projects $F
+dotnet run --project src/Sharpview.Cli -- exceptions $F
+dotnet run --project src/Sharpview.Cli -- exceptions $F --miscaught
+dotnet run --project src/Sharpview.Cli -- reach $F --root 'Research.Api.OrdersController.Get()'
 dotnet run --project src/Sharpview.Cli -- diagram $F
-dotnet run --project src/Sharpview.Cli -- layers $F "${L[@]}" --allow API=Application --allow Application=Infrastructure
 ```
 
 Analysing your own solution: restore it first (Sharpview never restores, builds or edits analysed code). Loading evaluates MSBuild projects and may run project tooling and source generators, so it is not a sandbox.
@@ -39,11 +39,14 @@ Analysing your own solution: restore it first (Sharpview never restores, builds 
 
 | Command | Question it answers | Default roots |
 | --- | --- | --- |
-| `reach` | What can each action reach — once per method, with distance, layer and shortest path? | controller actions (or any `--root`) |
-| `paths` | What are all call paths from each action (or any `--root` method), with project, layer and transitions? | controller actions |
-| `exceptions` | Which explicit exceptions may escape each action, with one witness per origin? `--paths` lists every propagation path and its handlers instead. | controller actions |
+| `projects` | How do the projects reference each other, and how is each one built (framework, nullable, warnings as errors, compiler warnings)? `--mermaid` also saves the tree as a diagram. | — |
+| `exceptions` | Where is each explicit exception thrown (method, type, project)? | — |
+| `exceptions --uncaught` | Which throws may escape an action because no catch is on the way? One example path per origin. | controller actions |
+| `exceptions --caught` | Which throws reach a matching catch, and where are they thrown and caught? | controller actions |
+| `exceptions --miscaught` | Which throws pass through a `try` whose catch clauses don't match their type? | controller actions |
+| `reach` | What can each action reach: once per method, with distance, project and shortest path? | controller actions (or any `--root`) |
+| `paths` | What are all call paths from each action (or any `--root` method), with project and transitions? | controller actions |
 | `diagram` | Export a Mermaid call graph in Markdown, grouped by project. | pick one controller action by number |
-| `layers` | Which layers depend on which; with `--allow`, which dependencies break the rules? | — |
 | `inspect` | Extraction summary; `--methods` lists callables with their IDs (to pick a `--root`); `--json` writes the full fact snapshot. | — |
 
 For practical use cases of each command, such as impact analysis, CI gating, finding roots or debugging extraction, see [When to use which command](docs/overview.md#when-to-use-which-command). Sample outputs for each are in [docs/samples](docs/samples/README.md). Run `--help` for the complete option list.
@@ -52,13 +55,11 @@ For practical use cases of each command, such as impact analysis, CI gating, fin
 
 - **Input:** `.csproj`, `.sln` or `.slnx`. Use `--framework` for multi-target projects and `--configuration` (default `Debug`) when needed.
 - **Roots:** `--root <id or exact signature>`; copy either from `inspect --methods`. An exact ID match wins, so use the ID when signatures collide. `reach` and `paths` accept any source method; `exceptions` and `diagram` need a controller action.
-- **Layers:** repeatable `--layer project:<prefix>=<name>`, `--layer namespace:<prefix>=<name>` (namespaces and nested namespaces) or `--layer type:<prefix>=<name>` (a type and its nested types). Longest prefix wins; a project mapping wins a tie. Layers come only from these mappings.
-- **Layer rules:** repeatable `--allow <from>=<to>[,<to>...]` (with `layers`). Same-layer dependencies are always allowed.
-- **Dispatch:** interface, virtual, delegate, dynamic and unresolved calls are visible boundaries. `reach --follow-candidates` and `diagram --follow-candidates` also follow implementation candidates, marked `(candidate)`. `paths` and `exceptions` stop at the declared target.
-- **Limits:** `--budget` (default 100,000 examined call sites; for exception summaries it also bounds retained facts), `--max-depth` (default 20 transitions) and `--max-paths` (default 1,000 reported paths, on `paths` and `exceptions --paths`). Reaching a limit is always reported. Exception summaries take `--budget` only.
+- **Dispatch:** interface, virtual, delegate, dynamic and unresolved calls are visible boundaries. `reach --follow-candidates` and `diagram --follow-candidates` also follow implementation candidates, marked `(candidate)`. `paths` and `exceptions` stop at the declared target; exception views report it as *Unknown*.
+- **Limits:** `--budget` (default 100,000 examined call sites; for `exceptions --uncaught` it also bounds retained facts), `--max-depth` (default 20 transitions) and `--max-paths` (default 1,000 reported paths or witnesses, on `paths`, `exceptions --caught` and `--miscaught`). Reaching a limit is always reported. `--uncaught` takes `--budget` only.
 - **Strict options:** each command accepts only its own options (`--help` lists them per command). Anything else fails before loading, naming the command.
 - **Evidence:** `--locations` prints call-site locations for paths and reach witnesses.
-- **Output:** `inspect --json` writes schema version 3 (IDs are plain strings) to stdout or `--output <new file>` (never overwrites). Diagnostics go to stderr. Ctrl+C cancels cleanly.
+- **Output:** `inspect --json` writes schema version 3 (IDs are plain strings) to stdout or `--output <new file>` (never overwrites). `projects --mermaid` and `diagram` save Markdown to `--output` or to `diagrams_exports` (see below). Diagnostics go to stderr. Ctrl+C cancels cleanly.
 
 ### Export a diagram
 
@@ -90,8 +91,8 @@ A saved file can return exit code 1 because it contains useful but partial resul
 
 | Code | Meaning |
 | --- | --- |
-| 0 | Completed within the model, with no gaps, boundaries, limits or findings; also a cancelled diagram selection or no recognised actions. |
-| 1 | Usable output, but with gaps, Unknown results, boundaries, limits or rule violations. The sample fixture returns 1 on purpose (top-level statements and external bodies are out of scope). |
+| 0 | Completed within the model, with no gaps, boundaries or limits; also a cancelled diagram selection or no recognised actions. `projects` returns 0 when every reference was loaded. |
+| 1 | Usable output, but with gaps, Unknown results, boundaries or limits; for `projects`, unloaded references or project-load problems. The sample fixture returns 1 on purpose for code analysis (top-level statements and external bodies are out of scope). |
 | 2 | Invalid request or fatal load error. |
 | 130 | Cancelled. |
 
@@ -99,8 +100,17 @@ A saved file can return exit code 1 because it contains useful but partial resul
 
 - **Paths are static.** `A() --> B() --> C()` is a call relationship in source, not an execution trace. Branches produce separate paths; transitions count edges, not stack depth.
 - **Declared vs candidate vs runtime.** A call is recorded at its declared target (e.g. an interface method). Implementations of it are *candidates*, shown only on request and always marked; the actual runtime target is never claimed.
+- **Projects.**
+  - Everything comes from the MSBuild evaluation of each project, including inherited `Directory.Build.props`: `<ProjectReference>` items, `TargetFramework`, `Nullable`, `TreatWarningsAsErrors` and `WarningsAsErrors`. Code-level dependencies between projects are not consulted.
+  - *Nullable warnings as errors* is yes when `TreatWarningsAsErrors` is true or `WarningsAsErrors` contains `nullable`.
+  - Warning and error counts are compiler (Roslyn) diagnostics after severity options; analyzer and NuGet warnings are not included.
+  - A project referenced from several places is described once; later occurrences say `(described above)`. References to projects outside the loaded workspace are listed as unloaded.
 - **Exceptions.**
   - Reports cover explicit `throw`s, throw expressions, rethrows and catches: static type vs exact constructed type, filters, protected regions and locations.
+  - The default view lists every explicit throw and rethrow in source, independent of any action. The other three views trace from controller actions (or `--root`).
+  - **Uncaught** (`--uncaught`) uses the bottom-up summary below; **caught** and **miscaught** use per-path witnesses, deduplicated by origin and handler or `try` block.
+  - **Caught** lists every catch an exception reaches with a matching type, with the handler's outcome: handles it (recovery not proven), rethrows it, or throws a replacement. A catch with a filter, or whose match depends on the runtime type, is flagged.
+  - **Miscaught** means the exception passes through a `try` whose catch clauses all have non-matching types. It is reported even when a catch further up handles it later; `Then:` shows what happens next. A catch whose match cannot be decided is *Unknown*, never miscaught.
   - Each witness unwinds the origin through its own `try` blocks and every caller's protected call site. An unrelated catch can never intercept it.
   - Statuses:
     - **Intercepted** by a matching handler. This does not prove recovery.
@@ -109,20 +119,12 @@ A saved file can return exit code 1 because it contains useful but partial resul
     - **Unknown**, with a reason. Causes include dispatch, missing bodies, filters, `finally`, async void, unobserved or aliased tasks, and depth limits.
   - Directly awaited task-producing calls propagate.
   - One action can show an intercepted origin next to Unknown results for other calls; each witness stands alone.
-  - The default summary mode computes a finite fixed point over direct-call strongly connected components. Recursion alone does not make a summary unknown. Origins remain distinct even when their exception types match; call-site catches transform each incoming effect separately.
+  - The `--uncaught` summary computes a finite fixed point over direct-call strongly connected components. Recursion alone does not make a summary unknown. Origins remain distinct even when their exception types match; call-site catches transform each incoming effect separately.
   - Ownerless extraction gaps are returned once in `GlobalGaps` and reported as global caveats on stderr, not repeated as action witnesses/unknown effects. Overall `IsComplete` stays false when global caveats exist; summary method/root completeness is local to its known effects.
   - Summary effects and uncertainty coexist. Unknown effects propagate conservatively, including through catch-all handlers, because a missing body or extraction gap may represent more than a normally thrown exception. A summary does not prove the absence of runtime exceptions.
-  - A summary witness is one example for an escaping effect, reconstructed on demand. `exceptions --paths` still reports intercepted origins and individual paths under its own bounds.
+  - A summary witness is one example for an escaping effect, reconstructed on demand.
   - Implicit exceptions and branch feasibility are not modelled.
   - `UseExceptionHandler`, `AddExceptionHandler` and `UseDeveloperExceptionPage` registrations are listed separately as *boundary evidence*. They do not prove middleware order or coverage; see Microsoft's [exception-handling documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling?view=aspnetcore-10.0).
-- **Layer edges.**
-  - Edge kinds:
-    - `DirectCall`.
-    - `DeclaredCall`: an interface or virtual call, counted at its declared target.
-    - `CandidateCall`: a call to an implementation candidate.
-    - `TypeDependency`: signatures, base types and their type arguments, fields, properties and construction.
-  - Code outside every mapping shows as `(unmapped)`. Unmapped referenced assemblies are counted as external references.
-  - The `layer-dependency` rule reports a disallowed cross-layer edge as **Violation** and an edge touching unmapped code as **Unknown**. Candidate edges are not judged.
 
 ## Library use
 
@@ -141,12 +143,17 @@ var reach = ReachabilityQuery.Analyze(index, actions, new ReachOptions(), cancel
 var paths = CallChainQuery.Enumerate(index, actions, new ChainOptions(), cancellationToken);
 var exceptions = ExceptionQuery.Analyze(index, actions, new ExceptionOptions(), cancellationToken);
 var summaries = ExceptionSummaryQuery.Analyze(index, actions, new ExceptionSummaryOptions(), cancellationToken);
+var caught = ExceptionHandlingQuery.Caught(exceptions);       // origin, catch, certainty, example witness
+var miscaught = ExceptionHandlingQuery.Miscaught(exceptions); // origin, try block that did not match, outcomes
+var projects = ProjectMap.Build(snapshot);                     // MSBuild reference graph and build settings
+var projectMarkdown = MermaidExporter.Markdown(projects);
 if (!actions.IsEmpty)
 {
     var diagram = CallDiagramQuery.Build(index, actions[0], new DiagramOptions(), cancellationToken);
     var markdown = MermaidExporter.Markdown(diagram);
 }
 
+// Library only (no CLI command): map code to your own layers and check allowed dependencies.
 var model = new LayerModel(
     [new(LayerScope.Project, "Orders.Api", "API"), new(LayerScope.Project, "Orders.Infrastructure", "Infrastructure")],
     [new("API", "Infrastructure")]);

@@ -1,7 +1,21 @@
-Exception summary: Research.Api.OrdersController.Get()
-  Explicit escapes: 1; unknown effects: 1; local summary complete within model: False.
-  May escape: Research.Infrastructure.StorageException | origin: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Research.Infrastructure.csproj|Debug|net10.0|Research.Infrastructure, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null|M:Research.Infrastructure.Repository.Read|throw|/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:199 | MayEscape
-    Path: Research.Api.OrdersController.Get() --> Research.Application.Service.Load() --> Research.Infrastructure.Repository.Read()
-    Origin evidence: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:6:33
-  Unknown [MissingBody]: Missing body: explicit origins unknown.
-  Boundary registration evidence (runtime coverage unknown): UseExceptionHandler | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:5:1
+Throw: rethrow of the caught exception
+  At: Research.Application.Service.Rethrow() | Type: Research.Application.Service | Project: Research.Application | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Application/Service.cs:9:90
+  Inside try in the same method: no
+Throw: System.InvalidOperationException
+  At: Research.Application.Service.Replace() | Type: Research.Application.Service | Project: Research.Application | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Application/Service.cs:10:90
+  Inside try in the same method: no
+Throw: rethrow of the caught exception
+  At: Research.Application.Service.Nested() | Type: Research.Application.Service | Project: Research.Application | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Application/Service.cs:18:95
+  Inside try in the same method: yes
+Throw: Research.Infrastructure.StorageException
+  At: Research.Infrastructure.Repository.Read() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:6:33
+  Inside try in the same method: no
+Throw: Research.Infrastructure.StorageException
+  At: Research.Infrastructure.Repository.ReadAsync() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:8:64
+  Inside try in the same method: no
+Throw: Research.Infrastructure.StorageException
+  At: Research.Infrastructure.Repository.Expression() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:9:39
+  Inside try in the same method: no
+Throw: System.Exception (static type; runtime type may differ)
+  At: Research.Infrastructure.Repository.StaticType(System.Exception) | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:10:54
+  Inside try in the same method: no

@@ -39,7 +39,8 @@ public static class RoslynProgramLoader
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (project.Language != LanguageNames.CSharp) { loadGaps.Add(new(GapKind.Unsupported, null, null, $"Non-C# project excluded: {project.FilePath}", null)); continue; }
-            var selection = ProjectSelection.Read(project.FilePath!, request);
+            var settings = ProjectSelection.Read(project.FilePath!, request);
+            var selection = settings.Framework;
             var compilation = await project.GetCompilationAsync(cancellationToken);
             if (compilation is null) { loadGaps.Add(new(GapKind.ProjectLoad, null, null, $"No compilation: {project.FilePath}", null)); continue; }
             var id = new CompilationId($"{Path.GetFullPath(project.FilePath!)}|{request.Configuration}|{selection}");
@@ -49,7 +50,15 @@ public static class RoslynProgramLoader
             var parse = (CSharpParseOptions)project.ParseOptions!;
             var fact = new CompilationFact(id, project.FilePath!, compilation.Assembly.Identity.ToString(), selection, request.Configuration,
                 parse.LanguageVersion.ToString(), compilation.Options.NullableContextOptions.ToString(), parse.PreprocessorSymbolNames.Order(StringComparer.Ordinal).ToImmutableArray(),
-                diagnostics.Select(x => x.ToString()).Order(StringComparer.Ordinal).ToImmutableArray());
+                diagnostics.Select(x => x.ToString()).Order(StringComparer.Ordinal).ToImmutableArray())
+            {
+                ProjectReferences = [.. settings.ProjectReferences],
+                NullableSetting = settings.Nullable,
+                TreatWarningsAsErrors = settings.TreatWarningsAsErrors,
+                WarningsAsErrors = [.. settings.WarningsAsErrors],
+                WarningCount = diagnostics.Count(x => x.Severity == DiagnosticSeverity.Warning),
+                ErrorCount = diagnostics.Count(x => x.Severity == DiagnosticSeverity.Error),
+            };
             contexts.Add((project, compilation, fact));
         }
         if (contexts.Count == 0) throw new InvalidOperationException("No C# projects could be loaded.");

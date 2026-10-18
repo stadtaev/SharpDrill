@@ -54,6 +54,34 @@ public static class MermaidExporter
         return output.ToString().Replace("\r\n", "\n", StringComparison.Ordinal);
     }
 
+    public static string Markdown(ProjectMap map)
+    {
+        var output = new StringBuilder();
+        output.AppendLine("# Project references").AppendLine();
+        output.AppendLine($"Projects: {map.Projects.Count}; references: {map.Graph.EdgeCount}. An arrow points from a project to a project it references (<ProjectReference>).").AppendLine();
+        var chart = Flowchart.Create(direction: FlowchartDirection.TB);
+        var nodes = new Dictionary<CompilationId, Node>();
+        var ordered = map.Graph.Nodes.Select(x => map.Projects[x]).ToArray();
+        for (var i = 0; i < ordered.Length; i++)
+        {
+            var node = Node.Create<MarkdownSafeText>("p" + (i + 1), $"{ordered[i].Name} ({ordered[i].Framework})");
+            nodes.Add(ordered[i].Id, node);
+            chart.AddNode(node);
+        }
+        foreach (var edge in map.Graph.Edges) chart.AddLink(Link.Create(nodes[edge.Source], nodes[edge.Target], LinkType.Create()));
+        output.AppendLine("```mermaid").Append(chart.ToMermaidString()).AppendLine("```").AppendLine();
+        output.AppendLine("| Project | Framework | Nullable | Nullable warnings as errors | All warnings as errors | Compiler warnings | Errors |");
+        output.AppendLine("| --- | --- | --- | --- | --- | --- | --- |");
+        foreach (var project in ordered)
+            output.AppendLine($"| {Html(project.Name)} | {Html(project.Framework)} | {Html(project.Nullable)} | {(project.WarningsAsErrors != WarningsAsErrorsLevel.None ? "yes" : "no")} | {(project.WarningsAsErrors == WarningsAsErrorsLevel.All ? "yes" : "no")} | {project.Warnings} | {project.Errors} |");
+        if (!map.Unloaded.IsEmpty)
+        {
+            output.AppendLine().AppendLine("## Unloaded references").AppendLine();
+            foreach (var (source, path) in map.Unloaded) output.AppendLine($"- {Html(map.Projects[source].Name)} --> {Html(path)}");
+        }
+        return output.ToString().Replace("\r\n", "\n", StringComparison.Ordinal);
+    }
+
     private static string BuildFlowchart(CallDiagram diagram)
     {
         var chart = Flowchart.Create(direction: FlowchartDirection.TB);

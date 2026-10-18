@@ -76,7 +76,18 @@ public sealed record BoundaryHandlingFact(CompilationId Compilation, string Regi
 public sealed record AnalysisGap(GapKind Kind, CompilationId? Compilation, CallableId? Owner, string Message, SourceEvidence? Evidence);
 public sealed record CompilationFact(CompilationId Id, string ProjectPath, string AssemblyIdentity,
     string TargetFramework, string Configuration, string LanguageVersion, string NullableContext,
-    ImmutableArray<string> PreprocessorSymbols, ImmutableArray<string> Diagnostics);
+    ImmutableArray<string> PreprocessorSymbols, ImmutableArray<string> Diagnostics)
+{
+    // Full paths of <ProjectReference> items as MSBuild evaluated them; a target may be outside the loaded workspace.
+    public ImmutableArray<string> ProjectReferences { get; init; } = [];
+    // MSBuild properties as evaluated: Nullable, TreatWarningsAsErrors, WarningsAsErrors (split on ';').
+    public string NullableSetting { get; init; } = "";
+    public bool TreatWarningsAsErrors { get; init; }
+    public ImmutableArray<string> WarningsAsErrors { get; init; } = [];
+    // Compiler diagnostics after severity options (analyzers and NuGet excluded); promoted warnings count as errors.
+    public int WarningCount { get; init; }
+    public int ErrorCount { get; init; }
+}
 // Init-only with empty defaults so new fact families do not break existing construction sites.
 public sealed record ProgramSnapshot
 {

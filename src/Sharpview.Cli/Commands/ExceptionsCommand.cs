@@ -3,16 +3,27 @@ using Sharpview.Core;
 
 namespace Sharpview.Cli;
 
-/// <summary>Default: bottom-up summaries (one witness per escaping origin). --paths: every propagation path and its handlers.</summary>
+/// <summary>Default: every explicit throw in source. --uncaught/--caught/--miscaught: the fate of each throw along the
+/// call chains from controller actions (or --root).</summary>
 internal sealed class ExceptionsCommand : ReportCommand
 {
-    public override ImmutableHashSet<string> Options { get; } = ["--root", "--paths", "--max-depth", "--max-paths", "--budget", "--locations"];
+    private static readonly string[] Views = ["--uncaught", "--caught", "--miscaught"];
+
+    public override ImmutableHashSet<string> Options { get; } = ["--root", "--max-depth", "--max-paths", "--budget", "--locations", .. Views];
 
     public override void Validate(Arguments arguments)
     {
-        if (!arguments.Paths && arguments.Given.Overlaps(["--max-depth", "--max-paths"]))
-            throw new ArgumentException("--max-depth and --max-paths require exceptions --paths; summaries are bounded by --budget only.");
-        if (arguments.Paths) PathQuery(arguments).Validate(); else SummaryQuery(arguments).Validate();
+        if (arguments.Given.Count(Views.Contains) > 1) throw new ArgumentException("Choose one of --uncaught, --caught or --miscaught.");
+        var traced = arguments.Given.Overlaps(["--root", "--max-depth", "--max-paths", "--budget", "--locations"]);
+        switch (arguments.View)
+        {
+            case ExceptionView.Throws when traced:
+                throw new ArgumentException("Listing all throws takes no options; --root and limits require --uncaught, --caught or --miscaught.");
+            case ExceptionView.Uncaught when arguments.Given.Overlaps(["--max-depth", "--max-paths"]):
+                throw new ArgumentException("--uncaught is bounded by --budget only; --max-depth and --max-paths apply to --caught and --miscaught.");
+            case ExceptionView.Uncaught: SummaryQuery(arguments).Validate(); break;
+            case ExceptionView.Caught or ExceptionView.Miscaught: PathQuery(arguments).Validate(); break;
+        }
     }
 
     private static ExceptionOptions PathQuery(Arguments arguments) => new(arguments.MaxDepth, arguments.MaxPaths, arguments.Budget);
@@ -22,21 +33,41 @@ internal sealed class ExceptionsCommand : ReportCommand
 
     protected override ValueTask<bool> ExecuteAsync(ReportContext context, CancellationToken token)
     {
+        if (context.Arguments.View == ExceptionView.Throws) return ValueTask.FromResult(Throws(context, token));
         var roots = Roots.Select(context.Index, context.Arguments, RootScope.Actions, token);
-        return ValueTask.FromResult(context.Arguments.Paths ? Detailed(context, roots, token) : Summary(context, roots, token));
+        return ValueTask.FromResult(context.Arguments.View switch
+        {
+            ExceptionView.Uncaught => Uncaught(context, roots, token),
+            ExceptionView.Caught => Handled(context, roots, caught: true, token),
+            _ => Handled(context, roots, caught: false, token),
+        });
     }
 
-    private static bool Detailed(ReportContext context, ImmutableArray<CallableId> roots, CancellationToken token)
+    private static bool Throws(ReportContext context, CancellationToken token)
     {
-        context.Report.Landscape(token);
-        var exceptions = ExceptionQuery.Analyze(context.Index, roots, PathQuery(context.Arguments), token);
-        foreach (var witness in exceptions.Results) { token.ThrowIfCancellationRequested(); context.Report.Witness(witness); }
-        var unknown = exceptions.Results.Count(x => x.Status == ExceptionStatus.Unknown || x.SubsequentStatus == ExceptionStatus.Unknown);
-        Console.Error.WriteLine($"Action roots: {roots.Length}; witnesses: {exceptions.Results.Length}; unknown: {unknown}; examined sites: {exceptions.ExpandedSites}; depth limit: {exceptions.DepthLimitReached}; output limit: {exceptions.OutputLimitReached}; work limit: {exceptions.WorkLimitReached}; global caveats: {exceptions.GlobalGaps.Length}.");
-        return !exceptions.IsComplete;
+        var index = context.Index;
+        var throws = context.Snapshot.ThrowSites
+            .OrderBy(x => index.ProjectName(index.Callable(x.Owner).Compilation), StringComparer.Ordinal)
+            .ThenBy(x => x.Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence.SpanStart).ToArray();
+        foreach (var origin in throws) { token.ThrowIfCancellationRequested(); context.Report.Throw(origin); }
+        Console.Error.WriteLine($"Throws: {throws.Length} (explicit: {throws.Count(x => x.Kind == ThrowKind.Explicit)}; rethrows: {throws.Count(x => x.Kind == ThrowKind.Rethrow)}). Implicit exceptions (null dereference, framework calls) are not listed.");
+        return false;
     }
 
-    private static bool Summary(ReportContext context, ImmutableArray<CallableId> roots, CancellationToken token)
+    private static bool Handled(ReportContext context, ImmutableArray<CallableId> roots, bool caught, CancellationToken token)
+    {
+        var result = ExceptionQuery.Analyze(context.Index, roots, PathQuery(context.Arguments), token);
+        var count = 0;
+        if (caught)
+            foreach (var item in ExceptionHandlingQuery.Caught(result)) { token.ThrowIfCancellationRequested(); context.Report.Caught(item); count++; }
+        else
+            foreach (var item in ExceptionHandlingQuery.Miscaught(result)) { token.ThrowIfCancellationRequested(); context.Report.Miscaught(item); count++; }
+        var unknown = result.Results.Count(x => (x.SubsequentStatus ?? x.Status) == ExceptionStatus.Unknown);
+        Console.Error.WriteLine($"Action roots: {roots.Length}; {(caught ? "caught" : "miscaught")}: {count}; witnesses: {result.Results.Length}; unknown: {unknown}; examined sites: {result.ExpandedSites}; depth limit: {result.DepthLimitReached}; output limit: {result.OutputLimitReached}; work limit: {result.WorkLimitReached}; global caveats: {result.GlobalGaps.Length}.");
+        return !result.IsComplete;
+    }
+
+    private static bool Uncaught(ReportContext context, ImmutableArray<CallableId> roots, CancellationToken token)
     {
         var (index, arguments, output, report) = (context.Index, context.Arguments, context.Output, context.Report);
         var summaries = ExceptionSummaryQuery.Analyze(index, roots, SummaryQuery(arguments), token);

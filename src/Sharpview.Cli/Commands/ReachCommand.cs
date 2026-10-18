@@ -5,7 +5,7 @@ namespace Sharpview.Cli;
 
 internal sealed class ReachCommand : ReportCommand
 {
-    public override ImmutableHashSet<string> Options { get; } = ["--root", "--layer", "--follow-candidates", "--max-depth", "--budget", "--locations"];
+    public override ImmutableHashSet<string> Options { get; } = ["--root", "--follow-candidates", "--max-depth", "--budget", "--locations"];
 
     public override void Validate(Arguments arguments) => Query(arguments).Validate();
 

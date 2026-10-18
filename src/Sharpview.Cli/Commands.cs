@@ -7,10 +7,10 @@ internal static class Commands
 {
     internal static ICliCommand Resolve(string name) => name switch
     {
+        "projects" => new ProjectsCommand(),
+        "exceptions" => new ExceptionsCommand(),
         "reach" => new ReachCommand(),
         "paths" => new PathsCommand(),
-        "exceptions" => new ExceptionsCommand(),
-        "layers" => new LayersCommand(),
         "diagram" => new DiagramCommand(Console.In, Console.Out),
         "inspect" => new InspectCommand(),
         _ => throw new ArgumentException($"Unknown command: {name}. Use --help."),
