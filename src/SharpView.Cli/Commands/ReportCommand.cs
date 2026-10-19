@@ -29,10 +29,16 @@ internal abstract class ReportCommand : ICliCommand
     /// <returns>True when the command's own results are incomplete within the model.</returns>
     protected abstract ValueTask<bool> ExecuteAsync(ReportContext context, CancellationToken token);
 
+    // Gaps are grouped by cause: a real solution has hundreds, usually a handful of kinds repeated many times.
     private static void WriteGaps(IReadOnlyList<AnalysisGap> gaps)
     {
-        foreach (var gap in gaps.Take(20)) Console.Error.WriteLine($"Gap [{gap.Kind}]: {gap.Message}" + (gap.Evidence is null ? "" : $" ({Display.Location(gap.Evidence)})"));
-        if (gaps.Count > 20) Console.Error.WriteLine($"Further gaps: {gaps.Count - 20}; inspect JSON for full evidence.");
-        Console.Error.WriteLine($"Extraction gaps: {gaps.Count}. Coverage: explicit origins/direct calls; minimal APIs and inherited actions outside scope.");
+        var groups = gaps.GroupBy(x => (x.Kind, x.Message))
+            .Select(g => (g.Key.Kind, g.Key.Message, Count: g.Count(), First: g.FirstOrDefault(x => x.Evidence is not null)?.Evidence))
+            .OrderByDescending(x => x.Count).ThenBy(x => x.Message, StringComparer.Ordinal).ToArray();
+        foreach (var group in groups.Take(10))
+            Console.Error.WriteLine($"Gap [{group.Kind}]{(group.Count > 1 ? $" x{group.Count}" : "")}: {group.Message}"
+                + (group.First is null ? "" : $" ({(group.Count > 1 ? "first at " : "")}{Display.Location(group.First)})"));
+        if (groups.Length > 10) Console.Error.WriteLine($"Further gap kinds: {groups.Length - 10}; inspect --json lists every gap with its evidence.");
+        Console.Error.WriteLine($"Extraction gaps: {gaps.Count} ({groups.Length} kind{(groups.Length == 1 ? "" : "s")}). Coverage: explicit origins/direct calls; minimal APIs and inherited actions outside scope.");
     }
 }

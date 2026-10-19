@@ -210,7 +210,7 @@ Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `Shar
 - [Model reference](model.md) — facts, identities and query semantics in detail.
 - [Validation](validation.md) — which tests prove which behaviour.
 - [Sample reports](samples/README.md) — full outputs on the fixture.
-
+- [Lessons learned](lessons.md) — why the first real-project run was noise, and the rules that came out of it.
 
 ## Summary analysis and diagram projections
 

@@ -10,4 +10,3 @@ Root: Research.Api.OrdersController.Get()
     Evidence: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/OrdersController.cs:8:36 | direct call
     Evidence: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Application/Service.cs:5:34 | direct call
     Evidence: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:6:39 | direct call
-  Boundary: body unavailable for Research.Infrastructure.StorageException..ctor() | no source

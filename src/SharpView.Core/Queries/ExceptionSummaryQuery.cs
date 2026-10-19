@@ -3,7 +3,9 @@ using SharpView.Graph;
 
 namespace SharpView.Core;
 
-public sealed record ExceptionSummaryOptions(int MaxWork = 1_000_000, int MaxFacts = 100_000)
+// FollowCandidates continues through interface/virtual calls into source implementation candidates; effects that
+// pass through one are marked ViaCandidate.
+public sealed record ExceptionSummaryOptions(int MaxWork = 1_000_000, int MaxFacts = 100_000, bool FollowCandidates = false)
 {
     public void Validate()
     {
@@ -12,7 +14,7 @@ public sealed record ExceptionSummaryOptions(int MaxWork = 1_000_000, int MaxFac
 }
 
 public sealed record ExceptionEscapeFact(ThrowSiteId Origin, ThrowSiteId? SubsequentOrigin,
-    string? ExceptionType, bool IsExactType, ExceptionReason ReasonCode);
+    string? ExceptionType, bool IsExactType, ExceptionReason ReasonCode, bool ViaCandidate = false);
 public sealed record ExceptionUncertainty(ExceptionReason ReasonCode, ThrowSiteId? Origin,
     CallSiteId? Site, string Message, SourceEvidence? Evidence = null);
 public sealed record ExceptionMethodSummary(CallableId Method, ImmutableArray<ExceptionEscapeFact> Escapes,
@@ -25,7 +27,7 @@ public sealed record ExceptionSummaryWitness(ThrowSiteId Origin, ImmutableArray<
 public sealed class ExceptionSummaryResult
 {
     internal readonly record struct FlowKey(ThrowSiteId Origin, ThrowSiteId? SubsequentOrigin,
-        TypeUse? StaticType, TypeUse? ExactType, bool Exact, bool Changed);
+        TypeUse? StaticType, TypeUse? ExactType, bool Exact, bool Changed, bool ViaCandidate);
     internal sealed record Link(CallableId Callee, FlowKey Key, CallSiteId Site);
     internal sealed record Stored(ExceptionFlow Flow, Link? Next);
     private readonly ImmutableDictionary<CallableId, ImmutableDictionary<FlowKey, Stored>> facts;
@@ -46,6 +48,24 @@ public sealed class ExceptionSummaryResult
     public ImmutableDictionary<CallableId, ExceptionMethodSummary> Roots { get; }
     public ImmutableDictionary<CallSiteId, ExceptionCrossingSummary> Crossings { get; }
     public ImmutableArray<AnalysisGap> GlobalGaps { get; }
+    // Followed callees and library callees per method; library methods have no source body, so their exceptions are
+    // not modelled and they never make a summary Unknown.
+    internal ImmutableDictionary<CallableId, ImmutableArray<CallableId>> Callees { get; init; } = ImmutableDictionary<CallableId, ImmutableArray<CallableId>>.Empty;
+    internal ImmutableDictionary<CallableId, ImmutableArray<CallableId>> LibraryByMethod { get; init; } = ImmutableDictionary<CallableId, ImmutableArray<CallableId>>.Empty;
+
+    /// <summary>Library methods called anywhere beneath a root (direct calls, and candidates when followed).</summary>
+    public ImmutableArray<CallableId> LibraryCallsFrom(CallableId root)
+    {
+        var seen = new HashSet<CallableId> { root }; var pending = new Stack<CallableId>([root]);
+        var library = new SortedSet<string>(StringComparer.Ordinal);
+        while (pending.TryPop(out var method))
+        {
+            foreach (var call in LibraryByMethod.GetValueOrDefault(method, [])) library.Add(call.Value);
+            foreach (var callee in Callees.GetValueOrDefault(method, [])) if (seen.Add(callee)) pending.Push(callee);
+        }
+        return [.. library.Select(x => new CallableId(x))];
+    }
+
     public bool IsComplete => GlobalGaps.IsEmpty && !WorkLimitReached && !FactLimitReached && Roots.Values.All(x => x.IsComplete);
     public bool WorkLimitReached { get; }
     public bool FactLimitReached { get; }
@@ -58,7 +78,8 @@ public sealed class ExceptionSummaryResult
         if (!Roots.TryGetValue(root, out var summary) || !summary.Escapes.Any(x => x.Origin == origin))
             throw new ArgumentException("No escaping fact for this root and origin.");
         var entry = facts[root].Where(x => x.Key.Origin == origin && x.Value.Flow.Type is not null)
-            .OrderBy(x => x.Value.Flow.SubsequentOrigin?.Value, StringComparer.Ordinal)
+            .OrderBy(x => x.Value.Flow.ViaCandidate)
+            .ThenBy(x => x.Value.Flow.SubsequentOrigin?.Value, StringComparer.Ordinal)
             .ThenBy(x => x.Value.Flow.Type?.DisplayName, StringComparer.Ordinal).First();
         return Reconstruct(root, entry.Key);
     }
@@ -69,7 +90,8 @@ public sealed class ExceptionSummaryResult
             throw new ArgumentException("No matching escaping fact for this root.");
         var entry = facts[root].Where(x => x.Key.Origin == escape.Origin && x.Value.Flow.SubsequentOrigin == escape.SubsequentOrigin
             && x.Value.Flow.Type?.DisplayName == escape.ExceptionType && x.Value.Flow.Exact == escape.IsExactType
-            && (x.Value.Flow.Changed ? ExceptionReason.ChangedMayEscape : ExceptionReason.MayEscape) == escape.ReasonCode)
+            && (x.Value.Flow.Changed ? ExceptionReason.ChangedMayEscape : ExceptionReason.MayEscape) == escape.ReasonCode
+            && x.Value.Flow.ViaCandidate == escape.ViaCandidate)
             .OrderBy(x => x.Key.StaticType?.DisplayName, StringComparer.Ordinal)
             .ThenBy(x => x.Key.ExactType?.DisplayName, StringComparer.Ordinal).First();
         return Reconstruct(root, entry.Key);
@@ -111,7 +133,17 @@ public static class ExceptionSummaryQuery
             if (work >= options.MaxWork) { workLimit = true; return false; }
             work++; return true;
         }
-        // Follow direct bindings only. Each site is charged during discovery.
+        var calls = index.GetCallGraph(token);
+        // What each call site leads to: followed callees (direct source callees, and implementation candidates when
+        // requested) or a library call. Library methods have no source body, so their exceptions are not modelled:
+        // they are recorded, never part of the summary graph, and never make a summary Unknown.
+        var siteTargets = new Dictionary<CallSiteId, ImmutableArray<CallableId>>();
+        var librarySites = new HashSet<CallSiteId>();
+        var libraryByMethod = new Dictionary<CallableId, HashSet<CallableId>>();
+        var callees = new Dictionary<CallableId, HashSet<CallableId>>();
+        var candidateIncoming = new Dictionary<CallableId, List<CallSiteFact>>();
+        void AddTo<T>(Dictionary<CallableId, HashSet<T>> map, CallableId key, T value) =>
+            (map.TryGetValue(key, out var set) ? set : map[key] = []).Add(value);
         var reachable = new HashSet<CallableId>(roots);
         var pending = new Stack<CallableId>(roots);
         while (!workLimit && pending.TryPop(out var method))
@@ -121,8 +153,30 @@ public static class ExceptionSummaryQuery
             {
                 token.ThrowIfCancellationRequested();
                 if (!Spend()) break;
-                if (site.Dispatch == DispatchKind.Direct && site.BoundTarget is { } target
-                    && index.ContainsCallable(target) && reachable.Add(target)) pending.Push(target);
+                var targets = ImmutableArray<CallableId>.Empty;
+                if (site.Dispatch == DispatchKind.Direct)
+                {
+                    if (site.BoundTarget is { } target && index.ContainsCallable(target))
+                    {
+                        if (index.Callable(target).Body == BodyStatus.MetadataOnly) { librarySites.Add(site.Id); AddTo(libraryByMethod, method, target); }
+                        else targets = [target];
+                    }
+                }
+                else
+                {
+                    var candidates = calls.CandidatesOf(site.Id);
+                    if (site.BoundTarget is { } declared && index.ContainsCallable(declared)
+                        && index.Callable(declared).Body == BodyStatus.MetadataOnly && candidates.IsEmpty)
+                    { librarySites.Add(site.Id); AddTo(libraryByMethod, method, declared); }
+                    else if (options.FollowCandidates)
+                    {
+                        targets = candidates;
+                        foreach (var candidate in candidates)
+                            (candidateIncoming.TryGetValue(candidate, out var list) ? list : candidateIncoming[candidate] = []).Add(site);
+                    }
+                }
+                siteTargets[site.Id] = targets;
+                foreach (var target in targets) { AddTo(callees, method, target); if (reachable.Add(target)) pending.Push(target); }
             }
         }
         // Graph/SCC preparation is O(V+E) baseline work and cancellable; MaxWork counts
@@ -135,8 +189,8 @@ public static class ExceptionSummaryQuery
             foreach (var site in index.Outgoing(method))
             {
                 token.ThrowIfCancellationRequested();
-                if (site.Dispatch == DispatchKind.Direct && site.BoundTarget is { } target && reachable.Contains(target))
-                    graphBuilder.AddEdge(new(method, target));
+                foreach (var target in siteTargets.GetValueOrDefault(site.Id, []))
+                    if (reachable.Contains(target)) graphBuilder.AddEdge(new(method, target));
             }
         var components = graphBuilder.Build().StronglyConnectedComponents(token);
         var componentOf = new Dictionary<CallableId, int>();
@@ -158,9 +212,17 @@ public static class ExceptionSummaryQuery
         var unknownQueues = Enumerable.Range(0, components.Length)
             .Select(_ => new Queue<(CallableId Method, ExceptionUncertainty Value)>()).ToArray();
         static ExceptionSummaryResult.FlowKey Key(ExceptionFlow flow) => new(flow.Origin, flow.SubsequentOrigin,
-            flow.StaticType, flow.ExactType, flow.Exact, flow.Changed);
+            flow.StaticType, flow.ExactType, flow.Exact, flow.Changed, flow.ViaCandidate);
         static ExceptionEscapeFact Escape(ExceptionFlow flow) => new(flow.Origin, flow.SubsequentOrigin,
-            flow.Type?.DisplayName, flow.Exact, flow.Changed ? ExceptionReason.ChangedMayEscape : ExceptionReason.MayEscape);
+            flow.Type?.DisplayName, flow.Exact, flow.Changed ? ExceptionReason.ChangedMayEscape : ExceptionReason.MayEscape, flow.ViaCandidate);
+        // Direct callers, then (when candidates are followed) callers through an interface/virtual declaration.
+        IEnumerable<(CallSiteFact Site, bool Candidate)> IncomingSites(CallableId method)
+        {
+            foreach (var site in index.Incoming(method))
+                if (site.Dispatch == DispatchKind.Direct && reachable.Contains(site.Caller)) yield return (site, false);
+            if (candidateIncoming.TryGetValue(method, out var list))
+                foreach (var site in list) yield return (site, true);
+        }
         bool AddFlow(CallableId method, ExceptionFlow flow, ExceptionSummaryResult.Link? link)
         {
             var key = Key(flow);
@@ -179,6 +241,8 @@ public static class ExceptionSummaryQuery
             token.ThrowIfCancellationRequested();
             if (workLimit || factLimit) break;
             var callable = index.Callable(method);
+            // Compiler-provided members hold no explicit code: no origins, no uncertainty.
+            if (callable.Body == BodyStatus.Synthesized) continue;
             if (callable.Body != BodyStatus.Source)
             {
                 if (Spend()) AddUnknown(method, new(ExceptionReason.MissingBody, null, null,
@@ -208,10 +272,14 @@ public static class ExceptionSummaryQuery
                     token.ThrowIfCancellationRequested();
                     if (factLimit || workLimit) break;
                     if (!Spend()) break;
+                    if (librarySites.Contains(site.Id)) continue;
                     if (site.Dispatch != DispatchKind.Direct)
                     {
+                        // Followed candidates carry their own effects in; only a call with nowhere to go is uncertain.
+                        if (options.FollowCandidates && !siteTargets.GetValueOrDefault(site.Id, []).IsEmpty) continue;
                         var value = new ExceptionUncertainty(ExceptionReason.DispatchBoundary, null, site.Id,
-                            $"{site.Dispatch} dispatch: runtime origins unknown.", site.Evidence);
+                            options.FollowCandidates ? $"{site.Dispatch} dispatch: no source implementation found; runtime origins unknown."
+                                                     : $"{site.Dispatch} dispatch: runtime origins unknown.", site.Evidence);
                         crossingUnknowns[site.Id].Add(value); AddUnknown(method, value);
                     }
                     else if (site.BoundTarget is not { } target || !index.ContainsCallable(target))
@@ -232,12 +300,12 @@ public static class ExceptionSummaryQuery
                 if (queue.TryDequeue(out var item))
                 {
                     var flow = facts[item.Method][item.Key].Flow;
-                    foreach (var site in index.Incoming(item.Method))
+                    foreach (var (site, viaCandidate) in IncomingSites(item.Method))
                     {
                         token.ThrowIfCancellationRequested();
-                        if (!reachable.Contains(site.Caller) || site.Dispatch != DispatchKind.Direct) continue;
                         if (!Spend()) break;
-                        var crossed = ExceptionTransfer.Cross(index, flow, site, token, collectEvidence: false);
+                        var input = viaCandidate && !flow.ViaCandidate ? flow with { ViaCandidate = true } : flow;
+                        var crossed = ExceptionTransfer.Cross(index, input, site, token, collectEvidence: false);
                         if (crossed.Status == ExceptionStatus.Intercepted)
                             crossingIntercepts[site.Id].Add(flow.Origin);
                         else if (crossed.Status == ExceptionStatus.Unknown)
@@ -259,10 +327,9 @@ public static class ExceptionSummaryQuery
                 }
                 else if (unknownQueue.TryDequeue(out var unknownItem))
                 {
-                    foreach (var site in index.Incoming(unknownItem.Method))
+                    foreach (var (site, _) in IncomingSites(unknownItem.Method))
                     {
                         token.ThrowIfCancellationRequested();
-                        if (!reachable.Contains(site.Caller) || site.Dispatch != DispatchKind.Direct) continue;
                         if (!Spend()) break;
                         crossingUnknowns[site.Id].Add(unknownItem.Value);
                         AddUnknown(site.Caller, unknownItem.Value);
@@ -274,9 +341,13 @@ public static class ExceptionSummaryQuery
         var incomplete = factLimit || workLimit;
         var methods = reachable.ToImmutableDictionary(method => method, method =>
         {
-            var escapes = facts[method].Values.Select(x => x.Flow).Where(x => x.Type is not null)
-                .Select(Escape).Distinct().OrderBy(x => x.Origin.Value, StringComparer.Ordinal)
-                .ThenBy(x => x.SubsequentOrigin?.Value, StringComparer.Ordinal).ToImmutableArray();
+            var all = facts[method].Values.Select(x => x.Flow).Where(x => x.Type is not null)
+                .Select(Escape).Distinct().ToList();
+            // A possibility through an implementation candidate is redundant when the same effect is proven directly.
+            var proven = all.Where(x => !x.ViaCandidate).Select(x => (x.Origin, x.SubsequentOrigin, x.ExceptionType, x.IsExactType)).ToHashSet();
+            var escapes = all.Where(x => !x.ViaCandidate || !proven.Contains((x.Origin, x.SubsequentOrigin, x.ExceptionType, x.IsExactType)))
+                .OrderBy(x => x.Origin.Value, StringComparer.Ordinal)
+                .ThenBy(x => x.SubsequentOrigin?.Value, StringComparer.Ordinal).ThenBy(x => x.ViaCandidate).ToImmutableArray();
             var localUnknowns = unknowns[method].ToList();
             foreach (var flow in facts[method].Values.Select(x => x.Flow).Where(x => x.Type is null))
                 localUnknowns.Add(new(ExceptionReason.UnboundExceptionType, flow.Origin, null, "Exception type could not be bound."));
@@ -301,6 +372,10 @@ public static class ExceptionSummaryQuery
         });
         var frozenFacts = facts.ToImmutableDictionary(x => x.Key, x => x.Value.ToImmutableDictionary());
         return new(methods, roots.Distinct().ToImmutableDictionary(x => x, x => methods[x]), crossings,
-            frozenFacts, workLimit, factLimit, work, count, [.. index.Snapshot.Gaps.Where(x => x.Owner is null)]);
+            frozenFacts, workLimit, factLimit, work, count, [.. index.Snapshot.Gaps.Where(x => x.Owner is null)])
+        {
+            Callees = callees.ToImmutableDictionary(x => x.Key, x => x.Value.ToImmutableArray()),
+            LibraryByMethod = libraryByMethod.ToImmutableDictionary(x => x.Key, x => x.Value.ToImmutableArray()),
+        };
     }
 }

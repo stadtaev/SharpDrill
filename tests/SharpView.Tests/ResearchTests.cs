@@ -122,8 +122,9 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
     public void Detailed_fixture_exception_counts_exclude_global_gap_duplication()
     {
         var report = ExceptionQuery.Analyze(S, [.. Actions.Select(x => x.Method)], new());
-        Assert.Equal(26, report.Results.Length);
-        Assert.Equal(18, report.Results.Count(x => x.Status == ExceptionStatus.Unknown || x.SubsequentStatus == ExceptionStatus.Unknown));
+        // Library calls and compiler-provided members are not uncertainty; what remains is genuine (filters, dispatch, cycles...).
+        Assert.Equal(13, report.Results.Length);
+        Assert.Equal(5, report.Results.Count(x => x.Status == ExceptionStatus.Unknown || x.SubsequentStatus == ExceptionStatus.Unknown));
         Assert.Equal(6, report.GlobalGaps.Length);
         Assert.False(report.IsComplete);
         Assert.DoesNotContain(report.Results, x => x.ReasonCode == ExceptionReason.ExtractionGap);

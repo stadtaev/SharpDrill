@@ -42,8 +42,12 @@ Implementation candidates come from source types' interface maps and overrides; 
   - complex handler flow and `finally` effects;
   - iterator, enumeration, disposal and `lock` behaviour;
   - custom awaitables, async void, and aliased or unobserved tasks;
-  - origins inside library code;
+  - dispatch through an interface or virtual member that source implements or overrides, when `--declared-only` is given (the default follows it);
   - handler-owned throws, whose reachability depends on other exceptions.
+- **Library calls are not uncertainty.** A call to a method with no source body (framework or NuGet code) ends the trace there: its exceptions are not modelled, so it never makes a result Unknown. Exception views report how many library methods were called, and `--uncaught` lists a few per action. This applies to direct calls and to interface/virtual calls to library members that no source type overrides.
+- **Compiler-provided members are known.** Implicit and record constructors, auto-property accessors and record members of source types have no explicit code, so they cannot throw explicitly and are never "missing".
+- **`foreach` and `using`** record their implicit `GetEnumerator`/`MoveNext`/`Dispose` calls, bound through the receiver type like an explicit call. A `Dispose` written in source is analysed; library enumerators are library calls. `await foreach`/`await using` remain gaps.
+- **Interface and virtual calls are followed by default** in the exception views, into their source implementation candidates (`--declared-only` stops at the declaration instead). Results that pass through one are marked as possibilities, never as proven runtime paths; a proven direct path to the same throw takes precedence. A call with no source implementation stays Unknown ("no source implementation found").
 - **Not modelled:** implicit exceptions (from constructors, getters, framework calls) and branch feasibility. All branches and catch-body calls are structural facts.
 - **Miscaught:** reported only when every catch clause of a crossed `try` definitely does not match the exception's type at that point. A filtered or runtime-dependent clause makes the result Unknown instead.
 - **Wording:** a catch is never reported as successful recovery. "May escape" is scoped to the action under this model. Registration evidence (`UseExceptionHandler`, `AddExceptionHandler`, `UseDeveloperExceptionPage`) does not prove middleware order, environment conditions, invocation, response availability or complete coverage.

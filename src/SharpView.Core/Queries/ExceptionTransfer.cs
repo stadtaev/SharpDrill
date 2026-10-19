@@ -8,6 +8,8 @@ internal sealed record ExceptionFlow(ThrowSiteId Origin, ThrowSiteId? Subsequent
     ImmutableList<SourceEvidence> Evidence, ImmutableList<CatchId> Handlers)
 {
     public TypeUse? Type => ExactType ?? StaticType;
+    // The flow crossed an implementation-candidate step of an interface/virtual call (a possibility, not a proof).
+    public bool ViaCandidate { get; init; }
     // Protected regions crossed whose catch clauses definitely do not match; collected with evidence only.
     public ImmutableList<MissedRegion> Missed { get; init; } = ImmutableList<MissedRegion>.Empty;
 }

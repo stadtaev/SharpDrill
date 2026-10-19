@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 using SharpView.Core;
@@ -124,13 +125,57 @@ internal sealed partial class FactExtractor
             if (operand is not IInvocationOperation) Gap("Await of an aliased task/custom awaitable: exception origin tracking unsupported.", operation.Syntax);
             base.VisitAwait(operation);
         }
+        // foreach and using call GetEnumerator/MoveNext/Dispose implicitly. They are recorded as implicit call sites, so
+        // library enumerators are library calls and a Dispose written in source is analysed like any other callee.
+        // Asynchronous enumeration and disposal stay a gap: awaited propagation of implicit calls is unsupported.
         public override void VisitForEachLoop(IForEachLoopOperation operation)
         {
-            Gap("Implicit enumeration/disposal calls are outside supported extraction.", operation.Syntax);
+            // Arrays are enumerated without calls (the operation tree wraps them in a conversion to IEnumerable).
+            var collection = operation.Collection;
+            while (collection is IConversionOperation { IsImplicit: true } conversion) collection = conversion.Operand;
+            if (collection.Type is IArrayTypeSymbol) { base.VisitForEachLoop(operation); return; }
+            if (operation.IsAsynchronous || operation.Syntax is not CommonForEachStatementSyntax statement)
+                Gap("Asynchronous enumeration (await foreach) is outside supported extraction.", operation.Syntax);
+            else
+            {
+                var info = model.GetForEachStatementInfo(statement);
+                var enumerator = info.GetEnumeratorMethod?.ReturnType;
+                if (info.GetEnumeratorMethod is { } getEnumerator) ImplicitCall(getEnumerator, operation.Collection.Type, operation.Syntax);
+                if (info.MoveNextMethod is { } moveNext) ImplicitCall(moveNext, enumerator, operation.Syntax);
+                if (info.DisposeMethod is { } dispose) ImplicitCall(dispose, enumerator, operation.Syntax);
+                if (info.GetEnumeratorMethod is null) Gap("Enumeration pattern could not be bound.", operation.Syntax);
+            }
             base.VisitForEachLoop(operation);
         }
-        public override void VisitUsing(IUsingOperation operation) { Gap("Implicit disposal and using exception propagation unsupported.", operation.Syntax); base.VisitUsing(operation); }
-        public override void VisitUsingDeclaration(IUsingDeclarationOperation operation) { Gap("Implicit disposal and using exception propagation unsupported.", operation.Syntax); base.VisitUsingDeclaration(operation); }
+        public override void VisitUsing(IUsingOperation operation) { Disposal(operation.IsAsynchronous, operation.Resources, operation.Syntax); base.VisitUsing(operation); }
+        public override void VisitUsingDeclaration(IUsingDeclarationOperation operation) { Disposal(operation.IsAsynchronous, operation.DeclarationGroup, operation.Syntax); base.VisitUsingDeclaration(operation); }
+        private void Disposal(bool asynchronous, IOperation? resources, SyntaxNode syntax)
+        {
+            if (asynchronous) { Gap("Asynchronous disposal (await using) is outside supported extraction.", syntax); return; }
+            var types = resources is IVariableDeclarationGroupOperation group
+                ? group.Declarations.SelectMany(x => x.Declarators).Select(x => (ITypeSymbol?)x.Symbol.Type)
+                : [resources?.Type];
+            foreach (var type in types)
+                if (DisposeMethod(type) is { } dispose) ImplicitCall(dispose, type, syntax);
+        }
+        // IDisposable.Dispose for ordinary resources; a pattern Dispose() for ref structs.
+        private IMethodSymbol? DisposeMethod(ITypeSymbol? type)
+        {
+            if (type is null) return null;
+            var disposable = model.Compilation.GetSpecialType(SpecialType.System_IDisposable);
+            if (SymbolEqualityComparer.Default.Equals(type, disposable) || type.AllInterfaces.Contains(disposable, SymbolEqualityComparer.Default))
+                return disposable.GetMembers("Dispose").OfType<IMethodSymbol>().FirstOrDefault();
+            return type.GetMembers("Dispose").OfType<IMethodSymbol>().FirstOrDefault(x => x.Parameters.IsEmpty && !x.IsStatic);
+        }
+        // The compiler reaches these members through an interface (IDisposable.Dispose, IEnumerator.MoveNext), but a call
+        // written in source binds to the receiver type's own member. Resolve it the same way: a library receiver is then a
+        // library call, and a source receiver has candidates only among its own overrides, not every implementer of the interface.
+        private void ImplicitCall(IMethodSymbol declared, ITypeSymbol? receiver, SyntaxNode syntax)
+        {
+            var target = declared.ContainingType.TypeKind == TypeKind.Interface && receiver is { TypeKind: TypeKind.Class or TypeKind.Struct }
+                && receiver.FindImplementationForInterfaceMember(declared) is IMethodSymbol implementation ? implementation : declared;
+            Call(target, syntax, Dispatch(target, syntax), implicitCall: true);
+        }
         public override void VisitInvalid(IInvalidOperation operation) { Gap("Invalid operation or unresolved binding.", operation.Syntax); Call(null, operation.Syntax, DispatchKind.Unknown); base.VisitInvalid(operation); }
         public void ExtractRegions(SyntaxNode declaration)
         {

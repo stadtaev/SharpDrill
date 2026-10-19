@@ -41,7 +41,7 @@ public static class CallChainQuery
             var end = frame.End;
             // Terminal frames (e.g. an unresolved target) may name a callable outside the graph; never expand them.
             var edges = end is null ? Steps(frame.Current) : [];
-            if (end is null && program.Callable(frame.Current).Body != BodyStatus.Source)
+            if (end is null && !program.Callable(frame.Current).HasBody)
                 end = program.Callable(frame.Current).Body == BodyStatus.MetadataOnly ? ChainEnd.Metadata : ChainEnd.NoBody;
             if (end is null && edges.IsEmpty) end = ChainEnd.Leaf;
             if (end is null && frame.Path.Length >= options.MaxDepth) end = ChainEnd.DepthLimit;

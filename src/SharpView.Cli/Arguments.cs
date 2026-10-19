@@ -21,6 +21,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
     internal int MaxEdges { get; init; } = 1000;
     internal bool Locations { get; init; }
     internal bool FollowCandidates { get; init; }
+    internal bool DeclaredOnly { get; init; }
     internal ExceptionView View { get; init; }
     internal bool Mermaid { get; init; }
     internal bool Methods { get; init; }
@@ -39,7 +40,9 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                         --uncaught   may escape the action: no catch on the way (one example path per origin)
                         --caught     reaches a matching catch: where it is thrown and where it is caught
                         --miscaught  passes through a try whose catch clauses do not match its type
-                      [--uncaught [--root R] [--budget N] | --caught|--miscaught [--root R] [--max-depth N] [--max-paths N] [--budget N]] [--locations]
+                      [--uncaught | --caught | --miscaught] [--root R] [--budget N] [--declared-only] [--locations]
+                      Interface/virtual calls are followed into their source implementations (results are marked
+                      as possibilities); --declared-only stops at the declaration instead.
           reach       What each controller action can reach: every method once, with distance and shortest path.
                       [--root R] [--follow-candidates] [--max-depth N] [--budget N] [--locations]
           paths       Every call path from each controller action (or from any --root), with project and transitions.
@@ -52,10 +55,11 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
         Options:
           --root R               One root: an ID (from inspect --methods) or an exact signature. Defaults to every
                                  controller action. reach/paths accept any source method; exceptions/diagram need an action.
-          --follow-candidates    Also follow implementation candidates of interface/virtual calls (marked, never runtime facts).
-          --max-depth N          Call transitions (default 20), never runtime stack depth.
-          --max-paths N          Reported paths or witnesses (default 1000).
-          --budget N             Examined call sites (default 100000); also bounds retained exception-summary facts.
+          --follow-candidates    reach/diagram: also follow implementation candidates of interface/virtual calls (marked, never runtime facts).
+          --declared-only        exceptions: do not follow interface/virtual calls into source implementations.
+          --max-depth N          reach/paths/diagram: call transitions (default 20), never runtime stack depth.
+          --max-paths N          paths: reported paths (default 1000).
+          --budget N             Examined call sites (default 100000). Raise it when the output says a limit was reached.
           --max-nodes N          diagram nodes, including boundaries (default 200).   --max-edges N  diagram edges (default 1000).
           --locations            Print call-site evidence for paths and witnesses.
           --mermaid              projects: also save the tree as a Mermaid diagram in Markdown.
@@ -95,6 +99,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
             {
                 "--root" => parsed with { Root = Value() },
                 "--follow-candidates" => parsed with { FollowCandidates = true },
+                "--declared-only" => parsed with { DeclaredOnly = true },
                 "--max-depth" => parsed with { MaxDepth = Number() },
                 "--max-paths" => parsed with { MaxPaths = Number() },
                 "--budget" => parsed with { Budget = Number() },
@@ -122,6 +127,6 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
         return parsed;
     }
 
-    private static readonly ImmutableHashSet<string> KnownOptions = ["--root", "--follow-candidates", "--max-depth", "--max-paths",
+    private static readonly ImmutableHashSet<string> KnownOptions = ["--root", "--follow-candidates", "--declared-only", "--max-depth", "--max-paths",
         "--budget", "--max-nodes", "--max-edges", "--locations", "--uncaught", "--caught", "--miscaught", "--mermaid", "--methods", "--json", "--output"];
 }

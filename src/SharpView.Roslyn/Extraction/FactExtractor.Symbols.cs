@@ -60,6 +60,11 @@ internal sealed partial class FactExtractor
         types[id] = types[id] with { BaseTypes = bases.ToImmutableArray(), BaseClass = s.BaseType is null ? null : bases[0].Declaration };
         return id;
     }
+    private static bool IsCompilerProvided(IMethodSymbol s) =>
+        !s.IsAbstract && !s.IsExtern && s.ContainingType is { TypeKind: not (TypeKind.Interface or TypeKind.Delegate) }
+        && (s.IsImplicitlyDeclared || s.AssociatedSymbol is IPropertySymbol or IEventSymbol
+            || s.MethodKind == MethodKind.Constructor && s.DeclaringSyntaxReferences.Any(r => r.GetSyntax() is Microsoft.CodeAnalysis.CSharp.Syntax.TypeDeclarationSyntax));
+
     internal CallableId RegisterMethod(IMethodSymbol symbol)
     {
         var s = Canonical(symbol);
@@ -70,6 +75,8 @@ internal sealed partial class FactExtractor
         var kind = s.MethodKind switch { MethodKind.Constructor or MethodKind.StaticConstructor => CallableKind.Constructor, MethodKind.PropertyGet => CallableKind.Getter, MethodKind.PropertySet => CallableKind.Setter, MethodKind.EventAdd => CallableKind.EventAdder, MethodKind.EventRemove => CallableKind.EventRemover, MethodKind.LocalFunction => CallableKind.LocalFunction, MethodKind.AnonymousFunction => CallableKind.Lambda, _ => CallableKind.Method };
         var bodyNode = bodyByKey.TryGetValue(key, out var bodyEntry) ? bodyEntry.Value.Node : null;
         var body = sourceIds.ContainsKey(key) ? bodyNode is not null && HasBody(bodyNode) ? BodyStatus.Source : BodyStatus.NoBody : BodyStatus.MetadataOnly;
+        // Implicit constructors, auto-property accessors and record members of source types have no explicit code.
+        if (body != BodyStatus.Source && assemblyProjects.ContainsKey(s.ContainingAssembly.Identity.ToString()) && IsCompilerProvided(s)) body = BodyStatus.Synthesized;
         // Insert before recursively registering containing local functions.
         methods[id] = new(id, compilation, s.ContainingType is null ? null : RegisterType(s.ContainingType), null, kind, Signature(s), s.DeclaredAccessibility.ToString(), Use(s.ReturnType), s.Parameters.Select(x => new ParameterFact(x.Name, Use(x.Type), x.RefKind.ToString())).ToImmutableArray(), Attributes(s), body, Declarations(s), s.IsAsync,
             s.ReturnType is INamedTypeSymbol returnType && returnType.ContainingNamespace.ToDisplayString() == "System.Threading.Tasks" && returnType.Name is "Task" or "ValueTask",

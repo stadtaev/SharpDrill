@@ -1,8 +1,3 @@
-Summary roots: 1; methods: 4; facts: 7; transfer work: 13; work limit: False; fact limit: False; global caveats: 6.
-Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:2:1)
-Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:3:1)
-Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:4:1)
-Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:5:1)
-Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:6:1)
-Gap [Unsupported]: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:7:1)
-Extraction gaps: 6. Coverage: explicit origins/direct calls; minimal APIs and inherited actions outside scope.
+Summary roots: 1; methods: 4; facts: 3; transfer work: 9; work limit: False; fact limit: False; library methods called: 0; global caveats: 6.
+Gap [Unsupported] x6: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (first at /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:2:1)
+Extraction gaps: 6 (1 kind). Coverage: explicit origins/direct calls; minimal APIs and inherited actions outside scope.

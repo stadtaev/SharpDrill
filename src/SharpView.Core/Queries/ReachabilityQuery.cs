@@ -156,7 +156,7 @@ public static class ReachabilityQuery
         foreach (var node in search.Discovered)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (index.Callable(node).Body != BodyStatus.Source)
+            if (!index.Callable(node).HasBody)
             {
                 boundaries.Add(new(node, null, ReachBoundaryKind.MissingBody, DispatchKind.Direct, null, 0));
                 continue;

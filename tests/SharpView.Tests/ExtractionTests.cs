@@ -600,4 +600,95 @@ public sealed class ExtractionTests
         Assert.Contains(snapshot.Dependencies, x => x.OwningCallable == getter.Id && x.Kind == DependencyKind.Signature && x.ReferencedType.DisplayName == "string");
         Assert.DoesNotContain(snapshot.Dependencies, x => x.Evidence is { } e && e.StartLine == 5 && x.Kind == DependencyKind.Field);
     }
+
+    [Fact]
+    public async Task Compiler_provided_members_are_synthesized_while_written_bodies_and_declarations_keep_their_status()
+    {
+        var snapshot = await Extract("""
+            public record Error(string Code, string Message);
+            public class Item
+            {
+                public string Name { get; set; } = "";
+                public int Count { get; init; }
+                public event System.EventHandler? Changed;
+                public Item() { }
+            }
+            public class Plain { }
+            public class Primary(string name) { public string Hello() => name; }
+            public abstract class Shape { public abstract int Sides { get; } }
+            public interface IThing { int Value { get; } }
+            public class Use
+            {
+                public object Make()
+                {
+                    _ = new Plain(); _ = new Primary("x"); _ = new Error("a", "b");
+                    var item = new Item { Name = "n", Count = 1 };
+                    item.Changed += (_, _) => { };
+                    return item;
+                }
+            }
+            """);
+        BodyStatus Body(Func<CallableFact, bool> match) => Assert.Single(snapshot.Callables, x => match(x)).Body;
+        Assert.Equal(BodyStatus.Synthesized, Body(x => x.DisplaySignature.StartsWith("Error..ctor(", StringComparison.Ordinal)));
+        Assert.Equal(BodyStatus.Synthesized, Body(x => x.DisplaySignature.StartsWith("Plain..ctor(", StringComparison.Ordinal)));
+        Assert.Equal(BodyStatus.Synthesized, Body(x => x.DisplaySignature.StartsWith("Primary..ctor(", StringComparison.Ordinal)));
+        Assert.Equal(BodyStatus.Synthesized, Body(x => x.DisplaySignature.Contains("Item.get_Name", StringComparison.Ordinal)));
+        Assert.Equal(BodyStatus.Synthesized, Body(x => x.DisplaySignature.Contains("Item.set_Name", StringComparison.Ordinal)));
+        Assert.Equal(BodyStatus.Synthesized, Body(x => x.DisplaySignature.Contains("Item.set_Count", StringComparison.Ordinal)));
+        Assert.Equal(BodyStatus.Synthesized, Body(x => x.DisplaySignature.Contains("Item.add_Changed", StringComparison.Ordinal)));
+        Assert.Equal(BodyStatus.Source, Body(x => x.DisplaySignature.StartsWith("Item..ctor()", StringComparison.Ordinal)));
+        Assert.Equal(BodyStatus.Source, Body(x => x.DisplaySignature.StartsWith("Primary.Hello(", StringComparison.Ordinal)));
+        // A declaration without code that is not compiler-provided stays unknown.
+        Assert.Equal(BodyStatus.NoBody, Body(x => x.DisplaySignature.Contains("Shape.get_Sides", StringComparison.Ordinal)));
+        Assert.Equal(BodyStatus.NoBody, Body(x => x.DisplaySignature.Contains("IThing.get_Value", StringComparison.Ordinal)));
+        Assert.All(snapshot.Callables.Where(x => x.Body == BodyStatus.Synthesized), x => Assert.True(x.HasBody));
+        // Library members stay library members.
+        Assert.All(snapshot.Callables.Where(x => x.DisplaySignature.StartsWith("object.", StringComparison.Ordinal)), x => Assert.Equal(BodyStatus.MetadataOnly, x.Body));
+    }
+
+    [Fact]
+    public async Task Foreach_and_using_record_their_implicit_calls_and_only_the_async_forms_remain_gaps()
+    {
+        var snapshot = await Extract("""
+            using System.Collections.Generic;
+            using System.Threading.Tasks;
+            public class Res : System.IDisposable { public void Dispose() { } }
+            public class Use
+            {
+                public void Loop(List<int> items, int[] numbers, IEnumerable<int> sequence)
+                {
+                    foreach (var x in items) { }
+                    foreach (var x in numbers) { }
+                    foreach (var x in sequence) { }
+                }
+                public void Scoped() { using var first = new Res(); using (new Res()) { } }
+                public void ViaInterface(System.IDisposable resource) { using (resource) { } }
+                public async Task Later(IAsyncEnumerable<int> stream) { await foreach (var x in stream) { } }
+            }
+            """);
+        CallableFact Find(string prefix) => Assert.Single(snapshot.Callables, x => x.DisplaySignature.StartsWith(prefix, StringComparison.Ordinal));
+        CallSiteFact[] Implicit(CallableFact owner) => [.. snapshot.CallSites.Where(x => x.Caller == owner.Id && x.IsImplicit)];
+        var loop = Find("Use.Loop(");
+        var loopCalls = Implicit(loop);
+        // Arrays are enumerated without calls: the list and the sequence each contribute one of each.
+        Assert.Equal(2, loopCalls.Count(x => x.TargetDisplay.EndsWith("GetEnumerator()", StringComparison.Ordinal)));
+        Assert.Equal(2, loopCalls.Count(x => x.TargetDisplay.EndsWith("MoveNext()", StringComparison.Ordinal)));
+        Assert.DoesNotContain(snapshot.Gaps, x => x.Owner == loop.Id);
+        // A list's enumerator is a concrete library type: its calls are direct, not interface calls with candidates.
+        Assert.All(loopCalls.Where(x => x.TargetDisplay.Contains("List<T>", StringComparison.Ordinal)), x => Assert.Equal(DispatchKind.Direct, x.Dispatch));
+        Assert.Contains(loopCalls, x => x.TargetDisplay == "System.Collections.Generic.List<T>.Enumerator.Dispose()" && x.Dispatch == DispatchKind.Direct);
+        // A sequence typed as an interface stays an interface call.
+        Assert.Contains(loopCalls, x => x.TargetDisplay.Contains("IEnumerable<T>.GetEnumerator", StringComparison.Ordinal) && x.Dispatch == DispatchKind.Interface);
+
+        // A resource typed as a source class binds to that class's own Dispose, exactly as an explicit call would.
+        var scoped = Implicit(Find("Use.Scoped("));
+        Assert.Equal(2, scoped.Length);
+        Assert.All(scoped, x => { Assert.Equal(DispatchKind.Direct, x.Dispatch); Assert.StartsWith("Res.Dispose(", x.TargetDisplay, StringComparison.Ordinal); });
+        Assert.DoesNotContain(snapshot.Gaps, x => x.Owner == Find("Use.Scoped(").Id);
+        // A resource typed as the interface is an interface call whose candidate is the source implementation.
+        var viaInterface = Assert.Single(Implicit(Find("Use.ViaInterface(")));
+        Assert.Equal(DispatchKind.Interface, viaInterface.Dispatch);
+        Assert.Contains(snapshot.Implementations, x => x.Declared == viaInterface.BoundTarget && snapshot.Callables.Single(c => c.Id == x.Implementation).DisplaySignature.StartsWith("Res.Dispose(", StringComparison.Ordinal));
+        Assert.Contains(snapshot.Gaps, x => x.Owner == Find("Use.Later(").Id && x.Message.Contains("await foreach", StringComparison.Ordinal));
+    }
 }

@@ -25,6 +25,7 @@ public sealed record CallEdge(CallableId Source, CallableId Target, CallSiteFact
 public sealed class CallGraph
 {
     private readonly Dictionary<CallableId, ImmutableArray<CallSiteFact>> unresolved;
+    private readonly Dictionary<CallSiteId, ImmutableArray<CallableId>> siteCandidates;
 
     public DiGraph<CallableId, CallEdge> Graph { get; }
     public ImmutableArray<CallSiteFact> UnresolvedSites { get; }
@@ -33,7 +34,13 @@ public sealed class CallGraph
     {
         Graph = graph; UnresolvedSites = unresolvedSites;
         unresolved = unresolvedSites.GroupBy(x => x.Caller).ToDictionary(x => x.Key, x => x.ToImmutableArray());
+        siteCandidates = graph.Edges.Where(x => x.Kind == CallEdgeKind.Candidate).GroupBy(x => x.Site.Id)
+            .ToDictionary(x => x.Key, x => x.Select(e => e.Target).ToImmutableArray());
     }
+
+    // Source implementation candidates of a non-direct call site, in ID order; empty when none exist in source
+    // (for example a call to a library interface). Candidates are possibilities, never inferred runtime targets.
+    public ImmutableArray<CallableId> CandidatesOf(CallSiteId site) => siteCandidates.GetValueOrDefault(site, []);
 
     // Unresolved sites of a caller, in Outgoing order.
     public ImmutableArray<CallSiteFact> Unresolved(CallableId caller) => unresolved.GetValueOrDefault(caller, []);

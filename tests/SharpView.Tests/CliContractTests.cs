@@ -46,6 +46,8 @@ public sealed class CliContractTests
     [InlineData("projects", "--output", "x.md")]
     [InlineData("paths", "--follow-candidates")]
     [InlineData("exceptions", "--root", "X()")]
+    [InlineData("exceptions", "--declared-only")]
+    [InlineData("projects", "--follow-candidates")]
     [InlineData("exceptions", "--uncaught", "--caught")]
     [InlineData("exceptions", "--uncaught", "--max-depth", "3")]
     [InlineData("exceptions", "--caught", "--max-paths", "0")]
@@ -208,11 +210,14 @@ public sealed class CliContractTests
     {
         var result = await Run(summary ? ["exceptions", ResearchFixture.Input, "--uncaught"] : ["exceptions", ResearchFixture.Input, "--caught"]);
         Assert.Equal(1, result.Exit);
-        Assert.Equal(6, result.Error.Split('\n').Count(x => x.StartsWith("Gap [", StringComparison.Ordinal)));
+        // Gaps are grouped by cause with a count and the first location.
+        var gap = Assert.Single(result.Error.Split('\n'), x => x.StartsWith("Gap [", StringComparison.Ordinal));
+        Assert.Contains(" x6: Top-level/initializer callable ownership", gap);
+        Assert.Contains("Extraction gaps: 6 (1 kind)", result.Error);
         Assert.Contains("global caveats: 6", result.Error);
         Assert.DoesNotContain("Unknown [ExtractionGap]", result.Out);
         Assert.DoesNotContain("Reason: Top-level/initializer", result.Out);
-        if (!summary) Assert.Contains("witnesses: 26; unknown: 18", result.Error);
+        if (!summary) Assert.Contains("witnesses: 13; unknown: 5", result.Error);
     }
 
     [Fact]
@@ -247,5 +252,29 @@ public sealed class CliContractTests
             Assert.Equal(code, await File.ReadAllTextAsync(source));
         }
         finally { Directory.Delete(directory, true); }
+    }
+    [Fact]
+    public async Task Interface_calls_are_followed_by_default_and_declared_only_stops_with_a_hint()
+    {
+        const string action = "Research.Api.OrdersController.Interface(Research.Infrastructure.IRepository)";
+        // The fixture's interface has no implementation in source, so following has nowhere to go and says so.
+        var followed = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--root", action);
+        Assert.Contains("Interface dispatch: no source implementation found", followed.Out);
+        Assert.DoesNotContain("were not followed", followed.Error);
+        var declared = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--declared-only", "--root", action);
+        Assert.Contains("Unknown [DispatchBoundary]: Interface dispatch: runtime origins unknown.", declared.Out);
+        Assert.Contains("1 interface/virtual call sites were not followed (--declared-only)", declared.Error);
+        Assert.Contains("Rerun without --declared-only", declared.Error);
+        var caught = await Run("exceptions", ResearchFixture.Input, "--caught", "--declared-only", "--root", action);
+        Assert.Contains("1 interface/virtual call sites were not followed (--declared-only)", caught.Error);
+    }
+    [Theory]
+    [InlineData("--max-depth", "3")]
+    [InlineData("--max-paths", "5")]
+    [InlineData("--follow-candidates")]
+    public async Task Exception_views_have_no_depth_or_path_limits_and_no_follow_flag(string option, params string[] value)
+    {
+        var result = await Run(["exceptions", "missing.slnx", "--uncaught", option, .. value]);
+        Assert.Equal(2, result.Exit); Assert.Contains($"exceptions does not accept {option}", result.Error);
     }
 }

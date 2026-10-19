@@ -1,4 +1,4 @@
-Research.Api.OrdersController.Get() --> Research.Application.Service.Load() --> Research.Infrastructure.Repository.Read() --> Research.Infrastructure.StorageException..ctor() [metadata body unavailable]
+Research.Api.OrdersController.Get() --> Research.Application.Service.Load() --> Research.Infrastructure.Repository.Read() --> Research.Infrastructure.StorageException..ctor() [no outgoing calls]
   Research.Api.OrdersController.Get() | Project: Research.Api | Type: Research.Api.OrdersController | Transitions: 0
   Research.Application.Service.Load() | Project: Research.Application | Type: Research.Application.Service | Transitions: 1
   Research.Infrastructure.Repository.Read() | Project: Research.Infrastructure | Type: Research.Infrastructure.Repository | Transitions: 2

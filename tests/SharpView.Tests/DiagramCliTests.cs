@@ -105,11 +105,16 @@ public sealed class DiagramCliTests
     public async Task Uncaught_reports_known_escapes_alongside_unknowns_and_limits()
     {
         var result = await Run("", "exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Get()");
-        Assert.Equal(1, result.Exit);
+        Assert.Equal(1, result.Exit); // the fixture's top-level statements are a global caveat
         Assert.Contains("Exception summary: Research.Api.OrdersController.Get()", result.Out);
         Assert.Contains("May escape: Research.Infrastructure.StorageException", result.Out);
-        Assert.Contains("Unknown [MissingBody]", result.Out);
         Assert.Contains("Path: Research.Api.OrdersController.Get() -->", result.Out);
+        // The exception type's compiler-provided constructor is not "missing code": the action itself is fully known.
+        Assert.Contains("unknown effects: 0; local summary complete within model: True", result.Out);
+        Assert.DoesNotContain("MissingBody", result.Out);
+        var unobserved = await Run("", "exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Unobserved()");
+        Assert.Contains("Unknown [UnobservedTask]", unobserved.Out);
+        Assert.Contains("Library calls not analysed: 1 method (e.g. System.Threading.Tasks.Task.Yield()", unobserved.Out);
         var limited = await Run("", "exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Get()", "--budget", "1");
         Assert.Equal(1, limited.Exit); Assert.Contains("work limit: True", limited.Error);
         var invalid = await Run("", "reach", "missing.slnx", "--uncaught");

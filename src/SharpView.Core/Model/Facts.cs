@@ -19,7 +19,10 @@ public readonly record struct CatchId(string Value) : IStringId<CatchId> { stati
 public readonly record struct ExceptionRegionId(string Value) : IStringId<ExceptionRegionId> { static ExceptionRegionId IStringId<ExceptionRegionId>.Create(string value) => new(value); }
 public enum CallableKind { Method, Constructor, Getter, Setter, EventAdder, EventRemover, LocalFunction, Lambda }
 public enum DispatchKind { Direct, Interface, Virtual, Delegate, Dynamic, Unknown }
-public enum BodyStatus { Source, MetadataOnly, NoBody, Unsupported }
+// Synthesized: a compiler-provided member of a source type (implicit or record constructor, auto-property accessor,
+// record member). It contains no explicit code, so it cannot hold a throw, and it is never "missing".
+// New values are appended: the snapshot serializes enums as numbers.
+public enum BodyStatus { Source, MetadataOnly, NoBody, Unsupported, Synthesized }
 public enum NullabilityKind { NotAnnotated, Annotated, Oblivious }
 public enum DependencyKind { Signature, Inheritance, Constraint, Attribute, Construction, BodyUse, Field, Property }
 public enum ImplementationKind { Interface, Override }
@@ -56,7 +59,11 @@ public sealed record CallableFact(CallableId Id, CompilationId Compilation, Type
     CallableId? ContainingCallable, CallableKind Kind, string DisplaySignature, string Accessibility, TypeUse ReturnType,
     ImmutableArray<ParameterFact> Parameters, ImmutableArray<AttributeFact> Attributes, BodyStatus Body,
     ImmutableArray<SourceEvidence> Declarations, bool IsAsync = false, bool ReturnsTask = false,
-    CallableModifiers Modifiers = CallableModifiers.None, CallableId? Overrides = null, string Key = "");
+    CallableModifiers Modifiers = CallableModifiers.None, CallableId? Overrides = null, string Key = "")
+{
+    // True when the callable's code is fully known: written in source, or compiler-provided and free of explicit code.
+    [JsonIgnore] public bool HasBody => Body is BodyStatus.Source or BodyStatus.Synthesized;
+}
 public sealed record CallSiteFact(CallSiteId Id, CallableId Caller, CallableId? BoundTarget, string TargetDisplay,
     DispatchKind Dispatch, ImmutableArray<TypeUse> TypeArguments, SourceEvidence Evidence, bool IsImplicit,
     ImmutableArray<ExceptionRegionId> ProtectedRegions, bool IsAwaited = false);

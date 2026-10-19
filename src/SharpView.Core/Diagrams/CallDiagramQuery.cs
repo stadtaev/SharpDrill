@@ -61,7 +61,7 @@ public static class CallDiagramQuery
             token.ThrowIfCancellationRequested();
             var (method, depth) = item;
             var source = ids[method];
-            if (index.Callable(method).Body != BodyStatus.Source)
+            if (!index.Callable(method).HasBody)
             {
                 boundaries.Add(new(source, null, DiagramBoundaryKind.MissingBody));
                 continue;
