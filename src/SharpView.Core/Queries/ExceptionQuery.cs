@@ -43,9 +43,10 @@ public sealed record ExceptionSearchResult(ImmutableArray<ExceptionWitness> Resu
 }
 
 // Bounds for detailed witness enumeration: call transitions, reported witnesses and examined call sites.
+// DistinctOutcomes reports one witness per origin and outcome instead of one per path.
 // MaxResults bounds origin witnesses and, separately, uncertainty witnesses. FollowCandidates continues through
 // interface/virtual calls into their source implementation candidates (marked ViaCandidate).
-public sealed record ExceptionOptions(int MaxDepth = 20, int MaxResults = 1000, int MaxExpansions = 100000, bool FollowCandidates = false)
+public sealed record ExceptionOptions(int MaxDepth = 20, int MaxResults = 1000, int MaxExpansions = 100000, bool FollowCandidates = false, bool DistinctOutcomes = false)
 {
     public void Validate()
     {
@@ -73,6 +74,7 @@ public static class ExceptionQuery
         var origins = 0; var uncertainties = 0; var unknownLimit = false;
         var seenUncertainty = new HashSet<(CallableId, ExceptionReason, string, string)>();
         var library = new HashSet<CallableId>();
+        var seenOutcome = new HashSet<(CallableId, ThrowSiteId?, ThrowSiteId?, ExceptionStatus, ExceptionStatus?, ExceptionReason, bool, string, string)>();
         // Origin witnesses stop the search at the budget. Uncertainty witnesses are deduplicated per action and site
         // and have their own budget, so a flood of boundaries can never hide the real throws behind them.
         bool Add(ExceptionWitness witness)
@@ -84,6 +86,10 @@ public static class ExceptionQuery
                 if (uncertainties >= options.MaxResults) { unknownLimit = true; return true; }
                 uncertainties++; results.Add(witness); return true;
             }
+            // The same origin reaching the same outcome by another path adds nothing: count distinct outcomes, not paths.
+            var outcome = (witness.Action, witness.Origin, witness.SubsequentOrigin, witness.Status, witness.SubsequentStatus, witness.ReasonCode, witness.ViaCandidate,
+                string.Join(',', witness.HandlerIds.Select(x => x.Value)), string.Join(',', witness.MissedRegions.Select(x => x.Region.Value)));
+            if (options.DistinctOutcomes && !seenOutcome.Add(outcome)) return true;
             if (origins >= options.MaxResults) { outputLimit = true; return false; }
             origins++; results.Add(witness); return true;
         }

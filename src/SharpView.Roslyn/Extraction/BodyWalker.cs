@@ -39,8 +39,9 @@ internal sealed partial class FactExtractor
         private static bool Awaited(IOperation operation)
         {
             var parent = operation.Parent;
-            while (parent is IConversionOperation or IParenthesizedOperation) parent = parent.Parent;
-            return parent is IAwaitOperation;
+            // `await call.ConfigureAwait(false)` observes the call's task; `return call;` hands it to the caller, which observes it.
+            while (parent is IConversionOperation or IParenthesizedOperation or IInvocationOperation { TargetMethod.Name: "ConfigureAwait" }) parent = parent.Parent;
+            return parent is IAwaitOperation || parent is IReturnOperation && operation.Type is { Name: "Task" or "ValueTask" };
         }
         public override void VisitInvocation(IInvocationOperation operation)
         {

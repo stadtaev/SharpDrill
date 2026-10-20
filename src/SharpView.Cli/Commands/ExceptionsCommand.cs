@@ -27,7 +27,7 @@ internal sealed class ExceptionsCommand : ReportCommand
     // One knob: --budget bounds the work; depth is generous (cycles are detected separately) and the number of reported
     // witnesses scales with the budget, so no output limit is hit before the work limit.
     private const int Depth = 100;
-    private static ExceptionOptions PathQuery(Arguments arguments) => new(Depth, Math.Max(1000, arguments.Budget / 100), arguments.Budget, !arguments.DeclaredOnly);
+    private static ExceptionOptions PathQuery(Arguments arguments) => new(Depth, Math.Max(1000, arguments.Budget / 100), arguments.Budget, !arguments.DeclaredOnly, DistinctOutcomes: true);
 
     // The same budget bounds both transfer work and retained facts.
     private static ExceptionSummaryOptions SummaryQuery(Arguments arguments) => new(arguments.Budget, arguments.Budget, !arguments.DeclaredOnly);
