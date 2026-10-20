@@ -104,10 +104,23 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
                 if (ns.StartsWith("Microsoft.AspNetCore.", StringComparison.Ordinal) && bound.Name is "MapGet" or "MapPost" or "MapPut" or "MapDelete" or "MapPatch" or "MapMethods")
                     gaps.Add(new(GapKind.Unsupported, fact.Id, null, "Minimal API endpoint is outside controller-action analysis.", Evidence(invocation)));
             }
-            foreach (var node in root.DescendantNodes().Where(x => x is GlobalStatementSyntax || x is EqualsValueClauseSyntax && x.Parent is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Parent: FieldDeclarationSyntax } } || x is EqualsValueClauseSyntax { Parent: PropertyDeclarationSyntax }))
-                gaps.Add(new(GapKind.Unsupported, fact.Id, null, "Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately.", Evidence(node)));
+            // Top-level statements are one gap per file. Initializers are a gap only when they can run source code or throw;
+            // literals, constants and library constructors/calls (`= 5`, `= new()`, `= string.Empty`) have nothing to model.
+            if (root.DescendantNodes().OfType<GlobalStatementSyntax>().FirstOrDefault() is { } topLevel)
+                gaps.Add(new(GapKind.Unsupported, fact.Id, null, "Top-level statements have no owning callable; boundary registrations are extracted separately.", Evidence(topLevel)));
+            foreach (var node in root.DescendantNodes().OfType<EqualsValueClauseSyntax>().Where(x => x.Parent is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Parent: FieldDeclarationSyntax } } or PropertyDeclarationSyntax))
+                if (InitializerRunsSource(node, model, token))
+                    gaps.Add(new(GapKind.Unsupported, fact.Id, null, "Field/property initializer runs source code or throws; initializer callable ownership is outside scope.", Evidence(node)));
         }
     }
+    private static bool InitializerRunsSource(EqualsValueClauseSyntax initializer, SemanticModel model, CancellationToken token) =>
+        initializer.Value.DescendantNodesAndSelf(x => x is not AnonymousFunctionExpressionSyntax).Any(x => x switch
+        {
+            ThrowExpressionSyntax => true,
+            InvocationExpressionSyntax or BaseObjectCreationExpressionSyntax or ElementAccessExpressionSyntax =>
+                model.GetSymbolInfo(x, token).Symbol is not { } symbol || symbol.Locations.Any(l => l.IsInSource),
+            _ => false
+        });
     private static bool HasBody(SyntaxNode n) => n switch
     {
         BaseMethodDeclarationSyntax x => x.Body is not null || x.ExpressionBody is not null,
@@ -138,8 +151,13 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
             if (operation is not null) walker.Visit(operation);
             else if (methods[id].Body == BodyStatus.Source) walker.Gap("Source body has no operation tree.", entry.Node);
             walker.ExtractRegions(entry.Node);
-            if (entry.Symbol.MethodKind == MethodKind.Constructor && entry.Node is ConstructorDeclarationSyntax { Initializer: null } && entry.Symbol.ContainingType.BaseType?.SpecialType != SpecialType.System_Object)
-                walker.Gap("Implicit base constructor invocation is outside supported extraction.", entry.Node);
+            // An implicit `: base()` is an ordinary implicit call to the base's parameterless constructor.
+            if (entry.Symbol.MethodKind == MethodKind.Constructor && entry.Node is ConstructorDeclarationSyntax { Initializer: null } && entry.Symbol.ContainingType.BaseType is { SpecialType: not SpecialType.System_Object } baseType)
+            {
+                var baseConstructor = baseType.InstanceConstructors.FirstOrDefault(x => x.Parameters.All(p => p.IsOptional || p.IsParams));
+                if (baseConstructor is null) walker.Gap("Implicit base constructor could not be resolved.", entry.Node);
+                else walker.ImplicitBaseConstructor(baseConstructor, entry.Node);
+            }
         }
         ExtractMembers(token);
         LinkHierarchy(token);

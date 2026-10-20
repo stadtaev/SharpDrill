@@ -162,10 +162,11 @@ public sealed class CliContractTests
         var result = await Run("exceptions", ResearchFixture.Input, "--caught");
         Assert.Equal(1, result.Exit);
         var text = result.Out.Replace("\r\n", "\n");
-        Assert.Contains("  Caught: Research.Application.Service.Caught() | catch (Research.Infrastructure.StorageException) | Project: Research.Application |", text);
-        Assert.Contains("  Thrown: Research.Infrastructure.Repository.Read() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure |", text);
-        Assert.Contains("Handler: rethrows it", text);
-        Assert.Contains("Handler: throws a replacement", text);
+        Assert.Contains("  Caught by: catch (Research.Infrastructure.StorageException) in Service.Caught  Research.Application", text);
+        Assert.Contains("  Thrown:    Repository.Read  Research.Infrastructure", text);
+        Assert.Contains("  Path:\n       OrdersController.", text);
+        Assert.Contains("Handler:   rethrows it", text);
+        Assert.Contains("Handler:   throws a replacement", text);
         Assert.Contains("filter decides at runtime", text);
         Assert.DoesNotContain("Service.Incompatible()", text);
     }
@@ -176,9 +177,9 @@ public sealed class CliContractTests
         Assert.Equal(1, result.Exit);
         var text = result.Out.Replace("\r\n", "\n");
         Assert.Contains("Miscaught: Research.Infrastructure.StorageException", text);
-        Assert.Contains("  Passed through: try in Research.Application.Service.Incompatible() | Project: Research.Application |", text);
-        Assert.Contains("  Catch clauses (none match): System.ArgumentException", text);
-        Assert.Contains("  Then: may escape the controller action", text);
+        Assert.Contains("  Missed by: try in Service.Incompatible (catches only System.ArgumentException)  Research.Application", text);
+        Assert.Contains("  Then:      may escape the controller action", text);
+        Assert.Contains("    -> Service.Incompatible\n", text);
         Assert.Contains("miscaught: 1;", result.Error);
     }
     [Fact]
@@ -212,11 +213,11 @@ public sealed class CliContractTests
         Assert.Equal(1, result.Exit);
         // Gaps are grouped by cause with a count and the first location.
         var gap = Assert.Single(result.Error.Split('\n'), x => x.StartsWith("Gap [", StringComparison.Ordinal));
-        Assert.Contains(" x6: Top-level/initializer callable ownership", gap);
-        Assert.Contains("Extraction gaps: 6 (1 kind)", result.Error);
-        Assert.Contains("global caveats: 6", result.Error);
+        Assert.Contains("Top-level statements have no owning callable", gap);
+        Assert.Contains("Extraction gaps: 1 (1 kind)", result.Error);
+        Assert.Contains("global caveats: 1", result.Error);
         Assert.DoesNotContain("Unknown [ExtractionGap]", result.Out);
-        Assert.DoesNotContain("Reason: Top-level/initializer", result.Out);
+        Assert.DoesNotContain("Reason: Top-level statements", result.Out);
         if (!summary) Assert.Contains("witnesses: 13; unknown: 5", result.Error);
     }
 

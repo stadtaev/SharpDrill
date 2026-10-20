@@ -125,7 +125,7 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
         // Library calls and compiler-provided members are not uncertainty; what remains is genuine (filters, dispatch, cycles...).
         Assert.Equal(13, report.Results.Length);
         Assert.Equal(5, report.Results.Count(x => x.Status == ExceptionStatus.Unknown || x.SubsequentStatus == ExceptionStatus.Unknown));
-        Assert.Equal(6, report.GlobalGaps.Length);
+        Assert.Single(report.GlobalGaps);
         Assert.False(report.IsComplete);
         Assert.DoesNotContain(report.Results, x => x.ReasonCode == ExceptionReason.ExtractionGap);
     }

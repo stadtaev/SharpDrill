@@ -81,6 +81,7 @@ internal sealed partial class FactExtractor
             if (operation.Type is { } type) facts.AddDependency(facts.methods[owner], facts.Use(type), DependencyKind.Construction, facts.Evidence(operation.Syntax));
             base.VisitObjectCreation(operation);
         }
+        internal void ImplicitBaseConstructor(IMethodSymbol constructor, SyntaxNode syntax) => Call(constructor, syntax, DispatchKind.Direct, implicitCall: true);
         public override void VisitDynamicInvocation(IDynamicInvocationOperation operation) { Call(null, operation.Syntax, DispatchKind.Dynamic); base.VisitDynamicInvocation(operation); }
         public override void VisitFunctionPointerInvocation(IFunctionPointerInvocationOperation operation) { Call(null, operation.Syntax, DispatchKind.Unknown); base.VisitFunctionPointerInvocation(operation); }
         public override void VisitPropertyReference(IPropertyReferenceOperation operation)
@@ -200,8 +201,9 @@ internal sealed partial class FactExtractor
                 }
                 facts.regions.Add(new(new(NodeId("try", region)), owner, facts.Evidence(region.Block), ids.ToImmutable(), region.Finally is not null));
             }
-            foreach (var node in declaration.DescendantNodes(x => x == declaration || !IsDeclaration(x)).Where(x => x is YieldStatementSyntax or LockStatementSyntax))
-                Gap("Iterator/lock exception behaviour is outside the supported model.", node);
+            // `lock` only adds Monitor calls that cannot raise a modelled exception. An iterator defers its body, so one gap per iterator.
+            if (declaration.DescendantNodes(x => x == declaration || !IsDeclaration(x)).FirstOrDefault(x => x is YieldStatementSyntax) is { } yield)
+                Gap("Iterator bodies run deferred; exception timing is outside the supported model.", yield);
         }
     }
 }

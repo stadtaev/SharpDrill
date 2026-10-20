@@ -27,9 +27,9 @@ Recognised by convention, classified in Core from extracted facts:
 
 | Supported (followed) | Boundary (recorded, not followed) | Gap (not modelled, listed) |
 | --- | --- | --- |
-| Normal invocations, explicit construction, source constructors | Interface and virtual calls, including virtual members with bodies (an explicit root may still inspect its own body) | Top-level statements |
-| Property/event accessors, user-defined operators and conversions | Delegates, `dynamic`, function pointers, invalid operations | Field/property initialisers |
-| Reduced extension methods; local functions and lambdas as separately owned bodies | Metadata-only (library) bodies | Implicit base-constructor calls, `foreach`/`using`/`lock`/iterator implicit calls |
+| Normal invocations, explicit construction, source constructors | Interface and virtual calls, including virtual members with bodies (an explicit root may still inspect its own body) | Top-level statements (one gap per file) |
+| Property/event accessors, user-defined operators and conversions | Delegates, `dynamic`, function pointers, invalid operations | Field/property initialisers that run source code or throw |
+| Reduced extension methods; local functions and lambdas as separately owned bodies | Metadata-only (library) bodies | Iterator bodies (one gap per iterator), `await foreach`/`await using` |
 
 Implementation candidates come from source types' interface maps and overrides; dependency-injection registrations are not read.
 

@@ -35,6 +35,28 @@ public sealed class ExtractionTests
     }
 
     [Fact]
+    public async Task Trivial_initializers_lock_and_library_base_constructors_are_not_gaps()
+    {
+        var snapshot = await Extract("""
+            using System.Collections.Generic; using System.Net.Http;
+            public class Plain : DelegatingHandler {
+                public int A { get; set; } = 5; public List<int> L { get; } = new(); public string S = string.Empty;
+                public Plain() { }
+                object gate = new();
+                public void Locked() { lock (gate) { } }
+            }
+            public class Active { static string Build() => "x"; public string T = Build(); public string U = (string?)null ?? throw new System.Exception(); }
+            public class Base { public Base() { } } public class Derived : Base { public Derived() { } }
+            public static class Iter { public static IEnumerable<int> It() { yield return 1; yield return 2; } }
+            """);
+        Assert.Equal(2, snapshot.Gaps.Count(x => x.Message.StartsWith("Field/property initializer", StringComparison.Ordinal)));
+        Assert.DoesNotContain(snapshot.Gaps, x => x.Message.Contains("Implicit base constructor", StringComparison.Ordinal) || x.Message.Contains("lock", StringComparison.Ordinal));
+        Assert.Single(snapshot.Gaps, x => x.Message.StartsWith("Iterator bodies", StringComparison.Ordinal));
+        var derived = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Derived..ctor()");
+        Assert.Contains(snapshot.CallSites, x => x.Caller == derived.Id && x.TargetDisplay == "Base..ctor()" && x.IsImplicit);
+    }
+
+    [Fact]
     public async Task Expression_bodied_property_and_base_accessor_have_source_and_direct_dispatch()
     {
         var snapshot = await Extract("""

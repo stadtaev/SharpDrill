@@ -60,10 +60,26 @@ internal sealed class ExceptionsCommand : ReportCommand
         var (arguments, display) = (context.Arguments, context.Display);
         var result = ExceptionQuery.Analyze(context.Index, roots, PathQuery(arguments), token);
         var count = 0;
+        var hidden = 0;
+        // A path that reaches a fake or test class only through an assumed implementation is a guess about what DI picks.
+        bool Hidden(ThrowSiteFact origin, ExceptionWitness witness) =>
+            witness.ViaCandidate && (display.IsTestDouble(origin.Owner) || witness.Path.Any(display.IsTestDouble));
         if (caught)
-            foreach (var item in ExceptionHandlingQuery.Caught(result)) { token.ThrowIfCancellationRequested(); WriteCaught(context, item); count++; }
+            foreach (var item in ExceptionHandlingQuery.Caught(result))
+            {
+                token.ThrowIfCancellationRequested();
+                if (Hidden(context.Index.ThrowSite(item.Origin), item.Example)) { hidden++; continue; }
+                WriteCaught(context, item); count++;
+            }
         else
-            foreach (var item in ExceptionHandlingQuery.Miscaught(result)) { token.ThrowIfCancellationRequested(); WriteMiscaught(context, item); count++; }
+            foreach (var item in ExceptionHandlingQuery.Miscaught(result))
+            {
+                token.ThrowIfCancellationRequested();
+                if (Hidden(context.Index.ThrowSite(item.Origin), item.Example)) { hidden++; continue; }
+                WriteMiscaught(context, item); count++;
+            }
+        if (hidden > 0)
+            Console.Error.WriteLine($"Hidden: {hidden} finding{(hidden == 1 ? "" : "s")} that reach fakes, mocks or test code only through an assumed implementation.");
         var unknown = result.Results.Count(x => (x.SubsequentStatus ?? x.Status) == ExceptionStatus.Unknown);
         Console.Error.WriteLine($"Action roots: {roots.Length}; {(caught ? "caught" : "miscaught")}: {count}; witnesses: {result.Results.Length}; unknown: {unknown}; library methods called: {result.LibraryCalls.Length}; examined sites: {result.ExpandedSites}; depth limit: {result.DepthLimitReached}; output limit: {result.OutputLimitReached}; work limit: {result.WorkLimitReached}; global caveats: {result.GlobalGaps.Length}.");
         if (result.OutputLimitReached)
@@ -132,11 +148,11 @@ internal sealed class ExceptionsCommand : ReportCommand
     // The path from the action to the origin; steps through an implementation candidate are marked.
     private static string PathText(ReportContext context, ImmutableArray<CallableId> path, ImmutableArray<CallSiteId> sites)
     {
-        var text = context.Display.Name(path[0]);
+        var text = context.Display.Short(path[0]);
         for (var i = 1; i < path.Length; i++)
         {
             var candidate = i - 1 < sites.Length && context.Index.CallSite(sites[i - 1]).Dispatch != DispatchKind.Direct;
-            text += (candidate ? " -[candidate]-> " : " --> ") + context.Display.Name(path[i]);
+            text += (candidate ? " -[candidate]-> " : " --> ") + context.Display.Short(path[i]);
         }
         return text;
     }
@@ -144,7 +160,7 @@ internal sealed class ExceptionsCommand : ReportCommand
     private static void WriteThrow(ReportContext context, ThrowSiteFact origin)
     {
         context.Output.WriteLine($"Throw: {Thrown(origin)}");
-        WriteOrigin(context, "At", origin);
+        context.Output.WriteLine($"  At: {context.Display.Name(origin.Owner)} | Type: {context.Display.TypeOf(origin.Owner)} | Project: {context.Display.Project(origin.Owner)} | {Display.Location(origin.Evidence)}");
         context.Output.WriteLine($"  Inside try in the same method: {(origin.ProtectedRegions.IsEmpty ? "no" : "yes")}");
     }
 
@@ -155,8 +171,8 @@ internal sealed class ExceptionsCommand : ReportCommand
         var handler = index.Catch(caught.Catch);
         output.WriteLine($"Caught: {Thrown(origin)}");
         WriteOrigin(context, "Thrown", origin);
-        output.WriteLine($"  Caught: {display.Name(handler.Owner)} | catch ({handler.CaughtType?.DisplayName ?? "all exceptions"}){(handler.Filter is null ? "" : " when (...)")} | Project: {display.Project(handler.Owner)} | {Display.Location(handler.Evidence)}");
-        output.WriteLine($"  Handler: {Outcome(handler.Outcome)}{caught.Certainty switch
+        output.WriteLine($"  Caught by: catch ({handler.CaughtType?.DisplayName ?? "all exceptions"}){(handler.Filter is null ? "" : " when (...)")} in {display.Short(handler.Owner)}  {Where(context, handler.Evidence)}");
+        output.WriteLine($"  Handler:   {Outcome(handler.Outcome)}{caught.Certainty switch
         {
             CatchCertainty.TypeUncertain => " | match uncertain: the runtime type may not be caught",
             CatchCertainty.Filtered => " | filter decides at runtime",
@@ -173,20 +189,34 @@ internal sealed class ExceptionsCommand : ReportCommand
         var clauses = region.Catches.Select(x => index.Catch(x).CaughtType?.DisplayName ?? "all exceptions");
         output.WriteLine($"Miscaught: {miscaught.Missed.ExceptionType ?? Thrown(origin)}");
         WriteOrigin(context, "Thrown", origin);
-        output.WriteLine($"  Passed through: try in {display.Name(region.Owner)} | Project: {display.Project(region.Owner)} | {Display.Location(region.ProtectedBlock)}");
-        output.WriteLine($"  Catch clauses (none match): {string.Join(", ", clauses)}");
-        output.WriteLine($"  Then: {string.Join("; ", miscaught.Outcomes.Select(Fate))}");
+        output.WriteLine($"  Missed by: try in {display.Short(region.Owner)} (catches only {string.Join(", ", clauses)})  {Where(context, region.ProtectedBlock)}");
+        output.WriteLine($"  Then:      {string.Join("; ", miscaught.Outcomes.Select(Fate))}");
         WriteExample(context, miscaught.Example);
     }
 
-    // Where an exception is raised: method, declaring type, project and source location.
     private static void WriteOrigin(ReportContext context, string label, ThrowSiteFact origin) =>
-        context.Output.WriteLine($"  {label}: {context.Display.Name(origin.Owner)} | Type: {context.Display.TypeOf(origin.Owner)} | Project: {context.Display.Project(origin.Owner)} | {Display.Location(origin.Evidence)}");
+        context.Output.WriteLine($"  {label + ":",-10} {context.Display.Short(origin.Owner)}  {Where(context, origin.Evidence)}");
 
+    // Source location relative to the analysed solution or project, so lines stay short.
+    private static string Where(ReportContext context, SourceEvidence evidence)
+    {
+        var root = Path.GetDirectoryName(Path.GetFullPath(context.Arguments.Input)) ?? "";
+        var relative = Path.GetRelativePath(root, evidence.Path);
+        return $"{(relative.StartsWith("..", StringComparison.Ordinal) ? evidence.Path : relative)}:{evidence.StartLine}";
+    }
+
+    // One call per line, from the action down to the throw. A step through an interface/virtual call assumes which
+    // implementation runs, so a path with such a step is possible, not proven.
     private static void WriteExample(ReportContext context, ExceptionWitness witness)
     {
-        context.Output.WriteLine($"  Example path: {PathText(context, witness.Path, witness.Sites)}{(witness.ViaCandidate ? "   (via an implementation candidate: possible, not proven)" : "")}");
-        if (context.Arguments.Locations) foreach (var evidence in witness.Evidence) context.Output.WriteLine($"    Evidence: {Display.Location(evidence)}");
+        var (index, display, output) = (context.Index, context.Display, context.Output);
+        output.WriteLine(witness.ViaCandidate ? "  Path (possible, not proven):" : "  Path:");
+        for (var i = 0; i < witness.Path.Length; i++)
+        {
+            var candidate = i > 0 && i - 1 < witness.Sites.Length && index.CallSite(witness.Sites[i - 1]).Dispatch != DispatchKind.Direct;
+            output.WriteLine($"    {(i == 0 ? "  " : "->")} {display.Short(witness.Path[i])}{(candidate ? "  (assumed implementation)" : "")}");
+        }
+        if (context.Arguments.Locations) foreach (var evidence in witness.Evidence) output.WriteLine($"    Evidence: {Display.Location(evidence)}");
     }
 
     private static string Thrown(ThrowSiteFact origin) => origin.Kind == ThrowKind.Rethrow ? "rethrow of the caught exception"
@@ -208,6 +238,6 @@ internal sealed class ExceptionsCommand : ReportCommand
         ExceptionStatus.Intercepted => "caught further up",
         ExceptionStatus.RethrownOrReplaced => "rethrown or replaced further up",
         ExceptionStatus.MayEscape => "may escape the controller action",
-        _ => "unknown",
+        _ => "not determined",
     };
 }

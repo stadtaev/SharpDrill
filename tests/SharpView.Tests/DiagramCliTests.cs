@@ -108,7 +108,7 @@ public sealed class DiagramCliTests
         Assert.Equal(1, result.Exit); // the fixture's top-level statements are a global caveat
         Assert.Contains("Exception summary: Research.Api.OrdersController.Get()", result.Out);
         Assert.Contains("May escape: Research.Infrastructure.StorageException", result.Out);
-        Assert.Contains("Path: Research.Api.OrdersController.Get() -->", result.Out);
+        Assert.Contains("Path: OrdersController.Get -->", result.Out);
         // The exception type's compiler-provided constructor is not "missing code": the action itself is fully known.
         Assert.Contains("unknown effects: 0; local summary complete within model: True", result.Out);
         Assert.DoesNotContain("MissingBody", result.Out);
