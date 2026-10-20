@@ -3,7 +3,7 @@ namespace SharpView.Roslyn;
 
 // Evaluated MSBuild values for the selected framework; these are the project's real settings, not inferred ones.
 internal sealed record ProjectSettings(string Framework, string Nullable, bool TreatWarningsAsErrors,
-    IReadOnlyList<string> WarningsAsErrors, IReadOnlyList<string> ProjectReferences);
+    IReadOnlyList<string> WarningsAsErrors, IReadOnlyList<string> ProjectReferences, bool ExcludedTest = false);
 
 internal static class ProjectSelection
 {
@@ -12,6 +12,8 @@ internal static class ProjectSelection
         var properties = new Dictionary<string, string> { ["Configuration"] = request.Configuration };
         using var collection = new ProjectCollection(properties);
         var project = collection.LoadProject(path);
+        // Checked before framework selection and restore, so an excluded test project never fails the load.
+        if (!request.IncludeTests && IsTest(project)) return new("", "", false, [], [], ExcludedTest: true);
         var multiple = project.GetPropertyValue("TargetFrameworks").Split(';', StringSplitOptions.RemoveEmptyEntries);
         var single = project.GetPropertyValue("TargetFramework");
         if (multiple.Length > 1 && request.TargetFramework is null)
@@ -32,4 +34,10 @@ internal static class ProjectSelection
             [.. project.GetPropertyValue("WarningsAsErrors").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)],
             [.. project.GetItems("ProjectReference").Select(x => Path.GetFullPath(Path.Combine(directory, x.EvaluatedInclude.Replace('\\', Path.DirectorySeparatorChar)))).Order(StringComparer.Ordinal)]);
     }
+
+    // Microsoft.NET.Test.Sdk, MSTest and TUnit set IsTestProject; package families catch the rest (xunit.v3, NUnit3TestAdapter, Reqnroll.xUnit...).
+    private static readonly string[] TestPackages = ["Microsoft.NET.Test.Sdk", "xunit", "NUnit", "TUnit", "MSTest", "SpecFlow", "Reqnroll", "LightBDD", "Cucumber", "PactNet"];
+    private static bool IsTest(Project project) =>
+        string.Equals(project.GetPropertyValue("IsTestProject"), "true", StringComparison.OrdinalIgnoreCase)
+        || project.GetItems("PackageReference").Any(x => TestPackages.Any(p => x.EvaluatedInclude.StartsWith(p, StringComparison.OrdinalIgnoreCase)));
 }

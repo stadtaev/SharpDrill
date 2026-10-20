@@ -35,11 +35,13 @@ public static class RoslynProgramLoader
             ? (await workspace.OpenProjectAsync(input, cancellationToken: cancellationToken)).Solution
             : await workspace.OpenSolutionAsync(input, cancellationToken: cancellationToken);
         var contexts = new List<(Project Project, Compilation Compilation, CompilationFact Fact)>();
+        var excludedTests = new List<string>();
         foreach (var project in solution.Projects.OrderBy(x => x.FilePath, StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (project.Language != LanguageNames.CSharp) { loadGaps.Add(new(GapKind.Unsupported, null, null, $"Non-C# project excluded: {project.FilePath}", null)); continue; }
             var settings = ProjectSelection.Read(project.FilePath!, request);
+            if (settings.ExcludedTest) { excludedTests.Add(project.FilePath!); continue; }
             var selection = settings.Framework;
             var compilation = await project.GetCompilationAsync(cancellationToken);
             if (compilation is null) { loadGaps.Add(new(GapKind.ProjectLoad, null, null, $"No compilation: {project.FilePath}", null)); continue; }
@@ -61,10 +63,11 @@ public static class RoslynProgramLoader
             };
             contexts.Add((project, compilation, fact));
         }
-        if (contexts.Count == 0) throw new InvalidOperationException("No C# projects could be loaded.");
+        if (contexts.Count == 0)
+            throw new InvalidOperationException(excludedTests.Count > 0 ? "Only test projects were found; use --include-tests to analyse them." : "No C# projects could be loaded.");
         var extractor = new FactExtractor(contexts.Select(x => x.Fact).ToImmutableArray(), loadGaps);
         foreach (var context in contexts) await extractor.RegisterAsync(context.Project, context.Compilation, context.Fact, request.IncludeGenerated, cancellationToken);
         extractor.Extract(cancellationToken);
-        return extractor.Snapshot() with { SourceRoot = Path.GetDirectoryName(input)! };
+        return extractor.Snapshot() with { SourceRoot = Path.GetDirectoryName(input)!, ExcludedTestProjects = [.. excludedTests.Distinct().Order(StringComparer.Ordinal)] };
     }
 }

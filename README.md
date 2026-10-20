@@ -63,6 +63,7 @@ For practical use cases of each command, such as impact analysis, CI gating, fin
 ### Common options
 
 - **Input:** `.csproj`, `.sln` or `.slnx`. Use `--framework` for multi-target projects and `--configuration` (default `Debug`) when needed.
+- **Test projects** (xUnit, NUnit, TUnit, MSTest, SpecFlow/Reqnroll, LightBDD, Cucumber, Pact, or anything with `IsTestProject=true`) are skipped by default, before restore or framework checks; stderr lists them. `--include-tests` loads them like any other project.
 - **Roots:** `--root <id or exact signature>`; copy either from `inspect --methods`. An exact ID match wins, so use the ID when signatures collide. `reach` and `paths` accept any source method; `exceptions` and `diagram` need a controller action.
 - **Dispatch:** interface, virtual, delegate, dynamic and unresolved calls are visible boundaries. `reach --follow-candidates` and `diagram --follow-candidates` also follow implementation candidates, marked `(candidate)`. `paths` stops at the declared target. Exception views follow interface/virtual calls into their source implementations by default (the usual case with dependency-injected interfaces) and mark such results as possibilities, never as proven runtime paths; `exceptions --declared-only` stops at the declaration and reports *Unknown* instead.
 - **Limits:** `--budget` (default 100,000 examined call sites) everywhere; `reach`, `paths` and `diagram` also take `--max-depth` (default 20 transitions), `paths` takes `--max-paths` (default 1,000). `exceptions` has one knob only, `--budget`: its depth is generous and its witness cap scales with the budget. Reaching a limit is always reported, with what to raise.
@@ -148,7 +149,7 @@ The version is computed by [github-tag-action](https://github.com/mathieudutour/
 
 The highest bump among the new commits wins. Before the first tag the baseline is 0.0.0, so a `feat:` commit makes the first release 0.1.0. The subject must start with the type: `feat: ...` counts, while "feat" only in the description does not. Add `[skip-release]` to a commit message to leave it out of the version calculation. Local builds report `0.0.0-dev`.
 
-Publishing uses nuget.org [trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing), so no API key is stored: the workflow exchanges its GitHub OIDC token for a short-lived key. One-time setup on nuget.org (Trusted Publishing page): a policy for repository owner `stadtaev`, repository `sharpview`, workflow file `release.yml`, glob pattern `SharpView*` (covers all five package IDs). The workflow's `NuGet login` step names the nuget.org account (`user: StasT`). Optionally reserve the `SharpView.` ID prefix so nobody else can publish packages under it.
+Publishing uses nuget.org [trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing), so no API key is stored: the workflow exchanges its GitHub OIDC token for a short-lived key. One-time setup on nuget.org (Trusted Publishing page): a policy for repository owner `stadtaev`, repository `sharpview`, workflow file `release.yml`, glob pattern `SharpView*` (covers all five package IDs). The workflow's `NuGet login` step names the nuget.org account (`user: stadtaev`). Optionally reserve the `SharpView.` ID prefix so nobody else can publish packages under it.
 
 ## Packages
 

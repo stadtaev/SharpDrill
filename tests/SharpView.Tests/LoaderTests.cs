@@ -60,6 +60,33 @@ public sealed class LoaderTests
         finally { Directory.Delete(directory, true); }
     }
 
+    [Fact]
+    public async Task Test_projects_are_skipped_before_restore_or_framework_checks_unless_included()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "sharpview-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var input = Path.Combine(directory, "Fixture.slnx");
+        try
+        {
+            // Unrestored and multi-targeted: loading it would fail, so only an early skip lets the solution load.
+            var tests = Path.Combine(directory, "Api.Tests.csproj");
+            await File.WriteAllTextAsync(tests, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFrameworks>net8.0;net10.0</TargetFrameworks></PropertyGroup>
+                  <ItemGroup><PackageReference Include="xunit" Version="2.9.3" /></ItemGroup>
+                </Project>
+                """);
+            var fixture = Path.Combine(ResearchFixture.Root, "tests/Fixtures/ResearchSolution");
+            var projects = new[] { "Research.Api", "Research.Application", "Research.Infrastructure" }.Select(x => Path.Combine(fixture, x, x + ".csproj")).Append(tests);
+            await File.WriteAllTextAsync(input, $"<Solution>{string.Concat(projects.Select(x => $"<Project Path=\"{x}\" />"))}</Solution>");
+            var snapshot = await RoslynProgramLoader.LoadAsync(new(input));
+            Assert.Equal(3, snapshot.Compilations.Length);
+            Assert.Equal(tests, Assert.Single(snapshot.ExcludedTestProjects));
+            await Assert.ThrowsAsync<ArgumentException>(() => RoslynProgramLoader.LoadAsync(new(input, IncludeTests: true)));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
     private static void AssertResearchBindings(ProgramSnapshot snapshot)
     {
         var action = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Research.Api.OrdersController.Get()");

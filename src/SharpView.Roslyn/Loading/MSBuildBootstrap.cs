@@ -14,4 +14,5 @@ public static class MSBuildBootstrap
         }
     }
 }
-public sealed record AnalysisRequest(string InputPath, string Configuration = "Debug", string? TargetFramework = null, bool IncludeGenerated = true);
+/// <param name="IncludeTests">Test projects (xUnit, NUnit, TUnit, MSTest, BDD, Pact...) are skipped unless true.</param>
+public sealed record AnalysisRequest(string InputPath, string Configuration = "Debug", string? TargetFramework = null, bool IncludeGenerated = true, bool IncludeTests = false);

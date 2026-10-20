@@ -61,7 +61,7 @@ jobs:
         if: steps.version.outputs.new_tag != ''
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         with:
-          user: StasT
+          user: stadtaev
 
       - name: Publish to nuget.org
         if: steps.version.outputs.new_tag != ''

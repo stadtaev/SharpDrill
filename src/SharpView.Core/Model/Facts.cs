@@ -111,4 +111,6 @@ public sealed record ProgramSnapshot
     public ImmutableArray<BoundaryHandlingFact> BoundaryHandling { get; init; } = [];
     // Full path of the analysed input's directory; consumers use it with SourceEvidence.RelativeTo.
     public string SourceRoot { get; init; } = "";
+    // Project files skipped at load because they are test projects (not a gap: excluding them is the default scope).
+    public ImmutableArray<string> ExcludedTestProjects { get; init; } = [];
 }

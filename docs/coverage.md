@@ -56,6 +56,7 @@ Implementation candidates come from source types' interface maps and overrides; 
 
 - **From MSBuild:** `<ProjectReference>` items and the evaluated `TargetFramework`, `Nullable`, `TreatWarningsAsErrors` and `WarningsAsErrors` of each loaded C# project, for the selected configuration and framework.
 - **From the compiler:** warning and error counts after severity options. Analyzer, NuGet and other MSBuild warnings are not counted.
+- **Test projects** are skipped unless `--include-tests` is given: `IsTestProject=true`, or a package reference from the xUnit, NUnit, TUnit, MSTest, SpecFlow, Reqnroll, LightBDD, Cucumber or PactNet families, or Microsoft.NET.Test.Sdk. Skipping is the default scope, not a gap.
 - **Not covered:** package references, non-C# projects (reported as gaps) and references to projects outside the loaded workspace (listed as unloaded).
 
 ## Layers and dependencies (library only)
