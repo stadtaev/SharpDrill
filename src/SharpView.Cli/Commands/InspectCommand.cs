@@ -54,12 +54,16 @@ internal sealed class InspectCommand : ReportCommand
             token.ThrowIfCancellationRequested();
             output.WriteLine($"Catch: {handler.CaughtType?.DisplayName ?? "all exceptions"} | Handler: {handler.Outcome}\n  Project: {display.Project(handler.Owner)} | Method: {display.Name(handler.Owner)}\n  Filter: {handler.Filter ?? "none"}\n  Evidence: {Display.Location(handler.Evidence)}");
             foreach (var region in index.RegionsOf(handler.Id))
-                output.WriteLine($"  Protected region: {Display.Location(region.ProtectedBlock)} | span {region.ProtectedBlock.SpanStart}+{region.ProtectedBlock.SpanLength} | Finally: {region.HasFinally}");
+                output.WriteLine($"  Protected region: {Display.Location(region.ProtectedBlock)} | span {region.ProtectedBlock.SpanStart}+{region.ProtectedBlock.SpanLength} | Finally may throw: {region.FinallyMayThrow}");
             if (handler.SubsequentThrow is { } next && index.TryGetThrowSite(next, out var nextThrow)) output.WriteLine($"  Subsequent origin: {Display.Location(nextThrow.Evidence)} ({next.Value})");
         }
         output.WriteLine("Boundary registrations (evidence only; runtime coverage and middleware order unknown):");
         foreach (var boundary in snapshot.BoundaryHandling)
             output.WriteLine($"  {boundary.Registration} | Project: {index.ProjectName(boundary.Compilation)} | {boundary.BoundMethod} | {Display.Location(boundary.Evidence)}");
         if (snapshot.BoundaryHandling.IsEmpty) output.WriteLine("  No supported registration evidence found; boundary handling unknown.");
+        // Every gap, grouped by cause: the other commands mention only those that affect their results.
+        output.WriteLine("Gaps (code the analysis does not model):");
+        foreach (var group in snapshot.Gaps.GroupBy(x => (x.Kind, x.Message)).OrderByDescending(x => x.Count()).ThenBy(x => x.Key.Message, StringComparer.Ordinal))
+            output.WriteLine($"  [{group.Key.Kind}] x{group.Count()} {group.Key.Message}{(group.FirstOrDefault(x => x.Evidence is not null)?.Evidence is { } first ? $" (first at {context.Display.Where(first)})" : "")}");
     }
 }

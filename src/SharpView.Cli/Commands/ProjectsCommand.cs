@@ -18,19 +18,17 @@ internal sealed class ProjectsCommand : ICliCommand
     {
         var map = ProjectMap.Build(index.Snapshot);
         var output = Console.Out;
-        await output.WriteLineAsync($"Projects: {map.Projects.Count}. Each project is listed with the projects it references (<ProjectReference>) beneath it.");
         var printed = new HashSet<CompilationId>();
         foreach (var root in map.Roots) await Write(root, "", "", []);
         foreach (var (source, path) in map.Unloaded)
-            await output.WriteLineAsync($"Unloaded reference: {map.Projects[source].Name} --> {path} (not part of the loaded workspace)");
+            await output.WriteLineAsync($"Not loaded: {map.Projects[source].Name} references {path}, which is not in the solution");
         if (arguments.Mermaid)
         {
             var path = await MarkdownExport.SaveAsync(MermaidExporter.Markdown(map), arguments.Output, "projects", token);
             await output.WriteLineAsync("Saved diagram: " + path);
         }
         var loadGaps = index.Snapshot.Gaps.Where(x => x.Kind == GapKind.ProjectLoad).ToArray();
-        foreach (var gap in loadGaps) Console.Error.WriteLine($"Gap [{gap.Kind}]: {gap.Message}");
-        Console.Error.WriteLine($"Projects: {map.Projects.Count}; references: {map.Graph.EdgeCount}; unloaded references: {map.Unloaded.Length}; load gaps: {loadGaps.Length}.");
+        foreach (var gap in loadGaps) Console.Error.WriteLine($"Not loaded: {gap.Message}");
         token.ThrowIfCancellationRequested();
         return map.Unloaded.IsEmpty && loadGaps.Length == 0 ? 0 : 1;
 
@@ -51,9 +49,11 @@ internal sealed class ProjectsCommand : ICliCommand
         }
     }
 
-    private static string Settings(ProjectNode project) =>
-        $"{project.Framework} | Nullable: {project.Nullable} | Nullable warnings as errors: {YesNo(project.WarningsAsErrors != WarningsAsErrorsLevel.None)}" +
-        $" | All warnings as errors: {YesNo(project.WarningsAsErrors == WarningsAsErrorsLevel.All)} | Compiler warnings: {project.Warnings} | Errors: {project.Errors}";
-
-    private static string YesNo(bool value) => value ? "yes" : "no";
+    // Framework, nullable context and warning count always; the rest only when it is set.
+    private static string Settings(ProjectNode project) => string.Join(", ", new[]
+    {
+        project.Framework, $"nullable {project.Nullable.ToLowerInvariant()}", Display.Plural(project.Warnings, "warning"),
+        project.WarningsAsErrors switch { WarningsAsErrorsLevel.All => "all warnings are errors", WarningsAsErrorsLevel.None => null, _ => "nullable warnings are errors" },
+        project.Errors > 0 ? Display.Plural(project.Errors, "error") : null,
+    }.OfType<string>());
 }

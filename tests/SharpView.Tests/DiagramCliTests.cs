@@ -105,20 +105,17 @@ public sealed class DiagramCliTests
     public async Task Uncaught_reports_known_escapes_alongside_unknowns_and_limits()
     {
         var result = await Run("", "exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Get()");
-        Assert.Equal(1, result.Exit); // the fixture's top-level statements are a global caveat
-        Assert.Contains("Exception summary: Research.Api.OrdersController.Get()", result.Out);
-        Assert.Contains("May escape: Research.Infrastructure.StorageException", result.Out);
-        Assert.Contains("Path: OrdersController.Get -->", result.Out);
+        Assert.Equal(0, result.Exit);
+        Assert.Contains("Uncaught: Research.Infrastructure.StorageException", result.Out);
+        Assert.Contains("  Path:\n       OrdersController.Get\n    -> Service.Load\n", result.Out.ReplaceLineEndings("\n"));
         // The exception type's compiler-provided constructor is not "missing code": the action itself is fully known.
-        Assert.Contains("unknown effects: 0; local summary complete within model: True", result.Out);
-        Assert.DoesNotContain("MissingBody", result.Out);
+        Assert.DoesNotContain("Not followed", result.Error);
         var unobserved = await Run("", "exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Unobserved()");
-        Assert.Contains("Unknown [UnobservedTask]", unobserved.Out);
-        Assert.Contains("Library calls not analysed: 1 method (e.g. System.Threading.Tasks.Task.Yield()", unobserved.Out);
+        Assert.Contains("Not followed: 1 task that is never awaited (e.g. Research.Application/Service.cs:15).", unobserved.Error);
         var limited = await Run("", "exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Get()", "--budget", "1");
-        Assert.Equal(1, limited.Exit); Assert.Contains("work limit: True", limited.Error);
+        Assert.Equal(1, limited.Exit); Assert.Contains("Stopped early: the analysis budget ran out", limited.Error);
         var invalid = await Run("", "reach", "missing.slnx", "--uncaught");
-        Assert.Equal(2, invalid.Exit); Assert.DoesNotContain("Analysis input not found", invalid.Error);
+        Assert.Equal(2, invalid.Exit); Assert.DoesNotContain("Input not found", invalid.Error);
     }
 
     [Theory]
@@ -128,7 +125,7 @@ public sealed class DiagramCliTests
     public async Task Invalid_summary_options_fail_before_loading(string option, string value)
     {
         var result = await Run("", "exceptions", "missing.slnx", "--uncaught", option, value);
-        Assert.Equal(2, result.Exit); Assert.DoesNotContain("Analysis input not found", result.Error);
+        Assert.Equal(2, result.Exit); Assert.DoesNotContain("Input not found", result.Error);
     }
 
     [Theory]
@@ -141,7 +138,7 @@ public sealed class DiagramCliTests
     {
         var result = await Run("", "diagram", "missing.slnx", option, value);
         Assert.Equal(2, result.Exit);
-        Assert.DoesNotContain("Analysis input not found", result.Error);
+        Assert.DoesNotContain("Input not found", result.Error);
     }
 
     [Fact]
@@ -150,6 +147,6 @@ public sealed class DiagramCliTests
         var root = await Run("", "diagram", ResearchFixture.Input, "--root", "Research.Application.Service.Load()");
         Assert.Equal(2, root.Exit); Assert.Contains("recognised action", root.Error);
         var wrongCommand = await Run("", "reach", "missing.slnx", "--max-nodes", "20");
-        Assert.Equal(2, wrongCommand.Exit); Assert.DoesNotContain("Analysis input not found", wrongCommand.Error);
+        Assert.Equal(2, wrongCommand.Exit); Assert.DoesNotContain("Input not found", wrongCommand.Error);
     }
 }

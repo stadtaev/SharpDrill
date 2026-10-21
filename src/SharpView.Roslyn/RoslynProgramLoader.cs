@@ -21,7 +21,7 @@ public static class RoslynProgramLoader
     {
         cancellationToken.ThrowIfCancellationRequested();
         var input = Path.GetFullPath(request.InputPath);
-        if (!File.Exists(input)) throw new FileNotFoundException("Analysis input not found.", input);
+        if (!File.Exists(input)) throw new FileNotFoundException($"Input not found: {input}", input);
         if (Path.GetExtension(input) is not (".csproj" or ".sln" or ".slnx")) throw new ArgumentException("Input must be .csproj, .sln or .slnx.");
         var properties = new Dictionary<string, string> { ["Configuration"] = request.Configuration };
         if (request.TargetFramework is { } framework) properties["TargetFramework"] = framework;
@@ -64,7 +64,7 @@ public static class RoslynProgramLoader
             contexts.Add((project, compilation, fact));
         }
         if (contexts.Count == 0)
-            throw new InvalidOperationException(excludedTests.Count > 0 ? "Only test projects were found; use --include-tests to analyse them." : "No C# projects could be loaded.");
+            throw new AnalysisInputException(excludedTests.Count > 0 ? "Only test projects were found; use --include-tests to analyse them." : "No C# projects could be loaded.");
         var extractor = new FactExtractor(contexts.Select(x => x.Fact).ToImmutableArray(), loadGaps);
         foreach (var context in contexts) await extractor.RegisterAsync(context.Project, context.Compilation, context.Fact, request.IncludeGenerated, cancellationToken);
         extractor.Extract(cancellationToken);

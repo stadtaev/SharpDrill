@@ -35,7 +35,7 @@ public sealed class ExtractionTests
     }
 
     [Fact]
-    public async Task Trivial_initializers_lock_and_library_base_constructors_are_not_gaps()
+    public async Task Initializers_lock_and_library_base_constructors_are_not_gaps()
     {
         var snapshot = await Extract("""
             using System.Collections.Generic; using System.Net.Http;
@@ -49,7 +49,12 @@ public sealed class ExtractionTests
             public class Base { public Base() { } } public class Derived : Base { public Derived() { } }
             public static class Iter { public static IEnumerable<int> It() { yield return 1; yield return 2; } }
             """);
-        Assert.Equal(2, snapshot.Gaps.Count(x => x.Message.StartsWith("Field/property initializer", StringComparison.Ordinal)));
+        Assert.DoesNotContain(snapshot.Gaps, x => x.Message.StartsWith("Field/property initializer", StringComparison.Ordinal));
+        // Initializers that run source code or throw belong to the constructor they run in, which then has a body.
+        var active = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Active..ctor()");
+        Assert.Equal(BodyStatus.Source, active.Body);
+        Assert.Contains(snapshot.CallSites, x => x.Caller == active.Id && x.TargetDisplay == "Active.Build()");
+        Assert.Contains(snapshot.ThrowSites, x => x.Owner == active.Id);
         Assert.DoesNotContain(snapshot.Gaps, x => x.Message.Contains("Implicit base constructor", StringComparison.Ordinal) || x.Message.Contains("lock", StringComparison.Ordinal));
         Assert.Single(snapshot.Gaps, x => x.Message.StartsWith("Iterator bodies", StringComparison.Ordinal));
         var derived = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Derived..ctor()");
@@ -148,21 +153,23 @@ public sealed class ExtractionTests
     }
 
     [Fact]
-    public async Task Direct_await_observation_and_aliased_task_unknown_are_distinguished()
+    public async Task Awaiting_a_task_directly_or_through_a_local_observes_it()
     {
         var snapshot = await Extract("""
             using System.Threading.Tasks;
             public static class Sample {
                 public static Task Produce() => Task.CompletedTask;
-                public static async Task Consume() { await Produce(); var task = Produce(); await task; }
+                public static async Task Consume() { await Produce(); var task = Produce(); await task; var a = Produce(); var b = Produce(); await Task.WhenAll(a, b); var lost = Produce(); }
+                static Task held = Produce();
+                public static async Task Field() => await held;
             }
             """);
         var consume = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Sample.Consume()");
         var calls = snapshot.CallSites.Where(x => x.Caller == consume.Id && x.TargetDisplay == "Sample.Produce()").OrderBy(x => x.Evidence.SpanStart).ToArray();
-        Assert.Equal(2, calls.Length);
-        Assert.True(calls[0].IsAwaited);
-        Assert.False(calls[1].IsAwaited);
-        Assert.Contains(snapshot.Gaps, x => x.Owner == consume.Id && x.Message.Contains("aliased task", StringComparison.Ordinal));
+        Assert.Equal([true, true, true, true, false], calls.Select(x => x.IsAwaited));
+        Assert.DoesNotContain(snapshot.Gaps, x => x.Owner == consume.Id);
+        var field = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Sample.Field()");
+        Assert.Contains(snapshot.Gaps, x => x.Owner == field.Id && x.Message.Contains("field, property or parameter", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -669,7 +676,7 @@ public sealed class ExtractionTests
     }
 
     [Fact]
-    public async Task Foreach_and_using_record_their_implicit_calls_and_only_the_async_forms_remain_gaps()
+    public async Task Foreach_and_using_record_their_implicit_calls_awaited_in_the_async_forms()
     {
         var snapshot = await Extract("""
             using System.Collections.Generic;
@@ -686,6 +693,7 @@ public sealed class ExtractionTests
                 public void Scoped() { using var first = new Res(); using (new Res()) { } }
                 public void ViaInterface(System.IDisposable resource) { using (resource) { } }
                 public async Task Later(IAsyncEnumerable<int> stream) { await foreach (var x in stream) { } }
+                public async Task Disposing(System.IAsyncDisposable resource) { await using (resource) { } }
             }
             """);
         CallableFact Find(string prefix) => Assert.Single(snapshot.Callables, x => x.DisplaySignature.StartsWith(prefix, StringComparison.Ordinal));
@@ -711,6 +719,45 @@ public sealed class ExtractionTests
         var viaInterface = Assert.Single(Implicit(Find("Use.ViaInterface(")));
         Assert.Equal(DispatchKind.Interface, viaInterface.Dispatch);
         Assert.Contains(snapshot.Implementations, x => x.Declared == viaInterface.BoundTarget && snapshot.Callables.Single(c => c.Id == x.Implementation).DisplaySignature.StartsWith("Res.Dispose(", StringComparison.Ordinal));
-        Assert.Contains(snapshot.Gaps, x => x.Owner == Find("Use.Later(").Id && x.Message.Contains("await foreach", StringComparison.Ordinal));
+        Assert.DoesNotContain(snapshot.Gaps, x => x.Owner == Find("Use.Later(").Id || x.Owner == Find("Use.Disposing(").Id);
+        Assert.Contains(Implicit(Find("Use.Later(")), x => x.TargetDisplay.Contains("MoveNextAsync", StringComparison.Ordinal) && x.IsAwaited);
+        Assert.Contains(Implicit(Find("Use.Disposing(")), x => x.TargetDisplay.Contains("DisposeAsync", StringComparison.Ordinal) && x.IsAwaited);
+    }
+
+    [Fact]
+    public async Task Handler_outcome_follows_control_flow_and_a_finally_matters_only_when_it_can_throw()
+    {
+        var snapshot = await Extract("""
+            using System;
+            public class Res : IDisposable { public void Dispose() { } }
+            public static class H
+            {
+                static void Log(Exception e) => Console.WriteLine(e);
+                static void Cleanup() { }
+                public static int Run(bool b)
+                {
+                    try { } catch (InvalidOperationException e) { Log(e); throw; }
+                    try { } catch (ArgumentException e) { Console.WriteLine(e); return 0; }
+                    try { } catch (FormatException e) { if (b) return 1; throw; }
+                    try { } catch (TimeoutException e) { throw e; }
+                    try { } catch (NotSupportedException e) { Log(e); throw new InvalidOperationException("x", e); }
+                    try { } catch (Exception) { }
+                    try { } finally { Console.WriteLine(); System.IO.Stream.Null.Dispose(); }
+                    try { } finally { Cleanup(); }
+                    return 2;
+                }
+            }
+            """);
+        HandlerOutcome Outcome(string type) => Assert.Single(snapshot.Catches, x => x.CaughtType?.DisplayName == type).Outcome;
+        Assert.Equal(HandlerOutcome.Rethrows, Outcome("System.InvalidOperationException"));
+        Assert.Equal(HandlerOutcome.Intercepts, Outcome("System.ArgumentException"));
+        Assert.Equal(HandlerOutcome.MayRethrow, Outcome("System.FormatException"));
+        Assert.Equal(HandlerOutcome.Rethrows, Outcome("System.TimeoutException"));
+        Assert.Equal(HandlerOutcome.Replaces, Outcome("System.NotSupportedException"));
+        Assert.Equal(HandlerOutcome.Intercepts, Outcome("System.Exception"));
+        // `throw e` of the catch variable is a rethrow, not a new origin; the replacement is the only explicit throw.
+        Assert.Equal("System.InvalidOperationException", Assert.Single(snapshot.ThrowSites, x => x.Kind == ThrowKind.Explicit).StaticExceptionType?.DisplayName);
+        var finallies = snapshot.ExceptionRegions.Where(x => x.Catches.IsEmpty).OrderBy(x => x.ProtectedBlock.SpanStart).ToArray();
+        Assert.Equal([false, true], finallies.Select(x => x.FinallyMayThrow));
     }
 }

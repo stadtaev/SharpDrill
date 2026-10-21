@@ -39,7 +39,7 @@ public sealed class CliContractTests
         var result = await Run("paths", "missing.slnx", option, value);
         Assert.Equal(2, result.Exit);
         Assert.NotEmpty(result.Error);
-        Assert.DoesNotContain("Analysis input not found", result.Error);
+        Assert.DoesNotContain("Input not found", result.Error);
     }
     [Theory]
     [InlineData("projects", "--root", "X()")]
@@ -59,22 +59,22 @@ public sealed class CliContractTests
     {
         var result = await Run([command, "missing.slnx", .. options]);
         Assert.Equal(2, result.Exit);
-        Assert.DoesNotContain("Analysis input not found", result.Error);
+        Assert.DoesNotContain("Input not found", result.Error);
     }
     [Fact]
     public async Task Traversal_limits_have_nonzero_status_and_visible_marker()
     {
         var result = await Run("paths", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--max-depth", "0");
         Assert.Equal(1, result.Exit);
-        Assert.Contains("[max depth]", result.Out);
-        Assert.Contains("depth", result.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("OrdersController.Get  (ends: --max-depth)\n", result.Out.ReplaceLineEndings("\n"));
+        Assert.Contains("1 path cut at --max-depth 0", result.Error);
     }
     [Fact]
     public async Task Paths_preserve_the_declared_binding_at_dispatch()
     {
         var result = await Run("paths", ResearchFixture.Input, "--root", "Research.Application.Service.Interface(Research.Infrastructure.IRepository)");
         Assert.Equal(1, result.Exit);
-        Assert.Contains(" --> Research.Infrastructure.IRepository.Read() [interface target]", result.Out);
+        Assert.Contains("Service.Interface -> [interface call Research.Infrastructure.IRepository.Read()]", result.Out);
     }
     [Theory]
     [InlineData("chains")]
@@ -113,7 +113,7 @@ public sealed class CliContractTests
     {
         var first = await Run("inspect", ResearchFixture.Input, "--json");
         var second = await Run("inspect", ResearchFixture.Input, "--json");
-        Assert.Equal(1, first.Exit); Assert.Equal(first.Out, second.Out);
+        Assert.Equal(0, first.Exit); Assert.Equal(first.Out, second.Out);
         using var saved = new MemoryStream(Encoding.UTF8.GetBytes(first.Out));
         var restored = await SnapshotJson.ReadAsync(saved);
         var index = new ProgramIndex(restored.Snapshot);
@@ -125,8 +125,8 @@ public sealed class CliContractTests
             .Single(x => x.GetProperty("displaySignature").GetString() == "Research.Api.OrdersController.Get()");
         var id = method.GetProperty("id").GetString()!;
         var result = await Run("paths", ResearchFixture.Input, "--root", id);
-        Assert.Equal(1, result.Exit);
-        Assert.Contains("OrdersController.Get() --> Research.Application.Service.Load()", result.Out);
+        Assert.Equal(0, result.Exit);
+        Assert.Contains("OrdersController.Get -> Service.Load", result.Out);
     }
     [Fact]
     public async Task Output_refuses_to_overwrite_an_input_file()
@@ -140,8 +140,9 @@ public sealed class CliContractTests
     public async Task Inspect_landscape_includes_catch_protected_regions_and_static_types()
     {
         var result = await Run("inspect", ResearchFixture.Input);
-        Assert.Equal(1, result.Exit);
+        Assert.Equal(0, result.Exit);
         Assert.Contains("Subsequent origin:", result.Out);
+        Assert.Contains("Gaps (code the analysis does not model):\n  [Unsupported] x1 Top-level statements", result.Out.ReplaceLineEndings("\n"));
         Assert.Contains("Protected region:", result.Out);
         Assert.Contains("Filter: enabled", result.Out);
         Assert.Contains("static; runtime type may differ", result.Out);
@@ -150,11 +151,12 @@ public sealed class CliContractTests
     public async Task Default_lists_every_throw_with_method_type_and_project()
     {
         var result = await Run("exceptions", ResearchFixture.Input);
-        Assert.Equal(1, result.Exit);
-        Assert.Contains("Throw: Research.Infrastructure.StorageException\n  At: Research.Infrastructure.Repository.Read() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure |", result.Out.Replace("\r\n", "\n"));
-        Assert.Contains("Throw: rethrow of the caught exception", result.Out);
-        Assert.Contains("Inside try in the same method: yes", result.Out);
-        Assert.Contains("Throws: ", result.Error);
+        Assert.Equal(0, result.Exit);
+        Assert.Contains("Research.Infrastructure.StorageException  Repository.Read  Research.Infrastructure/Repository.cs:6\n", result.Out.ReplaceLineEndings("\n"));
+        Assert.Contains("System.Exception (or a subclass)  Repository.StaticType", result.Out);
+        // Rethrows are not new exceptions.
+        Assert.DoesNotContain("rethrow", result.Out, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("5 throws in source.\n", result.Error.ReplaceLineEndings("\n"));
     }
     [Fact]
     public async Task Caught_reports_where_thrown_and_where_caught_with_the_handler_outcome()
@@ -166,8 +168,8 @@ public sealed class CliContractTests
         Assert.Contains("  Thrown:    Repository.Read  Research.Infrastructure", text);
         Assert.Contains("  Path:\n       OrdersController.", text);
         Assert.Contains("Handler:   rethrows it", text);
-        Assert.Contains("Handler:   throws a replacement", text);
-        Assert.Contains("filter decides at runtime", text);
+        Assert.Contains("Handler:   throws a different exception instead", text);
+        Assert.Contains("Handler:   handles it (only if the filter accepts it)", text);
         Assert.DoesNotContain("Service.Incompatible()", text);
     }
     [Fact]
@@ -180,7 +182,7 @@ public sealed class CliContractTests
         Assert.Contains("  Missed by: try in Service.Incompatible (catches only System.ArgumentException)  Research.Application", text);
         Assert.Contains("  Then:      may escape the controller action", text);
         Assert.Contains("    -> Service.Incompatible\n", text);
-        Assert.Contains("miscaught: 1;", result.Error);
+        Assert.Contains("12 actions analysed: 1 miscaught.", result.Error);
     }
     [Fact]
     public async Task Projects_print_the_reference_tree_with_build_settings()
@@ -188,9 +190,8 @@ public sealed class CliContractTests
         var result = await Run("projects", ResearchFixture.Input);
         Assert.Equal(0, result.Exit);
         var text = result.Out.Replace("\r\n", "\n");
-        Assert.Contains("Research.Api [net10.0 | Nullable: enable | Nullable warnings as errors: no | All warnings as errors: no | Compiler warnings: 0 | Errors: 0]\n└── Research.Application [", text);
-        Assert.Contains("\n    └── Research.Infrastructure [net10.0 | Nullable: enable | Nullable warnings as errors: yes |", text);
-        Assert.Contains("references: 2; unloaded references: 0", result.Error);
+        Assert.Equal("Research.Api [net10.0, nullable enable, 0 warnings]\n└── Research.Application [net10.0, nullable enable, 0 warnings]\n    └── Research.Infrastructure [net10.0, nullable enable, 0 warnings, nullable warnings are errors]\n", text);
+        Assert.Empty(result.Error);
         var path = Path.Combine(Path.GetTempPath(), $"sharpview-projects-{Guid.NewGuid():N}.md");
         try
         {
@@ -207,18 +208,15 @@ public sealed class CliContractTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Ownerless_exception_gaps_are_reported_once_as_global_caveats(bool summary)
+    public async Task Gaps_off_every_path_stay_out_of_exception_reports(bool summary)
     {
         var result = await Run(summary ? ["exceptions", ResearchFixture.Input, "--uncaught"] : ["exceptions", ResearchFixture.Input, "--caught"]);
+        // Exit 1 for the fixture's genuine stops (an interface without implementation, a task never awaited), not for Program.cs.
         Assert.Equal(1, result.Exit);
-        // Gaps are grouped by cause with a count and the first location.
-        var gap = Assert.Single(result.Error.Split('\n'), x => x.StartsWith("Gap [", StringComparison.Ordinal));
-        Assert.Contains("Top-level statements have no owning callable", gap);
-        Assert.Contains("Extraction gaps: 1 (1 kind)", result.Error);
-        Assert.Contains("global caveats: 1", result.Error);
-        Assert.DoesNotContain("Unknown [ExtractionGap]", result.Out);
-        Assert.DoesNotContain("Reason: Top-level statements", result.Out);
-        if (!summary) Assert.Contains("witnesses: 13; unknown: 5", result.Error);
+        Assert.DoesNotContain("Top-level", result.Error);
+        Assert.DoesNotContain("Top-level", result.Out);
+        Assert.Contains("Not followed: 1 interface or virtual call without a source implementation (e.g. Research.Application/Service.cs:12)", result.Error);
+        Assert.Contains("1 task that is never awaited (e.g. Research.Application/Service.cs:15)", result.Error);
     }
 
     [Fact]
@@ -226,10 +224,8 @@ public sealed class CliContractTests
     {
         var result = await Run("reach", ResearchFixture.Input, "--root", "Research.Application.Service.Interface(Research.Infrastructure.IRepository)", "--max-depth", "0");
         Assert.Equal(1, result.Exit);
-        Assert.Contains("Boundary: depth limit", result.Out);
-        Assert.DoesNotContain("Boundary: Interface", result.Out);
-        Assert.Contains("boundaries: 1", result.Error);
-        Assert.Contains("examined sites: 0", result.Error);
+        Assert.Equal("Service.Interface\n  Stops at: --max-depth in Service.Interface  Research.Application/Service.cs:12\n", result.Out.ReplaceLineEndings("\n"));
+        Assert.Contains("deeper than --max-depth 0", result.Error);
     }
 
     [Fact]
@@ -260,14 +256,11 @@ public sealed class CliContractTests
         const string action = "Research.Api.OrdersController.Interface(Research.Infrastructure.IRepository)";
         // The fixture's interface has no implementation in source, so following has nowhere to go and says so.
         var followed = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--root", action);
-        Assert.Contains("Interface dispatch: no source implementation found", followed.Out);
-        Assert.DoesNotContain("were not followed", followed.Error);
+        Assert.Contains("Not followed: 1 interface or virtual call without a source implementation", followed.Error);
         var declared = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--declared-only", "--root", action);
-        Assert.Contains("Unknown [DispatchBoundary]: Interface dispatch: runtime origins unknown.", declared.Out);
-        Assert.Contains("1 interface/virtual call sites were not followed (--declared-only)", declared.Error);
-        Assert.Contains("Rerun without --declared-only", declared.Error);
+        Assert.Contains("Not followed: 1 interface or virtual call not followed (--declared-only)", declared.Error);
         var caught = await Run("exceptions", ResearchFixture.Input, "--caught", "--declared-only", "--root", action);
-        Assert.Contains("1 interface/virtual call sites were not followed (--declared-only)", caught.Error);
+        Assert.Contains("1 interface or virtual call not followed (--declared-only)", caught.Error);
     }
     [Theory]
     [InlineData("--max-depth", "3")]

@@ -100,9 +100,17 @@ public sealed class CoreTests
             [Throw("Leaf"), next], [Handler("catch", "Middle", outcome, "next")], [Region("try", "Middle", "catch")]);
         var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
         var escape = Assert.Single(result.Roots[new CallableId("Action")].Escapes);
+        Assert.Equal(expectedType, escape.ExceptionType);
+        if (outcome == HandlerOutcome.Replaces)
+        {
+            // The replacement escapes as an origin of its own; the original ends at the handler.
+            Assert.Equal(new ThrowSiteId("next"), escape.Origin);
+            Assert.Null(escape.SubsequentOrigin);
+            Assert.Equal(ExceptionReason.MayEscape, escape.ReasonCode);
+            return;
+        }
         Assert.Equal(new ThrowSiteId("origin"), escape.Origin);
         Assert.Equal(new ThrowSiteId("next"), escape.SubsequentOrigin);
-        Assert.Equal(expectedType, escape.ExceptionType);
         Assert.Equal(ExceptionReason.ChangedMayEscape, escape.ReasonCode);
     }
 
@@ -128,7 +136,7 @@ public sealed class CoreTests
         var snapshot = Snapshot([Method("Action"), Method("Other")], [], [Throw("Action")]) with { Gaps = [gap] };
         var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action"), new("Other")], new(MaxWork: 1, MaxFacts: 1));
         Assert.Equal(gap, Assert.Single(result.GlobalGaps));
-        Assert.False(result.IsComplete);
+        Assert.True(result.IsComplete);
         Assert.False(result.WorkLimitReached); Assert.False(result.FactLimitReached);
         Assert.Single(result.Roots[new CallableId("Action")].Escapes);
         Assert.All(result.Roots.Values, root => { Assert.True(root.IsComplete); Assert.Empty(root.Unknowns); });
@@ -141,7 +149,7 @@ public sealed class CoreTests
         var snapshot = Snapshot([Method("Action"), Method("Other")], [], [Throw("Action"), Throw("Other", "other")]) with { Gaps = [gap] };
         var result = ExceptionQuery.Analyze(snapshot, [new("Action"), new("Other")], new());
         Assert.Equal(gap, Assert.Single(result.GlobalGaps));
-        Assert.False(result.IsComplete);
+        Assert.True(result.IsComplete);
         Assert.Equal(2, result.Results.Length);
         Assert.All(result.Results, x => Assert.NotEqual(ExceptionReason.ExtractionGap, x.ReasonCode));
         var limited = ExceptionQuery.Analyze(snapshot, [new("Action"), new("Other")], new(MaxResults: 1));
@@ -191,16 +199,16 @@ public sealed class CoreTests
     }
 
     [Theory]
-    [InlineData(false, true, ExceptionReason.CatchFilter)]
-    [InlineData(true, false, ExceptionReason.FinallyUnsupported)]
-    public void Exception_summary_marks_filter_and_finally_boundaries_unknown(bool hasFinally, bool hasFilter, ExceptionReason expected)
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void Exception_summary_follows_filters_past_and_stops_at_a_finally_that_may_throw(bool finallyMayThrow, bool hasFilter)
     {
-        var region = Region("try", "Action", "catch") with { HasFinally = hasFinally };
+        var region = Region("try", "Action", "catch") with { FinallyMayThrow = finallyMayThrow };
         var handler = Handler("catch", "Action", HandlerOutcome.Intercepts, filter: hasFilter ? "condition" : null);
         var snapshot = Snapshot([Method("Action")], [], [Throw("Action", regions: ["try"])], [handler], [region]);
         var summary = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]).Roots[new CallableId("Action")];
-        Assert.Empty(summary.Escapes);
-        Assert.Contains(summary.Unknowns, x => x.ReasonCode == expected && x.Origin == new ThrowSiteId("origin"));
+        if (hasFilter) { Assert.Single(summary.Escapes); Assert.Empty(summary.Unknowns); }
+        else { Assert.Empty(summary.Escapes); Assert.Contains(summary.Unknowns, x => x.ReasonCode == ExceptionReason.FinallyUnsupported && x.Origin == new ThrowSiteId("origin")); }
     }
 
     [Fact]
@@ -431,6 +439,13 @@ public sealed class CoreTests
             [Throw("Leaf"), next], [Handler("inner", "Middle", outcome, "next"), Handler("outer", "Action", HandlerOutcome.Intercepts)],
             [Region("inner-region", "Middle", "inner"), Region("outer-region", "Action", "outer")]);
         var witness = AnalyzeOrigin(snapshot);
+        if (outcome == HandlerOutcome.Replaces)
+        {
+            // The original ends at the replacing handler; the replacement is an origin of its own.
+            Assert.Equal(ExceptionStatus.Intercepted, witness.Status);
+            Assert.Equal(new[] { new CatchId("inner") }, witness.HandlerIds);
+            return;
+        }
         Assert.Equal(ExceptionStatus.RethrownOrReplaced, witness.Status);
         Assert.Equal(ExceptionStatus.Intercepted, witness.SubsequentStatus);
         Assert.Equal(new ThrowSiteId("next"), witness.SubsequentOrigin);
@@ -447,9 +462,8 @@ public sealed class CoreTests
             [Region("inner-region", "Middle", "inner"), Region("outer-region", "Action", "outer")]);
         var witness = AnalyzeOrigin(snapshot);
         Assert.Equal(ExceptionStatus.RethrownOrReplaced, witness.Status);
-        Assert.Equal(ExceptionStatus.Unknown, witness.SubsequentStatus);
-        Assert.Contains("filter", witness.Reason);
-        Assert.Equal(ExceptionReason.CatchFilter, witness.ReasonCode);
+        Assert.Equal(ExceptionStatus.MayEscape, witness.SubsequentStatus);
+        Assert.Equal(new[] { new CatchId("outer") }, witness.PossibleHandlers);
     }
 
     [Fact]
@@ -460,20 +474,18 @@ public sealed class CoreTests
         var witness = AnalyzeOrigin(snapshot);
         Assert.Equal(ExceptionStatus.Unknown, witness.Status);
         Assert.Equal(new[] { new CatchId("catch") }, witness.HandlerIds);
-        Assert.Contains("matching", witness.Reason);
-        Assert.Equal(ExceptionReason.HandlerTypeUncertain, witness.ReasonCode);
+        Assert.Equal(new[] { new CatchId("catch") }, witness.PossibleHandlers);
+        Assert.Equal(ExceptionReason.UnboundExceptionType, witness.ReasonCode);
     }
 
     [Fact]
-    public void Handler_origin_is_retained_with_scoped_uncertainty()
+    public void Origin_inside_a_handler_propagates_like_any_other_throw()
     {
         var snapshot = Snapshot([Method("Action")], [], [Throw("Action") with { CatchId = new CatchId("catch") }],
             [Handler("catch", "Action", HandlerOutcome.Unknown)]);
         var witness = AnalyzeOrigin(snapshot);
-        Assert.Equal(ExceptionStatus.Unknown, witness.Status);
+        Assert.Equal(ExceptionStatus.MayEscape, witness.Status);
         Assert.Equal(new ThrowSiteId("origin"), witness.Origin);
-        Assert.Contains("inside a handler", witness.Reason);
-        Assert.Equal(ExceptionReason.OriginInHandler, witness.ReasonCode);
     }
 
     [Theory]
@@ -497,7 +509,7 @@ public sealed class CoreTests
 
     [Theory]
     [InlineData(true, ExceptionStatus.MayEscape)]
-    [InlineData(false, ExceptionStatus.Unknown)]
+    [InlineData(false, ExceptionStatus.MayEscape)]
     public void Exact_and_base_typed_origins_have_distinct_narrow_handler_matching(bool exact, ExceptionStatus expected)
     {
         var snapshot = Snapshot([Method("Action")], [], [Throw("Action", regions: ["try"]) with { IsExactType = exact }],
@@ -521,7 +533,9 @@ public sealed class CoreTests
     {
         var snapshot = Snapshot([Method("Action")], [], [Throw("Action", type: Type("UnindexedException"), regions: ["try"])],
             [Handler("catch", "Action", HandlerOutcome.Intercepts, caught: Type("OtherException"))], [Region("try", "Action", "catch")]);
-        Assert.Equal(ExceptionStatus.Unknown, AnalyzeOrigin(snapshot).Status);
+        var witness = AnalyzeOrigin(snapshot);
+        Assert.Equal(ExceptionStatus.MayEscape, witness.Status);
+        Assert.Equal(new[] { new CatchId("catch") }, witness.PossibleHandlers);
     }
 
     [Fact]
@@ -553,14 +567,16 @@ public sealed class CoreTests
         var caught = thrown with { DisplayName = "GenericException<string>", Components = [Type("string")] };
         var snapshot = Snapshot([Method("Action")], [], [Throw("Action", type: thrown, regions: ["try"])],
             [Handler("catch", "Action", HandlerOutcome.Intercepts, caught: caught)], [Region("try", "Action", "catch")]);
-        Assert.Equal(ExceptionStatus.Unknown, AnalyzeOrigin(snapshot).Status);
+        var witness = AnalyzeOrigin(snapshot);
+        Assert.Equal(ExceptionStatus.MayEscape, witness.Status);
+        Assert.Empty(witness.HandlerIds);
     }
 
     [Fact]
     public void Finally_blocks_prevent_claiming_successful_interception()
     {
         var snapshot = Snapshot([Method("Action")], [], [Throw("Action", regions: ["try"])],
-            [Handler("catch", "Action", HandlerOutcome.Intercepts)], [Region("try", "Action", "catch") with { HasFinally = true }]);
+            [Handler("catch", "Action", HandlerOutcome.Intercepts)], [Region("try", "Action", "catch") with { FinallyMayThrow = true }]);
         var witness = AnalyzeOrigin(snapshot);
         Assert.Equal(ExceptionStatus.Unknown, witness.Status);
         Assert.Contains("Finally", witness.Reason);

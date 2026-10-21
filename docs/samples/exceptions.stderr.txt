@@ -1,3 +1,1 @@
-Throws: 7 (explicit: 5; rethrows: 2). Implicit exceptions (null dereference, framework calls) are not listed.
-Gap [Unsupported] x6: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (first at /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:2:1)
-Extraction gaps: 6 (1 kind). Coverage: explicit origins/direct calls; minimal APIs and inherited actions outside scope.
+5 throws in source.

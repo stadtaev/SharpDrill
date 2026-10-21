@@ -44,14 +44,19 @@ internal sealed class ExceptionsCommand : ReportCommand
         });
     }
 
+    // One line per explicit throw; rethrows are not new exceptions.
     private static bool Throws(ReportContext context, CancellationToken token)
     {
-        var index = context.Index;
-        var throws = context.Snapshot.ThrowSites
+        var (index, display) = (context.Index, context.Display);
+        var throws = context.Snapshot.ThrowSites.Where(x => x.Kind == ThrowKind.Explicit)
             .OrderBy(x => index.ProjectName(index.Callable(x.Owner).Compilation), StringComparer.Ordinal)
             .ThenBy(x => x.Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence.SpanStart).ToArray();
-        foreach (var origin in throws) { token.ThrowIfCancellationRequested(); WriteThrow(context, origin); }
-        Console.Error.WriteLine($"Throws: {throws.Length} (explicit: {throws.Count(x => x.Kind == ThrowKind.Explicit)}; rethrows: {throws.Count(x => x.Kind == ThrowKind.Rethrow)}). Implicit exceptions (null dereference, framework calls) are not listed.");
+        foreach (var origin in throws)
+        {
+            token.ThrowIfCancellationRequested();
+            context.Output.WriteLine($"{Thrown(origin)}  {display.Short(origin.Owner)}  {display.Where(origin.Evidence)}");
+        }
+        Console.Error.WriteLine($"{Display.Plural(throws.Length, "throw")} in source.");
         return false;
     }
 
@@ -60,7 +65,6 @@ internal sealed class ExceptionsCommand : ReportCommand
         var (arguments, display) = (context.Arguments, context.Display);
         var result = ExceptionQuery.Analyze(context.Index, roots, PathQuery(arguments), token);
         var count = 0;
-        var hidden = 0;
         // A path that reaches a fake or test class only through an assumed implementation is a guess about what DI picks.
         bool Hidden(ThrowSiteFact origin, ExceptionWitness witness) =>
             witness.ViaCandidate && (display.IsTestDouble(origin.Owner) || witness.Path.Any(display.IsTestDouble));
@@ -68,101 +72,93 @@ internal sealed class ExceptionsCommand : ReportCommand
             foreach (var item in ExceptionHandlingQuery.Caught(result))
             {
                 token.ThrowIfCancellationRequested();
-                if (Hidden(context.Index.ThrowSite(item.Origin), item.Example)) { hidden++; continue; }
+                if (Hidden(context.Index.ThrowSite(item.Origin), item.Example)) continue;
                 WriteCaught(context, item); count++;
             }
         else
             foreach (var item in ExceptionHandlingQuery.Miscaught(result))
             {
                 token.ThrowIfCancellationRequested();
-                if (Hidden(context.Index.ThrowSite(item.Origin), item.Example)) { hidden++; continue; }
+                if (Hidden(context.Index.ThrowSite(item.Origin), item.Example)) continue;
                 WriteMiscaught(context, item); count++;
             }
-        if (hidden > 0)
-            Console.Error.WriteLine($"Hidden: {hidden} finding{(hidden == 1 ? "" : "s")} that reach fakes, mocks or test code only through an assumed implementation.");
-        var unknown = result.Results.Count(x => (x.SubsequentStatus ?? x.Status) == ExceptionStatus.Unknown);
-        Console.Error.WriteLine($"Action roots: {roots.Length}; {(caught ? "caught" : "miscaught")}: {count}; witnesses: {result.Results.Length}; unknown: {unknown}; library methods called: {result.LibraryCalls.Length}; examined sites: {result.ExpandedSites}; depth limit: {result.DepthLimitReached}; output limit: {result.OutputLimitReached}; work limit: {result.WorkLimitReached}; global caveats: {result.GlobalGaps.Length}.");
-        if (result.OutputLimitReached)
-            Console.Error.WriteLine($"Stopped after {PathQuery(arguments).MaxResults} origin witnesses: the list above is incomplete. Raise --budget to see more.");
-        if (result.UnknownLimitReached)
-            Console.Error.WriteLine("Some uncertainty witnesses were dropped (limit reached); they do not affect the origins listed above.");
-        var unfollowed = result.Results.Where(x => x.ReasonCode == ExceptionReason.DispatchBoundary && x.Reason.Contains("declared binding only", StringComparison.Ordinal))
-            .Select(x => x.Evidence.FirstOrDefault() is { } e ? $"{e.Path}:{e.SpanStart}" : "").Distinct().Count();
-        if (unfollowed > 0)
-            Console.Error.WriteLine($"{unfollowed} interface/virtual call sites were not followed (--declared-only), so exceptions thrown behind them are not listed. Rerun without --declared-only to continue through their source implementations.");
+        Console.Error.WriteLine($"{Display.Plural(roots.Length, "action")} analysed: {count} {(caught ? "caught" : "miscaught")}.");
+        WriteNotFollowed(context, result.Results.Where(x => (x.SubsequentStatus ?? x.Status) == ExceptionStatus.Unknown)
+            .Select(x => (x.ReasonCode, x.Evidence.LastOrDefault())));
+        if (result.WorkLimitReached || result.OutputLimitReached || result.DepthLimitReached) WriteLimit(arguments);
         return !result.IsComplete;
     }
 
+    // One block per exception that may leave an action: the throw (and the rethrow it passed through), the actions it
+    // escapes from, and one example path. The same throw escaping many actions is listed once.
     private static bool Uncaught(ReportContext context, ImmutableArray<CallableId> roots, CancellationToken token)
     {
-        var (index, arguments, output, display) = (context.Index, context.Arguments, context.Output, context.Display);
-        var summaries = ExceptionSummaryQuery.Analyze(index, roots, SummaryQuery(arguments), token);
-        var unfollowed = new HashSet<CallSiteId>();
-        var library = new HashSet<CallableId>();
-        foreach (var root in roots.OrderBy(x => index.Callable(x).DisplaySignature, StringComparer.Ordinal).ThenBy(x => x.Value, StringComparer.Ordinal))
+        var (index, display, output) = (context.Index, context.Display, context.Output);
+        var summaries = ExceptionSummaryQuery.Analyze(index, roots, SummaryQuery(context.Arguments), token);
+        var escapes = roots.OrderBy(x => index.Callable(x).DisplaySignature, StringComparer.Ordinal).ThenBy(x => x.Value, StringComparer.Ordinal)
+            .SelectMany(root => summaries.Roots[root].Escapes.Select(escape => (Root: root, Escape: escape)))
+            .Where(x => x.Escape.ExceptionType is not null)
+            .GroupBy(x => (x.Escape.Origin, x.Escape.SubsequentOrigin, x.Escape.ExceptionType))
+            .OrderBy(x => index.ThrowSite(x.Key.Origin).Evidence.Path, StringComparer.Ordinal).ThenBy(x => index.ThrowSite(x.Key.Origin).Evidence.SpanStart)
+            .ThenBy(x => x.Key.SubsequentOrigin?.Value, StringComparer.Ordinal).ToArray();
+        foreach (var group in escapes)
         {
             token.ThrowIfCancellationRequested();
-            var summary = summaries.Roots[root];
-            var lines = new List<string>();
-            foreach (var uncertainty in summary.Unknowns)
-            {
-                lines.Add($"  Unknown [{uncertainty.ReasonCode}]: {uncertainty.Message}" + (uncertainty switch
-                {
-                    { Site: { } site } => $" | {Display.Location(index.CallSite(site).Evidence)}",
-                    { Evidence: { } evidence } => $" | {Display.Location(evidence)}",
-                    _ => "",
-                }));
-                if (uncertainty is { ReasonCode: ExceptionReason.DispatchBoundary, Site: { } dispatchSite } && arguments.DeclaredOnly) unfollowed.Add(dispatchSite);
-            }
-            // The same site can be reached several ways; identical lines are shown once with a count.
-            var grouped = lines.GroupBy(x => x).Select(x => (Line: x.Key, Count: x.Count())).ToArray();
-            output.WriteLine($"Exception summary: {display.Name(root)}");
-            output.WriteLine($"  Explicit escapes: {summary.Escapes.Length}; unknown effects: {grouped.Length}; local summary complete within model: {summary.IsComplete}.");
-            foreach (var escape in summary.Escapes)
-            {
-                output.WriteLine($"  May escape: {escape.ExceptionType ?? "unknown type"} | origin: {escape.Origin.Value} | {escape.ReasonCode}{(escape.ViaCandidate ? " | via an implementation candidate (possible, not proven)" : "")}");
-                var witness = summaries.GetWitness(root, escape);
-                output.WriteLine($"    Path: {PathText(context, witness.Path, witness.Sites)}");
-                if (index.TryGetThrowSite(escape.Origin, out var origin)) output.WriteLine($"    Origin evidence: {Display.Location(origin.Evidence)}");
-                if (escape.SubsequentOrigin is { } subsequent && index.TryGetThrowSite(subsequent, out var replacement))
-                    output.WriteLine($"    Subsequent origin: {subsequent.Value} | {Display.Location(replacement.Evidence)}");
-                if (arguments.Locations) foreach (var site in witness.Sites) output.WriteLine($"    Call-site evidence: {Display.Location(index.CallSite(site).Evidence)}");
-            }
-            foreach (var (line, count) in grouped) output.WriteLine(count > 1 ? $"{line} (x{count})" : line);
-            var libraryCalls = summaries.LibraryCallsFrom(root);
-            library.UnionWith(libraryCalls);
-            if (libraryCalls.Length > 0)
-            {
-                var names = libraryCalls.Select(display.Name).OrderBy(x => x, StringComparer.Ordinal).ToArray();
-                output.WriteLine($"  Library calls not analysed: {names.Length} method{(names.Length == 1 ? "" : "s")} (e.g. {string.Join(", ", names.Take(3))}{(names.Length > 3 ? ", ..." : "")}); exceptions they may throw are not modelled.");
-            }
-            foreach (var boundary in context.Snapshot.BoundaryHandling.Where(x => x.Compilation == index.Callable(root).Compilation))
-                output.WriteLine($"  Boundary registration evidence (runtime coverage unknown): {boundary.Registration} | {Display.Location(boundary.Evidence)}");
+            var actions = group.Select(x => x.Root).Distinct().ToArray();
+            // A proven path makes the better example than one through an assumed implementation.
+            var example = group.OrderBy(x => x.Escape.ViaCandidate).First();
+            output.WriteLine($"Uncaught: {group.Key.ExceptionType}");
+            WriteOrigin(context, "Thrown", index.ThrowSite(group.Key.Origin));
+            if (group.Key.SubsequentOrigin is { } rethrow && index.TryGetThrowSite(rethrow, out var site)) WriteOrigin(context, "Rethrown", site);
+            output.WriteLine($"  Escapes:   {string.Join(", ", actions.Take(3).Select(display.Short))}{(actions.Length > 3 ? $" and {actions.Length - 3} more" : "")}");
+            var witness = summaries.GetWitness(example.Root, example.Escape);
+            WritePath(context, witness.Path, witness.Sites, example.Escape.ViaCandidate, []);
         }
-        Console.Error.WriteLine($"Summary roots: {summaries.Roots.Count}; methods: {summaries.Methods.Count}; facts: {summaries.FactsAdded}; transfer work: {summaries.WorkItemsProcessed}; work limit: {summaries.WorkLimitReached}; fact limit: {summaries.FactLimitReached}; library methods called: {library.Count}; global caveats: {summaries.GlobalGaps.Length}.");
-        if (unfollowed.Count > 0)
-            Console.Error.WriteLine($"{unfollowed.Count} interface/virtual call sites were not followed (--declared-only), so exceptions thrown behind them are not listed. Rerun without --declared-only to continue through their source implementations.");
+        Console.Error.WriteLine($"{Display.Plural(roots.Length, "action")} analysed: {Display.Plural(escapes.Length, "uncaught exception")}.");
+        var boundary = context.Snapshot.BoundaryHandling.FirstOrDefault();
+        if (escapes.Length > 0 && boundary is not null)
+            Console.Error.WriteLine($"Uncaught means no catch on the way from the action; {boundary.Registration} ({display.Where(boundary.Evidence)}) still handles them at runtime.");
+        WriteNotFollowed(context, roots.SelectMany(x => summaries.Roots[x].Unknowns)
+            .Where(x => x.ReasonCode is not (ExceptionReason.WorkLimit or ExceptionReason.FactLimit))
+            .Select(x => (x.ReasonCode, x.Site is { } s ? index.CallSite(s).Evidence : x.Evidence)));
+        if (summaries.WorkLimitReached || summaries.FactLimitReached) WriteLimit(context.Arguments);
         return !summaries.IsComplete;
     }
 
-    // The path from the action to the origin; steps through an implementation candidate are marked.
-    private static string PathText(ReportContext context, ImmutableArray<CallableId> path, ImmutableArray<CallSiteId> sites)
+    // Where the analysis could not follow an exception, grouped by cause, one line in all.
+    private static void WriteNotFollowed(ReportContext context, IEnumerable<(ExceptionReason Reason, SourceEvidence? Evidence)> unknowns)
     {
-        var text = context.Display.Short(path[0]);
-        for (var i = 1; i < path.Length; i++)
-        {
-            var candidate = i - 1 < sites.Length && context.Index.CallSite(sites[i - 1]).Dispatch != DispatchKind.Direct;
-            text += (candidate ? " -[candidate]-> " : " --> ") + context.Display.Short(path[i]);
-        }
-        return text;
+        // Under --declared-only an interface call stops by request, not for lack of an implementation.
+        (string One, string Many)? Label(ExceptionReason reason) => reason == ExceptionReason.DispatchBoundary && context.Arguments.DeclaredOnly
+            ? ("interface or virtual call not followed (--declared-only)", "interface or virtual calls not followed (--declared-only)") : Cause(reason);
+        var groups = unknowns.Where(x => Label(x.Reason) is not null)
+            .GroupBy(x => x.Reason)
+            .Select(g => (Reason: g.Key, Places: g.Select(x => x.Evidence).DistinctBy(x => x is null ? "" : $"{x.Path}:{x.SpanStart}").ToArray()))
+            .OrderByDescending(x => x.Places.Length).ThenBy(x => x.Reason).ToArray();
+        if (groups.Length == 0) return;
+        Console.Error.WriteLine("Not followed: " + string.Join("; ", groups.Select(g =>
+            $"{Display.Plural(g.Places.Length, Label(g.Reason)!.Value.One, Label(g.Reason)!.Value.Many)}"
+            + (g.Places.OrderBy(x => x?.Path, StringComparer.Ordinal).ThenBy(x => x?.SpanStart).FirstOrDefault() is { } first ? $" (e.g. {context.Display.Where(first)})" : ""))) + ".");
     }
 
-    private static void WriteThrow(ReportContext context, ThrowSiteFact origin)
+    // Plain-words causes; limits are reported separately and the rest cannot occur after the handler rules above.
+    private static (string One, string Many)? Cause(ExceptionReason reason) => reason switch
     {
-        context.Output.WriteLine($"Throw: {Thrown(origin)}");
-        context.Output.WriteLine($"  At: {context.Display.Name(origin.Owner)} | Type: {context.Display.TypeOf(origin.Owner)} | Project: {context.Display.Project(origin.Owner)} | {Display.Location(origin.Evidence)}");
-        context.Output.WriteLine($"  Inside try in the same method: {(origin.ProtectedRegions.IsEmpty ? "no" : "yes")}");
-    }
+        ExceptionReason.UnobservedTask => ("task that is never awaited", "tasks that are never awaited"),
+        ExceptionReason.AsyncUnsupported => ("async void method", "async void methods"),
+        ExceptionReason.FinallyUnsupported => ("finally block that may throw", "finally blocks that may throw"),
+        ExceptionReason.MissingBody => ("method without a body", "methods without a body"),
+        ExceptionReason.DispatchBoundary => ("interface or virtual call without a source implementation", "interface or virtual calls without a source implementation"),
+        ExceptionReason.UnresolvedTarget => ("call that does not compile", "calls that do not compile"),
+        ExceptionReason.Cycle => ("recursive call", "recursive calls"),
+        ExceptionReason.UnboundExceptionType => ("exception whose type does not compile", "exceptions whose type does not compile"),
+        ExceptionReason.ExtractionGap => ("construct SharpView does not analyse", "constructs SharpView does not analyse"),
+        ExceptionReason.HandlerFlowUnsupported => ("catch block with unclear flow", "catch blocks with unclear flow"),
+        _ => null,
+    };
+
+    private static void WriteLimit(Arguments arguments) =>
+        Console.Error.WriteLine($"Stopped early: the analysis budget ran out, so the list above is incomplete. Rerun with --budget {arguments.Budget * 10}.");
 
     private static void WriteCaught(ReportContext context, CaughtException caught)
     {
@@ -171,13 +167,8 @@ internal sealed class ExceptionsCommand : ReportCommand
         var handler = index.Catch(caught.Catch);
         output.WriteLine($"Caught: {Thrown(origin)}");
         WriteOrigin(context, "Thrown", origin);
-        output.WriteLine($"  Caught by: catch ({handler.CaughtType?.DisplayName ?? "all exceptions"}){(handler.Filter is null ? "" : " when (...)")} in {display.Short(handler.Owner)}  {Where(context, handler.Evidence)}");
-        output.WriteLine($"  Handler:   {Outcome(handler.Outcome)}{caught.Certainty switch
-        {
-            CatchCertainty.TypeUncertain => " | match uncertain: the runtime type may not be caught",
-            CatchCertainty.Filtered => " | filter decides at runtime",
-            _ => "",
-        }}");
+        output.WriteLine($"  Caught by: catch ({handler.CaughtType?.DisplayName ?? "all exceptions"}){(handler.Filter is null ? "" : " when (...)")} in {display.Short(handler.Owner)}  {display.Where(handler.Evidence)}");
+        output.WriteLine($"  Handler:   {Outcome(handler.Outcome)}{(caught.Certainty == CatchCertainty.Possible ? handler.Filter is null ? " (only if the runtime type matches)" : " (only if the filter accepts it)" : "")}");
         WriteExample(context, caught.Example);
     }
 
@@ -189,55 +180,52 @@ internal sealed class ExceptionsCommand : ReportCommand
         var clauses = region.Catches.Select(x => index.Catch(x).CaughtType?.DisplayName ?? "all exceptions");
         output.WriteLine($"Miscaught: {miscaught.Missed.ExceptionType ?? Thrown(origin)}");
         WriteOrigin(context, "Thrown", origin);
-        output.WriteLine($"  Missed by: try in {display.Short(region.Owner)} (catches only {string.Join(", ", clauses)})  {Where(context, region.ProtectedBlock)}");
-        output.WriteLine($"  Then:      {string.Join("; ", miscaught.Outcomes.Select(Fate))}");
+        output.WriteLine($"  Missed by: try in {display.Short(region.Owner)} (catches only {string.Join(", ", clauses)})  {display.Where(region.ProtectedBlock)}");
+        output.WriteLine($"  Then:      {string.Join("; ", miscaught.Outcomes.Select(x => Fate(context, x, miscaught.Undetermined)))}");
         WriteExample(context, miscaught.Example);
     }
 
     private static void WriteOrigin(ReportContext context, string label, ThrowSiteFact origin) =>
-        context.Output.WriteLine($"  {label + ":",-10} {context.Display.Short(origin.Owner)}  {Where(context, origin.Evidence)}");
+        context.Output.WriteLine($"  {label + ":",-10} {context.Display.Short(origin.Owner)}  {context.Display.Where(origin.Evidence)}");
 
-    // Source location relative to the analysed solution or project, so lines stay short.
-    private static string Where(ReportContext context, SourceEvidence evidence)
-    {
-        var root = Path.GetDirectoryName(Path.GetFullPath(context.Arguments.Input)) ?? "";
-        var relative = Path.GetRelativePath(root, evidence.Path);
-        return $"{(relative.StartsWith("..", StringComparison.Ordinal) ? evidence.Path : relative)}:{evidence.StartLine}";
-    }
+    private static void WriteExample(ReportContext context, ExceptionWitness witness) =>
+        WritePath(context, witness.Path, witness.Sites, witness.ViaCandidate, witness.Evidence);
 
     // One call per line, from the action down to the throw. A step through an interface/virtual call assumes which
     // implementation runs, so a path with such a step is possible, not proven.
-    private static void WriteExample(ReportContext context, ExceptionWitness witness)
+    private static void WritePath(ReportContext context, ImmutableArray<CallableId> path, ImmutableArray<CallSiteId> sites, bool assumed, ImmutableArray<SourceEvidence> evidence)
     {
         var (index, display, output) = (context.Index, context.Display, context.Output);
-        output.WriteLine(witness.ViaCandidate ? "  Path (possible, not proven):" : "  Path:");
-        for (var i = 0; i < witness.Path.Length; i++)
+        output.WriteLine(assumed ? "  Path (possible, not proven):" : "  Path:");
+        for (var i = 0; i < path.Length; i++)
         {
-            var candidate = i > 0 && i - 1 < witness.Sites.Length && index.CallSite(witness.Sites[i - 1]).Dispatch != DispatchKind.Direct;
-            output.WriteLine($"    {(i == 0 ? "  " : "->")} {display.Short(witness.Path[i])}{(candidate ? "  (assumed implementation)" : "")}");
+            var candidate = i > 0 && i - 1 < sites.Length && index.CallSite(sites[i - 1]).Dispatch != DispatchKind.Direct;
+            output.WriteLine($"    {(i == 0 ? "  " : "->")} {display.Short(path[i])}{(candidate ? "  (assumed implementation)" : "")}");
         }
-        if (context.Arguments.Locations) foreach (var evidence in witness.Evidence) output.WriteLine($"    Evidence: {Display.Location(evidence)}");
+        if (!context.Arguments.Locations) return;
+        foreach (var item in evidence.IsEmpty ? sites.Select(x => index.CallSite(x).Evidence) : evidence) output.WriteLine($"    at {display.Where(item)}");
     }
 
-    private static string Thrown(ThrowSiteFact origin) => origin.Kind == ThrowKind.Rethrow ? "rethrow of the caught exception"
-        : (origin.ExactExceptionType ?? origin.StaticExceptionType)?.DisplayName is { } type
-            ? type + (origin.IsExactType || origin.ExactExceptionType is not null ? "" : " (static type; runtime type may differ)")
-            : "unknown type";
+    private static string Thrown(ThrowSiteFact origin) => (origin.ExactExceptionType ?? origin.StaticExceptionType)?.DisplayName is { } type
+        ? type + (origin.IsExactType || origin.ExactExceptionType is not null ? "" : " (or a subclass)")
+        : "exception of unknown type";
 
     private static string Outcome(HandlerOutcome outcome) => outcome switch
     {
-        HandlerOutcome.Intercepts => "handles it (recovery not proven)",
+        HandlerOutcome.Intercepts => "handles it",
         HandlerOutcome.Rethrows => "rethrows it",
-        HandlerOutcome.Replaces => "throws a replacement",
-        _ => "unsupported handler flow; outcome unknown",
+        HandlerOutcome.MayRethrow => "handles it in some cases, rethrows it in others",
+        HandlerOutcome.Replaces => "throws a different exception instead",
+        _ => "outcome not determined",
     };
 
     // What happens to a miscaught exception after the try it slipped through.
-    private static string Fate(ExceptionStatus status) => status switch
+    private static string Fate(ReportContext context, ExceptionStatus status, ExceptionWitness? undetermined) => status switch
     {
         ExceptionStatus.Intercepted => "caught further up",
-        ExceptionStatus.RethrownOrReplaced => "rethrown or replaced further up",
+        ExceptionStatus.RethrownOrReplaced => "rethrown further up",
         ExceptionStatus.MayEscape => "may escape the controller action",
-        _ => "not determined",
+        _ => "not determined" + (undetermined is not null && Cause(undetermined.ReasonCode) is { } cause
+            ? $": {cause.One}" + (undetermined.Evidence.LastOrDefault() is { } at ? $" at {context.Display.Where(at)}" : "") : ""),
     };
 }

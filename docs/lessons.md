@@ -121,8 +121,9 @@ After the changes the command has one limit, `--budget`, which scales the others
 
 ## Open items
 
-- **Exit code policy.** Real projects always exit 1 because of global caveats. Proposal: exit 0 unless the run failed or `--strict` is given.
-- **Initializer ownership.** Field and property initializers (`= Guid.NewGuid()`, `= new List<T>()`) belong to no callable, so calls and throws inside them are invisible. Attributing them to the constructors that run them removes most of the 420 global caveats.
-- **Iterators and `async`.** `yield return` bodies run inside a generated `MoveNext`; awaited implicit calls (`await foreach`, `await using`) are still gaps.
+- **Iterators.** `yield return` bodies run inside a generated `MoveNext`, when the caller enumerates; they are still a gap.
+- **Library exceptions.** Library calls end the trace, so a `catch (JsonException)` around `JsonSerializer.Deserialize` has nothing to explain it. The `<exception cref>` tags in the referenced assemblies' XML docs could supply those origins.
+
+Resolved since the first run: global caveats no longer set exit 1 (only gaps that affect a result do); initializers are attributed to the constructors that run them; `await foreach`/`await using` and awaited locals are modelled; handler outcomes come from control flow, filters are possible catches and a `finally` matters only when it can throw.
 - **A realistic fixture.** A second sample solution with DI, records, a `Result<T>`, a base controller and disposables, so the real-code shape is under test.
 - **One call-site resolution helper** shared by the detailed and summary engines.

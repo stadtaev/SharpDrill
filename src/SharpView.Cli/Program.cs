@@ -1,4 +1,5 @@
 using SharpView.Cli;
+using SharpView.Core;
 using SharpView.Roslyn;
 
 return await EntryPoint.RunAsync(args);
@@ -24,7 +25,13 @@ internal static class EntryPoint
             return await Commands.RunAsync(arguments, cancellation.Token);
         }
         catch (OperationCanceledException) { Console.Error.WriteLine("Analysis cancelled."); return 130; }
-        catch (Exception e) { Console.Error.WriteLine($"SharpView: {e.Message}"); return 2; }
+        // A wrong request or an input that cannot be analysed: the message says what to do.
+        catch (Exception e) when (e is ArgumentException or AnalysisInputException or FileNotFoundException or IOException) { Console.Error.WriteLine($"SharpView: {e.Message}"); return 2; }
+        catch (Exception e)
+        {
+            BugReport.Write("The analysis stopped.", [$"command: {string.Join(' ', args.Take(1).Concat(args.Skip(2)))}", .. e.ToString().Split('\n').Select(x => x.TrimEnd())]);
+            return 2;
+        }
         finally { Console.CancelKeyPress -= handler; }
     }
 }

@@ -1,3 +1,2 @@
-Action roots: 12; caught: 7; witnesses: 13; unknown: 5; library methods called: 2; examined sites: 38; depth limit: False; output limit: False; work limit: False; global caveats: 6.
-Gap [Unsupported] x6: Top-level/initializer callable ownership is outside scope; boundary registrations are extracted separately. (first at /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:2:1)
-Extraction gaps: 6 (1 kind). Coverage: explicit origins/direct calls; minimal APIs and inherited actions outside scope.
+12 actions analysed: 7 caught.
+Not followed: 1 interface or virtual call without a source implementation (e.g. Research.Application/Service.cs:12); 1 recursive call (e.g. Research.Application/Service.cs:13); 1 task that is never awaited (e.g. Research.Application/Service.cs:15).

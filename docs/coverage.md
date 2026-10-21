@@ -28,28 +28,33 @@ Recognised by convention, classified in Core from extracted facts:
 | Supported (followed) | Boundary (recorded, not followed) | Gap (not modelled, listed) |
 | --- | --- | --- |
 | Normal invocations, explicit construction, source constructors | Interface and virtual calls, including virtual members with bodies (an explicit root may still inspect its own body) | Top-level statements (one gap per file) |
-| Property/event accessors, user-defined operators and conversions | Delegates, `dynamic`, function pointers, invalid operations | Field/property initialisers that run source code or throw |
-| Reduced extension methods; local functions and lambdas as separately owned bodies | Metadata-only (library) bodies | Iterator bodies (one gap per iterator), `await foreach`/`await using` |
+| Property/event accessors, user-defined operators and conversions | Delegates, `dynamic`, function pointers, invalid operations | Iterator bodies (one gap per iterator) |
+| Reduced extension methods; local functions and lambdas as separately owned bodies | Metadata-only (library) bodies | `await` of a task held in a field, property or parameter |
+| Field/property initialisers, as code of the constructors that run them (static ones in the static constructor, which no call path reaches) | | |
 
 Implementation candidates come from source types' interface maps and overrides; dependency-injection registrations are not read.
 
 ## Exceptions
 
 - **Origins:** explicit `throw`, throw expressions and rethrows, with semantic types. `throw new E()` has an exact construction type; `throw e` only its static type.
-- **Handlers:** a catch applies only to a region that protects the throw or the call. Rethrows keep the original exception through a simple handler; replacements continue with the new exception.
+- **Handlers:** a catch applies only to a region that protects the throw or the call. What the handler does comes from its control flow (Roslyn's control-flow analysis), so logging before `throw;` or before `return` does not matter:
+  - every exit leaves normally (fall-through, `return`, `break`): it *handles* the exception;
+  - every exit is `throw;` or `throw e` of the catch variable: it *rethrows*, and the original exception continues;
+  - some exits rethrow, others leave normally: it *may rethrow*, and the exception is followed further as a possibility;
+  - every exit throws something else: it *replaces* the exception. The original ends there; the new `throw` is an origin of its own, like every throw inside a catch block.
+- **Filters and undecided matches:** a `catch ... when (...)`, or a narrow catch of an exception whose static type is a base class, may or may not take it. It is reported as a possible catch and the exception is followed past it.
+- **`finally`** is transparent unless it can throw itself (a `throw` or a call into source code); only then is the result Unknown.
 - **Unknown, with a reason:**
-  - catch filters, which may accept, reject or throw;
-  - complex handler flow and `finally` effects;
-  - iterator, enumeration, disposal and `lock` behaviour;
-  - custom awaitables, async void, and aliased or unobserved tasks;
+  - a `finally` that may throw;
+  - custom awaitables, async void, and tasks that are never awaited (`var t = CallAsync(); ... await t;` and `await Task.WhenAll(t, u)` count as awaited);
   - dispatch through an interface or virtual member that source implements or overrides, when `--declared-only` is given (the default follows it);
-  - handler-owned throws, whose reachability depends on other exceptions.
+  - iterator bodies and recursion in the per-path views.
 - **Library calls are not uncertainty.** A call to a method with no source body (framework or NuGet code) ends the trace there: its exceptions are not modelled, so it never makes a result Unknown. Exception views report how many library methods were called, and `--uncaught` lists a few per action. This applies to direct calls and to interface/virtual calls to library members that no source type overrides.
 - **Compiler-provided members are known.** Implicit and record constructors, auto-property accessors and record members of source types have no explicit code, so they cannot throw explicitly and are never "missing".
-- **`foreach` and `using`** record their implicit `GetEnumerator`/`MoveNext`/`Dispose` calls, bound through the receiver type like an explicit call. A `Dispose` written in source is analysed; library enumerators are library calls. `await foreach`/`await using` remain gaps.
+- **`foreach` and `using`** record their implicit `GetEnumerator`/`MoveNext`/`Dispose` calls, bound through the receiver type like an explicit call. A `Dispose` written in source is analysed; library enumerators are library calls. `await foreach` and `await using` record the same calls (`MoveNextAsync`, `DisposeAsync`) as awaited.
 - **Interface and virtual calls are followed by default** in the exception views, into their source implementation candidates (`--declared-only` stops at the declaration instead). Results that pass through one are marked as possibilities, never as proven runtime paths; a proven direct path to the same throw takes precedence. A call with no source implementation stays Unknown ("no source implementation found").
 - **Not modelled:** implicit exceptions (from constructors, getters, framework calls) and branch feasibility. All branches and catch-body calls are structural facts.
-- **Miscaught:** reported only when every catch clause of a crossed `try` definitely does not match the exception's type at that point. A filtered or runtime-dependent clause makes the result Unknown instead.
+- **Miscaught:** reported only when every catch clause of a crossed `try` definitely does not match the exception's type at that point. A filtered or runtime-dependent clause is a possible catch, never a miss.
 - **Wording:** a catch is never reported as successful recovery. "May escape" is scoped to the action under this model. Registration evidence (`UseExceptionHandler`, `AddExceptionHandler`, `UseDeveloperExceptionPage`) does not prove middleware order, environment conditions, invocation, response availability or complete coverage.
 
 ## Projects
@@ -87,7 +92,7 @@ Tests combine independently built Core snapshots, in-memory Roslyn compilations,
 - Reach: shared immutable parent links, lazy witness arrays, separate direct-only distance/witness and candidate-inclusive routes, per-root work
   truncation, and explicit dispatch/unresolved/body/depth boundaries. A work stop can leave a valid nonoptimal path.
 - Exception summaries: bottom-up direct-call SCC fixed points over explicit origins, per-site transfers, finite fact identities,
-  reconstructed example witnesses, separate uncertainty and work/fact limits. Detailed witness enumeration is still available. Ownerless gaps are global caveats, not repeated root effects; owned gaps remain associated with reached methods.
+  reconstructed example witnesses, separate uncertainty and work/fact limits. Detailed witness enumeration is still available. Ownerless gaps (top-level statements, minimal APIs) belong to no root and do not make a result incomplete; owned gaps remain associated with reached methods.
   Unknown propagation is conservative; summaries do not remove arbitrary unknown effects merely because a catch-all exists.
 - Mermaid: one controller action selected interactively or by exact signature/ID, project groups, branches/shared nodes/cycles,
   parallel sites, escaped labels, evidence, uncertainty boundaries and visible truncation. Default limits apply after loading

@@ -1,6 +1,7 @@
-Exception summary: Research.Api.OrdersController.Get()
-  Explicit escapes: 1; unknown effects: 0; local summary complete within model: True.
-  May escape: Research.Infrastructure.StorageException | origin: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Research.Infrastructure.csproj|Debug|net10.0|Research.Infrastructure, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null|M:Research.Infrastructure.Repository.Read|throw|/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:199 | MayEscape
-    Path: Research.Api.OrdersController.Get() --> Research.Application.Service.Load() --> Research.Infrastructure.Repository.Read()
-    Origin evidence: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:6:33
-  Boundary registration evidence (runtime coverage unknown): UseExceptionHandler | /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:5:1
+Uncaught: Research.Infrastructure.StorageException
+  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
+  Escapes:   OrdersController.Get
+  Path:
+       OrdersController.Get
+    -> Service.Load
+    -> Repository.Read

@@ -12,6 +12,9 @@ internal sealed record ExceptionFlow(ThrowSiteId Origin, ThrowSiteId? Subsequent
     public bool ViaCandidate { get; init; }
     // Protected regions crossed whose catch clauses definitely do not match; collected with evidence only.
     public ImmutableList<MissedRegion> Missed { get; init; } = ImmutableList<MissedRegion>.Empty;
+    // Handlers that may or may not take the exception (a filter, or a static type that does not decide the match); the
+    // exception is followed past them. Collected with evidence only.
+    public ImmutableList<CatchId> Possible { get; init; } = ImmutableList<CatchId>.Empty;
 }
 
 internal sealed record ExceptionTransferResult(ExceptionFlow Flow, ExceptionStatus? Status = null,
@@ -27,8 +30,6 @@ internal static class ExceptionTransfer
             origin.IsExactType || origin.ExactExceptionType is not null, false,
             collectEvidence ? ImmutableList<SourceEvidence>.Empty.Add(origin.Evidence) : ImmutableList<SourceEvidence>.Empty,
             ImmutableList<CatchId>.Empty);
-        if (origin.CatchId is not null)
-            return Unknown(flow, ExceptionReason.OriginInHandler, "Origin is inside a handler; reaching it depends on the caught exception and handler control flow.");
         if (program.Callable(origin.Owner).IsAsync && !program.Callable(origin.Owner).ReturnsTask)
             return Unknown(flow, ExceptionReason.AsyncUnsupported, "Async void or custom awaitable propagation is outside the supported model.");
         return ApplyRegions(program, flow, origin.ProtectedRegions, token, collectEvidence);
@@ -59,8 +60,8 @@ internal static class ExceptionTransfer
         {
             token.ThrowIfCancellationRequested();
             var region = program.Region(regionId);
-            if (region.HasFinally)
-                return Unknown(flow, ExceptionReason.FinallyUnsupported, "Finally may change propagation; its execution is outside the supported model.");
+            if (region.FinallyMayThrow)
+                return Unknown(flow, ExceptionReason.FinallyUnsupported, "Finally may throw and replace the propagating exception.");
             var matched = false;
             foreach (var catchId in region.Catches)
             {
@@ -70,10 +71,12 @@ internal static class ExceptionTransfer
                 matched = true;
                 if (collectEvidence)
                     flow = flow with { Evidence = flow.Evidence.Add(handler.Evidence), Handlers = flow.Handlers.Add(handler.Id) };
-                if (match is null)
-                    return Unknown(flow, ExceptionReason.HandlerTypeUncertain, "Static exception type does not determine runtime handler matching.");
-                if (handler.Filter is not null)
-                    return Unknown(flow, ExceptionReason.CatchFilter, "Conditional catch filter may accept, reject or throw.");
+                // A filter or an undecided type match may take the exception or let it pass: follow the case where it passes.
+                if (match is null || handler.Filter is not null)
+                {
+                    if (collectEvidence) flow = flow with { Possible = flow.Possible.Add(handler.Id) };
+                    continue;
+                }
                 switch (handler.Outcome)
                 {
                     case HandlerOutcome.Intercepts:
@@ -82,21 +85,16 @@ internal static class ExceptionTransfer
                     case HandlerOutcome.Unknown:
                         return Unknown(flow, ExceptionReason.HandlerFlowUnsupported,
                             "Matching handler has unsupported control flow or calls; propagation/recovery unknown.");
-                    case HandlerOutcome.Rethrows:
+                    // A handler that rethrows on some paths only may still let the exception continue.
+                    case HandlerOutcome.Rethrows or HandlerOutcome.MayRethrow:
                         flow = flow with { Changed = true };
                         if (handler.SubsequentThrow is { } rethrow)
                             flow = flow with { SubsequentOrigin = rethrow,
                                 Evidence = collectEvidence ? flow.Evidence.Add(program.ThrowSite(rethrow).Evidence) : flow.Evidence };
                         break;
+                    // The original exception ends here; the replacement throw is an origin of its own and propagates from the handler.
                     case HandlerOutcome.Replaces:
-                        if (handler.SubsequentThrow is null)
-                            return Unknown(flow, ExceptionReason.ReplacementUnavailable, "Replacement origin unavailable.");
-                        var replacement = program.ThrowSite(handler.SubsequentThrow.Value);
-                        var exact = replacement.ExactExceptionType ?? (replacement.IsExactType ? replacement.StaticExceptionType : null);
-                        flow = flow with { SubsequentOrigin = replacement.Id, StaticType = replacement.StaticExceptionType,
-                            ExactType = exact, Exact = replacement.IsExactType || replacement.ExactExceptionType is not null,
-                            Changed = true, Evidence = collectEvidence ? flow.Evidence.Add(replacement.Evidence) : flow.Evidence };
-                        break;
+                        return new(flow, ExceptionStatus.Intercepted, ExceptionReason.InterceptedByHandler, "Replaced by a handler; the replacement is reported as its own origin.");
                 }
                 break;
             }
@@ -121,10 +119,11 @@ internal static class ExceptionTransfer
             while (pending.TryPop(out var t))
             {
                 token.ThrowIfCancellationRequested();
+                // Exception types are classes, so generic variance never applies: other type arguments never match.
                 if (t.Declaration is not null && t.Declaration == target.Declaration)
                     return t.DisplayName == target.DisplayName
                         && t.Components.Select(x => x.DisplayName).SequenceEqual(target.Components.Select(x => x.DisplayName), StringComparer.Ordinal)
-                        ? true : null;
+                        ? true : false;
                 if (t.Declaration is not { } id) { incomplete = true; continue; }
                 if (!seen.Add(id)) continue;
                 var fact = types.GetValueOrDefault(id);

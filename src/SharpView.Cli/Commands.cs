@@ -19,8 +19,6 @@ internal static class Commands
     internal static async Task<int> RunAsync(Arguments arguments, CancellationToken token)
     {
         var index = new ProgramIndex(await RoslynProgramLoader.LoadAsync(arguments.Request, token));
-        if (index.Snapshot.ExcludedTestProjects is { Length: > 0 } tests)
-            Console.Error.WriteLine($"Test projects excluded: {tests.Length} ({string.Join(", ", tests.Select(Path.GetFileNameWithoutExtension))}). Use --include-tests to analyse them.");
         return await arguments.Handler.RunAsync(index, arguments, token);
     }
 }

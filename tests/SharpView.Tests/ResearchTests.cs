@@ -38,8 +38,8 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
     [InlineData("Unrelated", ExceptionStatus.MayEscape)]
     [InlineData("Incompatible", ExceptionStatus.MayEscape)]
     [InlineData("Rethrow", ExceptionStatus.RethrownOrReplaced)]
-    [InlineData("Replace", ExceptionStatus.RethrownOrReplaced)]
-    [InlineData("Filter(bool)", ExceptionStatus.Unknown)]
+    [InlineData("Replace", ExceptionStatus.Intercepted)]
+    [InlineData("Filter(bool)", ExceptionStatus.MayEscape)]
     [InlineData("AwaitCaught", ExceptionStatus.Intercepted)]
     [InlineData("Unobserved", ExceptionStatus.Unknown)]
     [InlineData("Nested", ExceptionStatus.RethrownOrReplaced)]
@@ -51,7 +51,7 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
         Assert.Equal(expected, witness.Status);
         Assert.Equal(3, witness.Path.Length);
         Assert.NotEmpty(witness.Evidence);
-        if (action == "Replace") Assert.Equal("System.InvalidOperationException", witness.ExceptionType);
+        if (action == "Replace") Assert.Contains(result.Results, x => x.Origin is { } o && S.ThrowSites.Single(t => t.Id == o).Owner == Method("Research.Application.Service.Replace()").Id && x.ExceptionType == "System.InvalidOperationException" && x.Status == ExceptionStatus.MayEscape);
         if (action == "Nested") Assert.Equal(ExceptionStatus.Intercepted, witness.SubsequentStatus);
     }
     [Theory]
@@ -124,7 +124,7 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
         var report = ExceptionQuery.Analyze(S, [.. Actions.Select(x => x.Method)], new());
         // Library calls and compiler-provided members are not uncertainty; what remains is genuine (filters, dispatch, cycles...).
         Assert.Equal(13, report.Results.Length);
-        Assert.Equal(5, report.Results.Count(x => x.Status == ExceptionStatus.Unknown || x.SubsequentStatus == ExceptionStatus.Unknown));
+        Assert.Equal(3, report.Results.Count(x => x.Status == ExceptionStatus.Unknown || x.SubsequentStatus == ExceptionStatus.Unknown));
         Assert.Single(report.GlobalGaps);
         Assert.False(report.IsComplete);
         Assert.DoesNotContain(report.Results, x => x.ReasonCode == ExceptionReason.ExtractionGap);

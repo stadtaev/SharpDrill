@@ -2,8 +2,8 @@ using System.Collections.Immutable;
 
 namespace SharpView.Core;
 
-// Definite: the catch type matches and no filter applies. TypeUncertain/Filtered: the catch may or may not take it.
-public enum CatchCertainty { Definite, TypeUncertain, Filtered }
+// Definite: the catch type matches and no filter applies. Possible: a filter or the runtime type decides.
+public enum CatchCertainty { Definite, Possible }
 
 /// <summary>An origin reaching a matching catch clause; Example is one witness path from a root.</summary>
 public sealed record CaughtException(ThrowSiteId Origin, CatchId Catch, CatchCertainty Certainty, ExceptionWitness Example)
@@ -12,10 +12,11 @@ public sealed record CaughtException(ThrowSiteId Origin, CatchId Catch, CatchCer
 }
 
 /// <summary>An origin passing through a try/catch whose clauses do not match it; Outcomes are its final statuses
-/// over every witness path (it may still be intercepted further up).</summary>
+/// over every witness path (it may still be intercepted further up). Undetermined is a witness whose outcome is Unknown.</summary>
 public sealed record MiscaughtException(ThrowSiteId Origin, MissedRegion Missed, ImmutableArray<ExceptionStatus> Outcomes, ExceptionWitness Example)
 {
     public bool ViaCandidate => Example.ViaCandidate;
+    public ExceptionWitness? Undetermined { get; init; }
 }
 
 /// <summary>Projections of detailed witnesses (ExceptionQuery) onto handlers, deduplicated across roots and paths.
@@ -32,7 +33,7 @@ public static class ExceptionHandlingQuery
             if (witness.Origin is not { } origin) continue;
             for (var i = 0; i < witness.HandlerIds.Length; i++)
             {
-                var certainty = i == witness.HandlerIds.Length - 1 ? Certainty(witness) : CatchCertainty.Definite;
+                var certainty = witness.PossibleHandlers.Contains(witness.HandlerIds[i]) ? CatchCertainty.Possible : CatchCertainty.Definite;
                 var key = (origin, witness.HandlerIds[i]);
                 if (!found.TryGetValue(key, out var existing)) { found[key] = new(origin, key.Item2, certainty, witness); order.Add(key); }
                 else if (existing.ViaCandidate && !witness.ViaCandidate) found[key] = existing with { Certainty = certainty, Example = witness };
@@ -44,6 +45,7 @@ public static class ExceptionHandlingQuery
     public static ImmutableArray<MiscaughtException> Miscaught(ExceptionSearchResult result)
     {
         var groups = new Dictionary<(ThrowSiteId, ExceptionRegionId), (MissedRegion Missed, SortedSet<ExceptionStatus> Outcomes, ExceptionWitness Example)>();
+        var undetermined = new Dictionary<(ThrowSiteId, ExceptionRegionId), ExceptionWitness>();
         var order = new List<(ThrowSiteId, ExceptionRegionId)>();
         foreach (var witness in result.Results)
         {
@@ -54,16 +56,10 @@ public static class ExceptionHandlingQuery
                 if (!groups.TryGetValue(key, out var group)) { groups[key] = group = (missed, [], witness); order.Add(key); }
                 else if (group.Example.ViaCandidate && !witness.ViaCandidate) groups[key] = group = (group.Missed, group.Outcomes, witness);
                 group.Outcomes.Add(witness.SubsequentStatus ?? witness.Status);
+                if ((witness.SubsequentStatus ?? witness.Status) == ExceptionStatus.Unknown) undetermined.TryAdd(key, witness);
             }
         }
-        return [.. order.Select(key => groups[key]).Select(x => new MiscaughtException(x.Example.Origin!.Value, x.Missed, [.. x.Outcomes], x.Example))];
+        return [.. order.Select(key => (Key: key, Group: groups[key])).Select(x => new MiscaughtException(x.Group.Example.Origin!.Value, x.Group.Missed, [.. x.Group.Outcomes], x.Group.Example)
+            { Undetermined = undetermined.GetValueOrDefault(x.Key) })];
     }
-
-    // Only the last recorded handler can be the one whose matching ended the analysis as Unknown.
-    private static CatchCertainty Certainty(ExceptionWitness witness) => witness.ReasonCode switch
-    {
-        ExceptionReason.HandlerTypeUncertain => CatchCertainty.TypeUncertain,
-        ExceptionReason.CatchFilter => CatchCertainty.Filtered,
-        _ => CatchCertainty.Definite,
-    };
 }

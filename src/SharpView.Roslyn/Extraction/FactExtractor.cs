@@ -21,6 +21,7 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
     private readonly LinkedList<(IMethodSymbol Symbol, SyntaxNode Node, SemanticModel Model, CompilationFact Compilation, bool Generated)> bodies = [];
     private readonly Dictionary<string, LinkedListNode<(IMethodSymbol Symbol, SyntaxNode Node, SemanticModel Model, CompilationFact Compilation, bool Generated)>> bodyByKey = new(StringComparer.Ordinal);
     private readonly List<INamedTypeSymbol> sourceTypes = [];
+    private readonly List<(EqualsValueClauseSyntax Node, SemanticModel Model, CompilationFact Compilation)> initializers = [];
     private readonly List<CallSiteFact> calls = [];
     private readonly List<ThrowSiteFact> throws = [];
     private readonly List<CatchFact> catches = [];
@@ -59,7 +60,7 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
     public async Task RegisterAsync(Project project, Compilation compilation, CompilationFact fact, bool includeGenerated, CancellationToken token)
     {
         if (assemblyProjects.TryGetValue(compilation.Assembly.Identity.ToString(), out var previous) && previous != fact.Id)
-            throw new InvalidOperationException($"Ambiguous source assembly identity {compilation.Assembly.Identity}; analyse separately.");
+            throw new AnalysisInputException($"Ambiguous source assembly identity {compilation.Assembly.Identity}; analyse separately.");
         assemblyProjects[compilation.Assembly.Identity.ToString()] = fact.Id;
         var generated = (await project.GetSourceGeneratedDocumentsAsync(token)).Select(x => x.FilePath).ToHashSet(StringComparer.Ordinal);
         var ordinary = project.Documents.Select(x => x.FilePath).ToHashSet(StringComparer.Ordinal);
@@ -104,19 +105,19 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
                 if (ns.StartsWith("Microsoft.AspNetCore.", StringComparison.Ordinal) && bound.Name is "MapGet" or "MapPost" or "MapPut" or "MapDelete" or "MapPatch" or "MapMethods")
                     gaps.Add(new(GapKind.Unsupported, fact.Id, null, "Minimal API endpoint is outside controller-action analysis.", Evidence(invocation)));
             }
-            // Top-level statements are one gap per file. Initializers are a gap only when they can run source code or throw;
+            // Top-level statements are one gap per file. Initializers matter only when they can run source code or throw;
             // literals, constants and library constructors/calls (`= 5`, `= new()`, `= string.Empty`) have nothing to model.
             if (root.DescendantNodes().OfType<GlobalStatementSyntax>().FirstOrDefault() is { } topLevel)
                 gaps.Add(new(GapKind.Unsupported, fact.Id, null, "Top-level statements have no owning callable; boundary registrations are extracted separately.", Evidence(topLevel)));
             foreach (var node in root.DescendantNodes().OfType<EqualsValueClauseSyntax>().Where(x => x.Parent is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Parent: FieldDeclarationSyntax } } or PropertyDeclarationSyntax))
-                if (InitializerRunsSource(node, model, token))
-                    gaps.Add(new(GapKind.Unsupported, fact.Id, null, "Field/property initializer runs source code or throws; initializer callable ownership is outside scope.", Evidence(node)));
+                if (RunsSourceOrThrows(node.Value, model, token)) initializers.Add((node, model, fact));
         }
     }
-    private static bool InitializerRunsSource(EqualsValueClauseSyntax initializer, SemanticModel model, CancellationToken token) =>
-        initializer.Value.DescendantNodesAndSelf(x => x is not AnonymousFunctionExpressionSyntax).Any(x => x switch
+    // True when the code can raise an exception the model tracks: an explicit throw or a call into source.
+    private static bool RunsSourceOrThrows(SyntaxNode code, SemanticModel model, CancellationToken token) =>
+        code.DescendantNodesAndSelf(x => x is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax)).Any(x => x switch
         {
-            ThrowExpressionSyntax => true,
+            ThrowExpressionSyntax or ThrowStatementSyntax => true,
             InvocationExpressionSyntax or BaseObjectCreationExpressionSyntax or ElementAccessExpressionSyntax =>
                 model.GetSymbolInfo(x, token).Symbol is not { } symbol || symbol.Locations.Any(l => l.IsInSource),
             _ => false
@@ -149,21 +150,39 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
                 _ => entry.Model.GetOperation(entry.Node, token)
             };
             if (operation is not null) walker.Visit(operation);
-            else if (methods[id].Body == BodyStatus.Source) walker.Gap("Source body has no operation tree.", entry.Node);
+            else if (methods[id].Body == BodyStatus.Source) walker.InternalGap($"Source body has no operation tree ({Microsoft.CodeAnalysis.CSharp.CSharpExtensions.Kind(entry.Node)}).", entry.Node);
             walker.ExtractRegions(entry.Node);
             // An implicit `: base()` is an ordinary implicit call to the base's parameterless constructor.
             if (entry.Symbol.MethodKind == MethodKind.Constructor && entry.Node is ConstructorDeclarationSyntax { Initializer: null } && entry.Symbol.ContainingType.BaseType is { SpecialType: not SpecialType.System_Object } baseType)
             {
                 var baseConstructor = baseType.InstanceConstructors.FirstOrDefault(x => x.Parameters.All(p => p.IsOptional || p.IsParams));
-                if (baseConstructor is null) walker.Gap("Implicit base constructor could not be resolved.", entry.Node);
+                if (baseConstructor is null) walker.InternalGap("Implicit base constructor could not be resolved.", entry.Node);
                 else walker.ImplicitBaseConstructor(baseConstructor, entry.Node);
             }
         }
+        foreach (var initializer in initializers) ExtractInitializer(initializer.Node, initializer.Model, initializer.Compilation, token);
         ExtractMembers(token);
         LinkHierarchy(token);
         foreach (var (id, fact) in methods.Where(x => x.Value.Overrides is not null && x.Value.Body != BodyStatus.MetadataOnly).Select(x => (x.Key, x.Value)))
             implementations.Add(new(fact.Overrides!.Value, id, ImplementationKind.Override));
         foreach (var type in types.Values.ToArray()) foreach (var b in type.BaseTypes) dependencies.Add(new(type.Id, null, b, DependencyKind.Inheritance, type.Declarations.FirstOrDefault()));
+    }
+    // An initializer runs inside every constructor that does not chain to `this(...)` and is not a record copy constructor
+    // (static ones inside the static constructor), so its calls and throws belong to those constructors. A constructor with no code of its own then has a body.
+    private void ExtractInitializer(EqualsValueClauseSyntax node, SemanticModel model, CompilationFact compilation, CancellationToken token)
+    {
+        if (model.GetDeclaredSymbol(node.Parent!, token) is not { ContainingType: { } type } member || model.GetOperation(node, token) is not { } operation)
+        { gaps.Add(new(GapKind.Internal, compilation.Id, null, "Field/property initializer could not be bound.", Evidence(node))); return; }
+        var owners = member.IsStatic ? type.StaticConstructors
+            : type.InstanceConstructors.Where(c => !c.DeclaringSyntaxReferences.Any(r => r.GetSyntax(token) is ConstructorDeclarationSyntax { Initializer.ThisOrBaseKeyword.ValueText: "this" })
+                && !(type.IsRecord && c.Parameters is [{ Type: var copied }] && SymbolEqualityComparer.Default.Equals(copied, type))).ToImmutableArray();
+        if (owners.IsEmpty) { gaps.Add(new(GapKind.Unsupported, compilation.Id, null, "Field/property initializer has no constructor to run in.", Evidence(node))); return; }
+        foreach (var constructor in owners)
+        {
+            var id = RegisterMethod(constructor);
+            if (methods[id].Body == BodyStatus.Synthesized) methods[id] = methods[id] with { Body = BodyStatus.Source };
+            new BodyWalker(this, model, compilation, id, token).Visit(operation);
+        }
     }
     public ProgramSnapshot Snapshot()
     {

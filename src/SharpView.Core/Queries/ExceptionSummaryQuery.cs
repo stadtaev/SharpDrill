@@ -66,7 +66,8 @@ public sealed class ExceptionSummaryResult
         return [.. library.Select(x => new CallableId(x))];
     }
 
-    public bool IsComplete => GlobalGaps.IsEmpty && !WorkLimitReached && !FactLimitReached && Roots.Values.All(x => x.IsComplete);
+    // Ownerless gaps (top-level statements, minimal APIs) belong to no root; the CLI reports them on their own.
+    public bool IsComplete => !WorkLimitReached && !FactLimitReached && Roots.Values.All(x => x.IsComplete);
     public bool WorkLimitReached { get; }
     public bool FactLimitReached { get; }
     public int WorkItemsProcessed { get; }

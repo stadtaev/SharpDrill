@@ -10,7 +10,8 @@ public static class MSBuildBootstrap
         {
             if (MSBuildLocator.IsRegistered) return;
             if (!MSBuildLocator.CanRegister) throw new InvalidOperationException("MSBuild was already loaded. Call MSBuildBootstrap.RegisterSdk before loading MSBuild types.");
-            MSBuildLocator.RegisterDefaults();
+            try { MSBuildLocator.RegisterDefaults(); }
+            catch (InvalidOperationException e) { throw new SharpView.Core.AnalysisInputException($"No .NET SDK found to load the projects ({e.Message}). Install the SDK the solution targets.", e); }
         }
     }
 }

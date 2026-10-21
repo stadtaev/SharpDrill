@@ -41,7 +41,7 @@ flowchart LR
    - *Declared binding* — what the source code calls, e.g. `IRepository.Read()`. Always recorded.
    - *Implementation candidate* — a source method that implements or overrides it, e.g. `SqlRepository.Read()`. Recorded separately; followed only on request and always marked "candidate".
    - *Runtime target* — what actually runs (depends on DI, receiver type…). SharpView never claims this.
-2. **Unknown is a result, not an error.** Interface dispatch, missing bodies, catch filters, `finally`, unobserved tasks, depth limits… produce explicit Unknown/boundary entries with a reason.
+2. **Unknown is a result, not an error.** Interface dispatch, missing bodies, a `finally` that can throw, tasks never awaited, depth limits… produce explicit Unknown/boundary entries with a reason.
 3. **Evidence everywhere.** Facts and results point at source locations; reports can be checked by hand.
 4. **Bounded and deterministic.** Depth, output and work limits are explicit flags; the same input gives byte-identical output.
 5. **Structure comes from the build, not from names.** The project map is MSBuild's own reference graph and settings; naming conventions are never treated as architecture. Custom layer mappings exist only in the library, where you declare them.
@@ -79,12 +79,12 @@ Snippets below are from the sample Web API, with names and paths shortened; the 
 
 **`exceptions` — where can things go wrong?** Four views over the same throw and catch facts:
 
-- *Default, every throw:* each explicit `throw` and rethrow with its method, type, project and location. A map of what the code can raise, independent of any endpoint.
+- *Default, every throw:* each explicit `throw` with its type, method and location. A map of what the code can raise, independent of any endpoint.
 - *`--uncaught`:* which exceptions may leave a controller action because no catch is on the way, each with one example path. Scales to a whole API, for example to find domain exceptions that reach middleware.
-- *`--caught`:* each place an exception meets a matching catch: where it is thrown, where it is caught, and what the handler does (handles, rethrows, replaces). Flags catches with filters or runtime-dependent matches.
+- *`--caught`:* each place an exception meets a matching catch: where it is thrown, where it is caught, and what the handler does (handles, rethrows, replaces). Catches with filters or runtime-dependent matches are marked as possible.
 - *`--miscaught`:* exceptions that pass through a `try` whose catch clauses don't match their type, a common sign of catching the wrong exception. Shows the clauses, and whether something further up catches it.
 
-Any *Unknown* entry says where the analysis needs a human.
+A `Not followed:` line on stderr says where the analysis stopped and needs a human.
 
 **`reach` — what can this endpoint touch?** Each reachable method once, with distance and one shortest path. Its cost grows with the size of the code, not the number of paths, so it is the right default on large solutions.
 
@@ -135,41 +135,45 @@ Root: Research.Api.OrdersController.Get()
 Every throw (default):
 
 ```text
-Throw: Research.Infrastructure.StorageException
-  At: Repository.Read() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure | Repository.cs:6:33
-  Inside try in the same method: no
+Research.Infrastructure.StorageException  Repository.Read  Research.Infrastructure/Repository.cs:6
+System.Exception (or a subclass)  Repository.StaticType  Research.Infrastructure/Repository.cs:10
 ```
 
 `--caught`, where it is thrown and where it is caught:
 
 ```text
 Caught: Research.Infrastructure.StorageException
-  Thrown: Repository.Read() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure | Repository.cs:6:33
-  Caught: Service.Caught() | catch (Research.Infrastructure.StorageException) | Project: Research.Application | Service.cs:6:62
-  Handler: handles it (recovery not proven)
-  Example path: OrdersController.Caught() --> Service.Caught() --> Repository.Read()
+  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
+  Caught by: catch (Research.Infrastructure.StorageException) in Service.Caught  Research.Application/Service.cs:6
+  Handler:   handles it
+  Path:
+       OrdersController.Caught
+    -> Service.Caught
+    -> Repository.Read
 ```
 
 `--miscaught`, a `try` that did not catch it:
 
 ```text
 Miscaught: Research.Infrastructure.StorageException
-  Thrown: Repository.Read() | Type: Research.Infrastructure.Repository | Project: Research.Infrastructure | Repository.cs:6:33
-  Passed through: try in Service.Incompatible() | Project: Research.Application | Service.cs:8:45
-  Catch clauses (none match): System.ArgumentException
-  Then: may escape the controller action
+  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
+  Missed by: try in Service.Incompatible (catches only System.ArgumentException)  Research.Application/Service.cs:8
+  Then:      may escape the controller action
 ```
 
-`--uncaught`, one entry per escaping origin with an example path:
+`--uncaught`, one entry per escaping throw, with the actions it escapes from and an example path:
 
 ```text
-Exception summary: OrdersController.Get()
-  Explicit escapes: 1; unknown effects: 1; local summary complete within model: False.
-  May escape: Research.Infrastructure.StorageException | origin: … | MayEscape
-    Path: OrdersController.Get() --> Service.Load() --> Repository.Read()
+Uncaught: Research.Infrastructure.StorageException
+  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
+  Escapes:   OrdersController.Filter, OrdersController.Get, OrdersController.Incompatible and 1 more
+  Path:
+       OrdersController.Filter
+    -> Service.Filter
+    -> Repository.Read
 ```
 
-"May escape" is never called "unhandled": middleware may still handle it. A catch is *miscaught* only when every clause definitely does not match; filters, runtime-dependent matches, `finally` and dispatch produce **Unknown** (with a reason code) instead.
+"May escape" is never called "unhandled": middleware may still handle it. A catch is *miscaught* only when every clause definitely does not match; filters and runtime-dependent matches are possible catches instead.
 
 ## Writing your own rule
 
@@ -201,7 +205,7 @@ Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `Shar
 | Transition / distance | One call edge. Not runtime stack depth. |
 | Witness | A concrete path plus source locations that justifies a result. |
 | Boundary | Where traversal stopped and why (dispatch, missing body, unresolved, depth/work limit). |
-| Gap | Something extraction could not model (e.g. top-level statements); listed, never hidden. |
+| Gap | Something extraction could not model (e.g. top-level statements). `inspect` lists them all; other commands mention one only when it affects their result. |
 | Key | Portable identity (`<project>\|<documentation ID>`); IDs are local to one analysis run. |
 
 ## Further reading

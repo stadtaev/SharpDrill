@@ -34,16 +34,18 @@ public sealed class CliTests
     public async Task Fresh_process_prints_cross_project_chain_and_evidence()
     {
         var result = await Run("paths", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--locations");
-        Assert.Equal(1, result.Exit);
-        Assert.Contains("Research.Api.OrdersController.Get() --> Research.Application.Service.Load() --> Research.Infrastructure.Repository.Read()", result.Out);
-        Assert.Contains("Repository.cs:", result.Out);
+        // A complete result exits 0: the top-level-statements gap in Program.cs lies on no reported path.
+        Assert.Equal(0, result.Exit);
+        Assert.Contains("OrdersController.Get -> Service.Load -> Repository.Read", result.Out);
+        Assert.Contains("    at Research.Infrastructure/Repository.cs:6", result.Out);
+        Assert.Equal("1 path from 1 root.\n", result.Error.ReplaceLineEndings("\n"));
         Assert.DoesNotContain("fatal", result.Error, StringComparison.OrdinalIgnoreCase);
     }
     [Fact]
     public async Task Json_stdout_remains_valid_and_contains_exception_regions()
     {
         var result = await Run("inspect", ResearchFixture.Input, "--json");
-        Assert.Equal(1, result.Exit);
+        Assert.Equal(0, result.Exit);
         using var doc = JsonDocument.Parse(result.Out);
         Assert.Equal(3, doc.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.True(doc.RootElement.GetProperty("snapshot").GetProperty("exceptionRegions").GetArrayLength() > 0);
@@ -52,34 +54,30 @@ public sealed class CliTests
     public async Task Exceptions_report_action_escape_and_boundary_evidence_separately()
     {
         var result = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Get()");
-        Assert.Equal(1, result.Exit);
-        Assert.Contains("May escape: Research.Infrastructure.StorageException", result.Out);
-        Assert.Contains("Boundary registration evidence (runtime coverage unknown)", result.Out);
-        Assert.Contains("UseExceptionHandler", result.Out);
-        Assert.DoesNotContain("unhandled", result.Out, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, result.Exit);
+        Assert.StartsWith("Uncaught: Research.Infrastructure.StorageException\n  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6\n  Escapes:   OrdersController.Get\n", result.Out.ReplaceLineEndings("\n"));
+        // The registered middleware is mentioned once, as context, not repeated per finding.
+        Assert.Contains("UseExceptionHandler (Research.Api/Program.cs:5) still handles them at runtime.", result.Error);
+        Assert.DoesNotContain("UseExceptionHandler", result.Out);
     }
     [Fact]
     public async Task Paths_show_projects_and_distance_is_transitions()
     {
         var result = await Run("paths", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()");
-        Assert.Equal(1, result.Exit);
-        Assert.Contains("Project: Research.Infrastructure | Type: Research.Infrastructure.Repository", result.Out);
-        Assert.Contains("Transitions: 2", result.Out);
+        Assert.Equal(0, result.Exit);
+        Assert.Equal("OrdersController.Get -> Service.Load -> Repository.Read -> StorageException.ctor\n", result.Out.ReplaceLineEndings("\n"));
     }
     [Fact]
     public async Task Reach_lists_each_callable_once_with_a_shortest_witness()
     {
         var result = await Run("reach", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--locations");
-        Assert.Equal(1, result.Exit);
-        Assert.Contains("Root: Research.Api.OrdersController.Get()", result.Out);
-        Assert.Contains("  [1] Research.Application.Service.Load() | Project: Research.Application", result.Out);
-        Assert.Contains("  [2] Research.Infrastructure.Repository.Read() | Project: Research.Infrastructure", result.Out);
-        Assert.Contains("    Path: Research.Api.OrdersController.Get() --> Research.Application.Service.Load() --> Research.Infrastructure.Repository.Read()", result.Out);
-        Assert.Contains("| direct call", result.Out);
+        Assert.Equal(0, result.Exit);
+        Assert.StartsWith("OrdersController.Get\n  [1] Service.Load  (Research.Application)\n      at Research.Api/OrdersController.cs:8\n  [2] Repository.Read  (Research.Infrastructure)  via Service.Load\n", result.Out.ReplaceLineEndings("\n"));
         var service = await Run("reach", ResearchFixture.Input, "--root", "Research.Application.Service.Load()");
-        Assert.Contains("  [1] Research.Infrastructure.Repository.Read()", service.Out);
+        Assert.Contains("  [1] Repository.Read  (Research.Infrastructure)", service.Out);
         var dispatch = await Run("reach", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Interface(Research.Infrastructure.IRepository)");
-        Assert.Contains("Boundary: Interface dispatch --> Research.Infrastructure.IRepository.Read() | candidates followed: 0", dispatch.Out);
+        Assert.Equal(1, dispatch.Exit);
+        Assert.Contains("  Stops at: interface call to IRepository.Read (--follow-candidates follows its implementations)  Research.Application/Service.cs:12", dispatch.Out);
     }
     [Fact]
     public async Task Absent_root_is_an_invalid_request()

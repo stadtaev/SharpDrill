@@ -37,7 +37,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
         Commands:
           projects    Project reference tree with each project's framework, nullable settings and compiler warning count.
                       [--mermaid [--output F]]
-          exceptions  Every explicit throw with its method, type and project. Or, along call chains from each action:
+          exceptions  Every explicit throw with its type, method and location. Or, along call chains from each action:
                         --uncaught   may escape the action: no catch on the way (one example path per origin)
                         --caught     reaches a matching catch: where it is thrown and where it is caught
                         --miscaught  passes through a try whose catch clauses do not match its type

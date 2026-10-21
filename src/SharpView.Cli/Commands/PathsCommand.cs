@@ -19,39 +19,31 @@ internal sealed class PathsCommand : ReportCommand
         foreach (var path in paths.Chains) { token.ThrowIfCancellationRequested(); Write(context, path); }
         var boundaries = paths.Chains.Count(x => x.End is ChainEnd.DispatchBoundary or ChainEnd.UnknownTarget or ChainEnd.NoBody);
         var depth = paths.Chains.Count(x => x.End == ChainEnd.DepthLimit);
-        Console.Error.WriteLine($"Roots: {roots.Length}; paths: {paths.Chains.Length}; examined sites: {paths.ExpandedSites}; uncertain boundaries: {boundaries}; depth limits: {depth}; output limit: {paths.OutputLimitReached}; work limit: {paths.WorkLimitReached}.");
+        Console.Error.WriteLine($"{Display.Plural(paths.Chains.Length, "path")} from {Display.Plural(roots.Length, "root")}.");
+        if (depth > 0) Console.Error.WriteLine($"{Display.Plural(depth, "path")} cut at --max-depth {context.Arguments.MaxDepth}; raise it to see further.");
+        if (paths.OutputLimitReached) Console.Error.WriteLine($"Stopped after {context.Arguments.MaxPaths} paths; raise --max-paths to see the rest.");
+        if (paths.WorkLimitReached) Console.Error.WriteLine($"Stopped early: the analysis budget ran out, so the list above is incomplete. Rerun with --budget {context.Arguments.Budget * 10}.");
         return ValueTask.FromResult(paths.OutputLimitReached || paths.WorkLimitReached || depth > 0 || boundaries > 0);
     }
 
-    // One line for the path and why it ends, then each method on it with project, type and distance from the root.
+    // One line per path, from the root to where it ends; the end is named when it is not simply a method without calls.
     private static void Write(ReportContext context, CallChain path)
     {
         var (index, display, output) = (context.Index, context.Display, context.Output);
-        var names = new List<string> { display.Name(path.Root) };
+        var names = new List<string> { display.Short(path.Root) };
         foreach (var step in path.Steps)
-            names.Add(step.Target is { } target ? display.Name(target) : $"[{step.Dispatch.ToString().ToLowerInvariant()} invocation: {step.TargetDisplay}]");
-        var marker = path.End switch
+            names.Add(step.Target is { } target && path.End != ChainEnd.DispatchBoundary ? display.Short(target) : $"[{step.Dispatch.ToString().ToLowerInvariant()} call {step.TargetDisplay}]");
+        var end = path.End switch
         {
-            ChainEnd.Leaf => " [no outgoing calls]",
-            ChainEnd.Metadata => " [metadata body unavailable]",
-            ChainEnd.NoBody => " [body unavailable]",
-            ChainEnd.UnknownTarget => " [unresolved target]",
-            ChainEnd.Cycle => " [cycle]",
-            ChainEnd.DepthLimit => " [max depth]",
-            ChainEnd.DispatchBoundary => $" [{path.Steps[^1].Dispatch.ToString().ToLowerInvariant()} target]",
+            ChainEnd.NoBody => "  (ends: no body)",
+            ChainEnd.UnknownTarget => "  (ends: a call that does not compile)",
+            ChainEnd.Cycle => "  (ends: recursion)",
+            ChainEnd.DepthLimit => "  (ends: --max-depth)",
             _ => ""
         };
-        output.WriteLine(string.Join(" --> ", names) + marker);
-        Method(path.Root, 0);
-        for (var i = 0; i < path.Steps.Length; i++) if (path.Steps[i].Target is { } target) Method(target, i + 1);
+        output.WriteLine(string.Join(" -> ", names) + end);
         if (context.Arguments.Locations)
             foreach (var step in path.Steps)
-                foreach (var site in step.EvidenceSites) output.WriteLine($"  Evidence: {Display.Location(index.CallSite(site).Evidence)} | {step.Dispatch} declared binding");
-
-        void Method(CallableId id, int transitions)
-        {
-            if (index.TryGetCallable(id, out _))
-                output.WriteLine($"  {display.Name(id)} | Project: {display.Project(id)} | Type: {display.TypeOf(id)} | Transitions: {transitions}");
-        }
+                foreach (var site in step.EvidenceSites) output.WriteLine($"    at {display.Where(index.CallSite(site).Evidence)}");
     }
 }

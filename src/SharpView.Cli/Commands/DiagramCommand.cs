@@ -42,7 +42,7 @@ internal sealed class DiagramCommand(TextReader input, TextWriter output) : ICli
         var document = MermaidExporter.Markdown(diagram);
         var path = await MarkdownExport.SaveAsync(document, arguments.Output, selected.DisplaySignature, token);
         await output.WriteLineAsync("Saved diagram: " + path);
-        await output.WriteLineAsync($"Nodes: {diagram.Nodes.Length}; edges: {diagram.Edges.Length}; boundaries: {diagram.Boundaries.Length}; extraction gaps: {diagram.Gaps.Length}; limits: {(diagram.Limits.IsEmpty ? "none" : string.Join(", ", diagram.Limits))}.");
+        if (!diagram.Limits.IsEmpty) await output.WriteLineAsync($"The diagram is cut short ({string.Join(", ", diagram.Limits).ToLowerInvariant()}); raise --max-depth, --max-nodes or --max-edges to see more.");
         return diagram.IsComplete ? 0 : 1;
     }
 }

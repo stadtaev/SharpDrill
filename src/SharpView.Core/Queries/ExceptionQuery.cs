@@ -26,6 +26,8 @@ public sealed record ExceptionWitness(CallableId Action, ThrowSiteId? Origin, Th
     // True when some step followed an implementation candidate of an interface/virtual call: a possibility, not a
     // proven runtime path.
     public bool ViaCandidate { get; init; }
+    // Handlers in HandlerIds that may or may not take the exception (filter or undecided type match); it was followed past them.
+    public ImmutableArray<CatchId> PossibleHandlers { get; init; } = [];
 }
 // A protected region with catch clauses, none of which matches ExceptionType (the type at that point of propagation).
 public sealed record MissedRegion(ExceptionRegionId Region, string? ExceptionType);
@@ -38,7 +40,7 @@ public sealed record ExceptionSearchResult(ImmutableArray<ExceptionWitness> Resu
     public bool UnknownLimitReached { get; init; }
     // Library methods (no source body) called along the examined paths. Their exceptions are not modelled.
     public ImmutableArray<CallableId> LibraryCalls { get; init; } = [];
-    public bool IsComplete => GlobalGaps.IsEmpty && !OutputLimitReached && !UnknownLimitReached && !WorkLimitReached && !DepthLimitReached
+    public bool IsComplete => !OutputLimitReached && !UnknownLimitReached && !WorkLimitReached && !DepthLimitReached
         && Results.All(x => x.Status != ExceptionStatus.Unknown && x.SubsequentStatus != ExceptionStatus.Unknown);
 }
 
@@ -199,6 +201,6 @@ public static class ExceptionQuery
             flow.Changed ? ExceptionStatus.RethrownOrReplaced : status, message,
             flow.Evidence.ToImmutableArray(), flow.Handlers.ToImmutableArray(),
             flow.Changed ? status : null, flow.StaticType?.DisplayName, flow.ExactType?.DisplayName, reason)
-        { MissedRegions = [.. flow.Missed], Sites = [.. sites.Select(x => x.Id)], ViaCandidate = via };
+        { MissedRegions = [.. flow.Missed], PossibleHandlers = [.. flow.Possible], Sites = [.. sites.Select(x => x.Id)], ViaCandidate = via };
     }
 }

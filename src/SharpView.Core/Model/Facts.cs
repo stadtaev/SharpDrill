@@ -27,8 +27,11 @@ public enum NullabilityKind { NotAnnotated, Annotated, Oblivious }
 public enum DependencyKind { Signature, Inheritance, Constraint, Attribute, Construction, BodyUse, Field, Property }
 public enum ImplementationKind { Interface, Override }
 public enum ThrowKind { Explicit, Rethrow }
-public enum GapKind { ProjectLoad, Compilation, Binding, Unsupported, ExcludedSource }
-public enum HandlerOutcome { Intercepts, Rethrows, Replaces, Unknown }
+// Internal: SharpView failed on code it should handle, a bug to report rather than a limit of the model.
+public enum GapKind { ProjectLoad, Compilation, Binding, Unsupported, ExcludedSource, Internal }
+// Intercepts: every exit leaves the handler normally. Rethrows: every exit rethrows. MayRethrow: some exits rethrow,
+// others leave normally. Replaces: every exit throws something else; that throw is an origin of its own.
+public enum HandlerOutcome { Intercepts, Rethrows, Replaces, Unknown, MayRethrow }
 public enum DeclaredTypeKind { Class, Record, Struct, RecordStruct, Interface, Enum, Delegate, Other }
 [Flags] public enum TypeModifiers { None = 0, Abstract = 1, Sealed = 2, Static = 4, Generic = 8 }
 // Operator covers user-defined operators and conversions.
@@ -74,7 +77,7 @@ public sealed record ThrowSiteFact(ThrowSiteId Id, CallableId Owner, ThrowKind K
 public sealed record CatchFact(CatchId Id, CallableId Owner, TypeUse? CaughtType, string? Filter,
     SourceEvidence Evidence, SourceEvidence BodyEvidence, HandlerOutcome Outcome, ThrowSiteId? SubsequentThrow);
 public sealed record ExceptionRegionFact(ExceptionRegionId Id, CallableId Owner, SourceEvidence ProtectedBlock,
-    ImmutableArray<CatchId> Catches, bool HasFinally);
+    ImmutableArray<CatchId> Catches, bool FinallyMayThrow);
 // A candidate: Declared may be implemented/overridden by Implementation. These are not inferred runtime targets;
 // consumers opt in to following them and own the resulting uncertainty (receiver type, DI registration, further overrides).
 public sealed record ImplementationFact(CallableId Declared, CallableId Implementation, ImplementationKind Kind);

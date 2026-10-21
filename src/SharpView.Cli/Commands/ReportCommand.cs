@@ -8,7 +8,7 @@ internal sealed record ReportContext(ProgramIndex Index, Arguments Arguments, Te
     internal ProgramSnapshot Snapshot => Index.Snapshot;
 }
 
-/// <summary>Text-report commands: shared output target, extraction-gap trailer and exit code.</summary>
+/// <summary>Text-report commands: shared output target, coverage trailer and exit code.</summary>
 internal abstract class ReportCommand : ICliCommand
 {
     public abstract ImmutableHashSet<string> Options { get; }
@@ -19,26 +19,44 @@ internal abstract class ReportCommand : ICliCommand
     {
         using var file = arguments.Output is null ? null : new StreamWriter(new FileStream(arguments.Output, FileMode.CreateNew, FileAccess.Write));
         var output = (TextWriter?)file ?? Console.Out;
-        var context = new ReportContext(index, arguments, output, file?.BaseStream, new Display(index));
-        var incomplete = await ExecuteAsync(context, token) | !index.Snapshot.Gaps.IsEmpty;
-        WriteGaps(index.Snapshot.Gaps);
+        var context = new ReportContext(index, arguments, output, file?.BaseStream, new Display(index, arguments.Input));
+        var incomplete = await ExecuteAsync(context, token);
         token.ThrowIfCancellationRequested();
-        return incomplete ? 1 : 0;
+        return WriteCoverage(index.Snapshot) | incomplete ? 1 : 0;
     }
 
     /// <returns>True when the command's own results are incomplete within the model.</returns>
     protected abstract ValueTask<bool> ExecuteAsync(ReportContext context, CancellationToken token);
 
-    // Gaps are grouped by cause: a real solution has hundreds, usually a handful of kinds repeated many times.
-    private static void WriteGaps(IReadOnlyList<AnalysisGap> gaps)
+    // Only what changes how far the results can be trusted: projects that did not load, code that does not compile,
+    // endpoints outside the analysis, and SharpView's own failures. Limits on a reported path show up with the result.
+    private static bool WriteCoverage(ProgramSnapshot snapshot)
     {
-        var groups = gaps.GroupBy(x => (x.Kind, x.Message))
-            .Select(g => (g.Key.Kind, g.Key.Message, Count: g.Count(), First: g.FirstOrDefault(x => x.Evidence is not null)?.Evidence))
-            .OrderByDescending(x => x.Count).ThenBy(x => x.Message, StringComparer.Ordinal).ToArray();
-        foreach (var group in groups.Take(10))
-            Console.Error.WriteLine($"Gap [{group.Kind}]{(group.Count > 1 ? $" x{group.Count}" : "")}: {group.Message}"
-                + (group.First is null ? "" : $" ({(group.Count > 1 ? "first at " : "")}{Display.Location(group.First)})"));
-        if (groups.Length > 10) Console.Error.WriteLine($"Further gap kinds: {groups.Length - 10}; inspect --json lists every gap with its evidence.");
-        Console.Error.WriteLine($"Extraction gaps: {gaps.Count} ({groups.Length} kind{(groups.Length == 1 ? "" : "s")}). Coverage: explicit origins/direct calls; minimal APIs and inherited actions outside scope.");
+        var load = snapshot.Gaps.Where(x => x.Kind == GapKind.ProjectLoad).ToArray();
+        foreach (var gap in load) Console.Error.WriteLine($"Not loaded: {gap.Message}");
+        var errors = snapshot.Gaps.Count(x => x.Kind == GapKind.Compilation);
+        if (errors > 0) Console.Error.WriteLine($"The code has {Display.Plural(errors, "compile error")}; results around them may be incomplete. Build the solution first.");
+        var minimal = snapshot.Gaps.Count(x => x.Message.StartsWith("Minimal API endpoint", StringComparison.Ordinal));
+        if (minimal > 0) Console.Error.WriteLine($"Not analysed: {Display.Plural(minimal, "minimal API endpoint")} (only controller actions are).");
+        var bugs = snapshot.Gaps.Where(x => x.Kind == GapKind.Internal).ToArray();
+        if (bugs.Length > 0)
+            BugReport.Write($"SharpView could not handle {Display.Plural(bugs.Length, "place")} in your code; results there are missing.",
+                bugs.Take(10).Select(x => $"{x.Message} {(x.Evidence is { } e ? $"({Path.GetFileName(e.Path)}:{e.StartLine}:{e.StartColumn})" : "")}"));
+        return load.Length > 0 || errors > 0 || minimal > 0 || bugs.Length > 0;
+    }
+}
+
+/// <summary>How SharpView owns up to its own bugs: say so plainly and ask for the output in an issue.</summary>
+internal static class BugReport
+{
+    internal const string Issues = "https://github.com/stadtaev/sharpview/issues";
+
+    internal static void Write(string what, IEnumerable<string> details)
+    {
+        Console.Error.WriteLine();
+        Console.Error.WriteLine($"Sorry, we hit a bug on our side. {what}");
+        Console.Error.WriteLine($"We are enthusiasts and fix these quickly when we hear about them: please copy-paste the lines below into an issue at {Issues}");
+        Console.Error.WriteLine($"  sharpview {EntryPoint.Version}, .NET {Environment.Version}, {System.Runtime.InteropServices.RuntimeInformation.OSDescription}");
+        foreach (var line in details) Console.Error.WriteLine("  " + line);
     }
 }

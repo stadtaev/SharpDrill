@@ -1,12 +1,10 @@
-Root: Research.Api.OrdersController.Get()
-  [1] Research.Application.Service.Load() | Project: Research.Application
-    Evidence: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/OrdersController.cs:8:36 | direct call
-  [2] Research.Infrastructure.Repository.Read() | Project: Research.Infrastructure
-    Path: Research.Api.OrdersController.Get() --> Research.Application.Service.Load() --> Research.Infrastructure.Repository.Read()
-    Evidence: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/OrdersController.cs:8:36 | direct call
-    Evidence: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Application/Service.cs:5:34 | direct call
-  [3] Research.Infrastructure.StorageException..ctor() | Project: Research.Infrastructure
-    Path: Research.Api.OrdersController.Get() --> Research.Application.Service.Load() --> Research.Infrastructure.Repository.Read() --> Research.Infrastructure.StorageException..ctor()
-    Evidence: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/OrdersController.cs:8:36 | direct call
-    Evidence: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Application/Service.cs:5:34 | direct call
-    Evidence: /home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Infrastructure/Repository.cs:6:39 | direct call
+OrdersController.Get
+  [1] Service.Load  (Research.Application)
+      at Research.Api/OrdersController.cs:8
+  [2] Repository.Read  (Research.Infrastructure)  via Service.Load
+      at Research.Api/OrdersController.cs:8
+      at Research.Application/Service.cs:5
+  [3] StorageException.ctor  (Research.Infrastructure)  via Service.Load -> Repository.Read
+      at Research.Api/OrdersController.cs:8
+      at Research.Application/Service.cs:5
+      at Research.Infrastructure/Repository.cs:6

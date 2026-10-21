@@ -63,7 +63,7 @@ For practical use cases of each command, such as impact analysis, CI gating, fin
 ### Common options
 
 - **Input:** `.csproj`, `.sln` or `.slnx`. Use `--framework` for multi-target projects and `--configuration` (default `Debug`) when needed.
-- **Test projects** (xUnit, NUnit, TUnit, MSTest, SpecFlow/Reqnroll, LightBDD, Cucumber, Pact, or anything with `IsTestProject=true`) are skipped by default, before restore or framework checks; stderr lists them. `--include-tests` loads them like any other project.
+- **Test projects** (xUnit, NUnit, TUnit, MSTest, SpecFlow/Reqnroll, LightBDD, Cucumber, Pact, or anything with `IsTestProject=true`) are skipped by default, before restore or framework checks. `--include-tests` loads them like any other project.
 - **Roots:** `--root <id or exact signature>`; copy either from `inspect --methods`. An exact ID match wins, so use the ID when signatures collide. `reach` and `paths` accept any source method; `exceptions` and `diagram` need a controller action.
 - **Dispatch:** interface, virtual, delegate, dynamic and unresolved calls are visible boundaries. `reach --follow-candidates` and `diagram --follow-candidates` also follow implementation candidates, marked `(candidate)`. `paths` stops at the declared target. Exception views follow interface/virtual calls into their source implementations by default (the usual case with dependency-injected interfaces) and mark such results as possibilities, never as proven runtime paths; `exceptions --declared-only` stops at the declaration and reports *Unknown* instead.
 - **Limits:** `--budget` (default 100,000 examined call sites) everywhere; `reach`, `paths` and `diagram` also take `--max-depth` (default 20 transitions), `paths` takes `--max-paths` (default 1,000). `exceptions` has one knob only, `--budget`: its depth is generous and its witness cap scales with the budget. Reaching a limit is always reported, with what to raise.
@@ -118,18 +118,18 @@ A saved file can return exit code 1 because it contains useful but partial resul
   - Reports cover explicit `throw`s, throw expressions, rethrows and catches: static type vs exact constructed type, filters, protected regions and locations.
   - The default view lists every explicit throw and rethrow in source, independent of any action. The other three views trace from controller actions (or `--root`).
   - **Uncaught** (`--uncaught`) uses the bottom-up summary below; **caught** and **miscaught** use per-path witnesses, deduplicated by origin and handler or `try` block.
-  - **Caught** lists every catch an exception reaches with a matching type, with the handler's outcome: handles it (recovery not proven), rethrows it, or throws a replacement. A catch with a filter, or whose match depends on the runtime type, is flagged.
-  - **Miscaught** means the exception passes through a `try` whose catch clauses all have non-matching types. It is reported even when a catch further up handles it later; `Then:` shows what happens next. A catch whose match cannot be decided is *Unknown*, never miscaught.
+  - **Caught** lists every catch an exception reaches with a matching type, with the handler's outcome, read from its control flow: handles it, rethrows it, handles some cases and rethrows others, or throws a different exception instead. A catch with a filter, or whose match depends on the runtime type, is marked as a possible catch and the exception is followed past it.
+  - **Miscaught** means the exception passes through a `try` whose catch clauses all have non-matching types. It is reported even when a catch further up handles it later; `Then:` shows what happens next. A catch whose match cannot be decided is a possible catch, never miscaught.
   - Each witness unwinds the origin through its own `try` blocks and every caller's protected call site. An unrelated catch can never intercept it.
   - Statuses:
     - **Intercepted** by a matching handler. This does not prove recovery.
     - **Rethrown or replaced**, followed by the subsequent status.
     - **May escape** the controller action. It is never called "unhandled": middleware may still handle it.
-    - **Unknown**, with a reason. Causes include dispatch, missing bodies, filters, `finally`, async void, unobserved or aliased tasks, and depth limits.
+    - **Unknown**, with a reason. Causes include dispatch, missing bodies, a `finally` that can throw, async void, tasks that are never awaited, and depth limits. The CLI sums them up in one `Not followed:` line.
   - Directly awaited task-producing calls propagate.
   - One action can show an intercepted origin next to Unknown results for other calls; each witness stands alone.
   - The `--uncaught` summary computes a finite fixed point over direct-call strongly connected components. Recursion alone does not make a summary unknown. Origins remain distinct even when their exception types match; call-site catches transform each incoming effect separately.
-  - Ownerless extraction gaps are returned once in `GlobalGaps` and reported as global caveats on stderr, not repeated as action witnesses/unknown effects. Overall `IsComplete` stays false when global caveats exist; summary method/root completeness is local to its known effects.
+  - Ownerless extraction gaps are returned once in `GlobalGaps`, not repeated as action witnesses/unknown effects, and do not make a result incomplete. The CLI mentions only those that matter (minimal API endpoints it does not analyse); `inspect` lists every gap.
   - Summary effects and uncertainty coexist. Unknown effects propagate conservatively, including through catch-all handlers, because a missing body or extraction gap may represent more than a normally thrown exception. A summary does not prove the absence of runtime exceptions.
   - A summary witness is one example for an escaping effect, reconstructed on demand.
   - Implicit exceptions and branch feasibility are not modelled.

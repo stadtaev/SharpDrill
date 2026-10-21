@@ -1,4 +1,3 @@
-Projects: 3. Each project is listed with the projects it references (<ProjectReference>) beneath it.
-Research.Api [net10.0 | Nullable: enable | Nullable warnings as errors: no | All warnings as errors: no | Compiler warnings: 0 | Errors: 0]
-└── Research.Application [net10.0 | Nullable: enable | Nullable warnings as errors: no | All warnings as errors: no | Compiler warnings: 0 | Errors: 0]
-    └── Research.Infrastructure [net10.0 | Nullable: enable | Nullable warnings as errors: yes | All warnings as errors: no | Compiler warnings: 0 | Errors: 0]
+Research.Api [net10.0, nullable enable, 0 warnings]
+└── Research.Application [net10.0, nullable enable, 0 warnings]
+    └── Research.Infrastructure [net10.0, nullable enable, 0 warnings, nullable warnings are errors]
