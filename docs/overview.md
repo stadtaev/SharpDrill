@@ -80,7 +80,7 @@ Snippets below are from the sample Web API, with names and paths shortened; the 
 **`exceptions` — where can things go wrong?** Four views over the same throw and catch facts:
 
 - *Default, every throw:* each explicit `throw` with its type, method and location. A map of what the code can raise, independent of any endpoint.
-- *`--uncaught`:* which exceptions may leave a controller action because no catch is on the way, each with one example path. Scales to a whole API, for example to find domain exceptions that reach middleware.
+- *`--uncaught`:* which exceptions may leave a controller action because no catch is on the way, each with the shortest example path. Scales to a whole API, for example to find domain exceptions that reach middleware.
 - *`--caught`:* each place an exception meets a matching catch: where it is thrown, where it is caught, and what the handler does (handles, rethrows, replaces). Catches with filters or runtime-dependent matches are marked as possible.
 - *`--miscaught`:* exceptions that pass through a `try` whose catch clauses don't match their type, a common sign of catching the wrong exception. Shows the clauses, and whether something further up catches it.
 
