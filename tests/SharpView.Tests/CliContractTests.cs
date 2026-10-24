@@ -59,6 +59,10 @@ public sealed class CliContractTests
     [InlineData("inspect", "--methods", "--json")]
     [InlineData("inspect", "--output", "x.json")]
     [InlineData("inspect", "--root", "X()")]
+    [InlineData("inspect", "--format", "json")]
+    [InlineData("exceptions", "--format", "json")]
+    [InlineData("exceptions", "--caught", "--format", "msbuild")]
+    [InlineData("exceptions", "--format", "msbuild", "--locations")]
     public async Task Invalid_requests_fail_before_loading(string command, params string[] options)
     {
         var result = await Run([command, "missing.slnx", .. options]);
@@ -124,7 +128,6 @@ public sealed class CliContractTests
     [InlineData("paths", "--max-chains", "5")]
     [InlineData("reach", "--max-expansions", "5")]
     [InlineData("paths", "--root-id", "x")]
-    [InlineData("inspect", "--format", "json")]
     public async Task Removed_options_are_rejected_before_loading(string command, params string[] options)
     {
         var result = await Run([command, "missing.slnx", .. options]);
@@ -212,6 +215,23 @@ public sealed class CliContractTests
         Assert.Contains("    -> Service.Incompatible\n", text);
         Assert.StartsWith("Handled by a global exception handler: UseExceptionHandler (Research.Api/Program.cs:5)\nMiscaught: ", text);
         Assert.Contains("12 actions analysed: 1 miscaught (1 handled by a global exception handler).", result.Error);
+    }
+    [Fact]
+    public async Task Msbuild_format_prints_one_canonical_warning_per_finding()
+    {
+        var result = await Run("exceptions", ResearchFixture.Input, "--format", "msbuild", "--strict");
+        Assert.Equal(1, result.Exit);
+        var lines = result.Out.Replace("\r\n", "\n").TrimEnd('\n').Split('\n');
+        // Without a view: the uncaught findings (all reach the fixture's exception middleware), then the miscaught one.
+        Assert.Equal(["SV0002", "SV0002", "SV0002", "SV0003"], lines.Select(x => x.Split(": warning ")[1][..6]));
+        var service = Path.Combine(Path.GetDirectoryName(ResearchFixture.Input)!, "Research.Application", "Service.cs");
+        Assert.Equal($"{service}(8,45): warning SV0003: Research.Infrastructure.StorageException thrown in Repository.Read (Repository.cs:6) passes through this try, "
+            + "which catches only System.ArgumentException; then may escape the controller action; path: OrdersController.Incompatible -> Service.Incompatible -> Repository.Read", lines[3]);
+        Assert.Contains(lines, x => x.EndsWith("warning SV0002: Research.Infrastructure.StorageException may escape OrdersController.Rethrow to the global exception handler UseExceptionHandler, "
+            + "rethrown in Service.Rethrow (Service.cs:9); path: OrdersController.Rethrow -> Service.Rethrow -> Repository.Read", StringComparison.Ordinal));
+        Assert.Contains("12 actions analysed: 1 miscaught (1 handled by a global exception handler).", result.Error);
+        // A view narrows the warnings to that view.
+        Assert.Equal([lines[3]], (await Run("exceptions", ResearchFixture.Input, "--miscaught", "--format", "msbuild")).Out.Replace("\r\n", "\n").TrimEnd('\n').Split('\n'));
     }
     [Fact]
     public async Task Projects_print_the_reference_tree_with_build_settings()

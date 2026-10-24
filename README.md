@@ -14,11 +14,29 @@ Results carry source evidence (file:line:column), and anything the analysis cann
 ## Install
 
 ```sh
-dotnet tool install -g SharpView   # requires a .NET 10 or newer SDK
+dotnet tool install -g SharpView.Cli   # requires a .NET 10 or newer SDK
 cd MyApi && sharpview projects   # the .sln/.slnx (or single .csproj) in the current directory; or pass a path
 ```
 
-Update with `dotnet tool update -g SharpView`. The examples below run from source with `dotnet run --project src/SharpView.Cli --`; with the tool installed, use `sharpview` instead.
+Update with `dotnet tool update -g SharpView.Cli`. The examples below run from source with `dotnet run --project src/SharpView.Cli --`; with the tool installed, use `sharpview` instead.
+
+### As build warnings
+
+Reference the `SharpView` package from the Web API project, and every build (`dotnet build`, Visual Studio, VS Code, CI) runs `sharpview exceptions --format msbuild` and reports its findings as warnings in the build output, the Error List and the Problems panel:
+
+```xml
+<PackageReference Include="SharpView" Version="x.y.z" />
+```
+
+| Code | Finding |
+| --- | --- |
+| `SV0001` | An exception may escape a controller action: no catch on the way. |
+| `SV0002` | The same, but a global exception handler (exception middleware or filter) receives it. |
+| `SV0003` | A throw passes through a `try` whose catch clauses do not match its type. |
+| `SV0004` | A third-party call with no catch on the way (with `<SharpViewArguments>--strict</SharpViewArguments>`). |
+| `SV0000` | The analysis itself failed. |
+
+`#pragma warning disable SV0003` and `[SuppressMessage("SharpView", "SV0003")]` suppress one finding where the warning points; `NoWarn` and `WarningsAsErrors` work as for compiler warnings; `SharpViewEnabled=false` skips the analysis, and `SharpViewInput` points it at a solution instead of the referencing project and its references. It adds a few seconds to each build and does not run in design-time builds. Settings: [src/SharpView.Build/PACKAGE.md](src/SharpView.Build/PACKAGE.md).
 
 ## Quick start (from source)
 
@@ -138,7 +156,7 @@ A saved file can return exit code 1 because it contains useful but partial resul
 
 ## Releasing
 
-Every push to `main` that changes code runs [release.yml](.github/workflows/release.yml): restore, build the fixture, test, then publish all five packages (see [Packages](#packages)) with the same version to nuget.org, tag `v<version>` and create a GitHub release with the packages attached. Pull requests and other branches run [ci.yml](.github/workflows/ci.yml) (test and pack only). Changes limited to `docs/` or `README.md` do not publish; they ship with the next code change.
+Every push to `main` that changes code runs [release.yml](.github/workflows/release.yml): restore, build the fixture, test, then publish all six packages (see [Packages](#packages)) with the same version to nuget.org, tag `v<version>` and create a GitHub release with the packages attached. Pull requests and other branches run [ci.yml](.github/workflows/ci.yml) (test and pack only). Changes limited to `docs/` or `README.md` do not publish; they ship with the next code change.
 
 The version is computed by [github-tag-action](https://github.com/mathieudutour/github-tag-action) (pinned to a commit) from [Conventional Commit](https://www.conventionalcommits.org/) subjects since the last `v*` tag. The tag is created only after nuget.org accepts the package:
 
@@ -150,13 +168,14 @@ The version is computed by [github-tag-action](https://github.com/mathieudutour/
 
 The highest bump among the new commits wins. Before the first tag the baseline is 0.0.0, so a `feat:` commit makes the first release 0.1.0. The subject must start with the type: `feat: ...` counts, while "feat" only in the description does not. Add `[skip-release]` to a commit message to leave it out of the version calculation. Local builds report `0.0.0-dev`.
 
-Publishing uses nuget.org [trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing), so no API key is stored: the workflow exchanges its GitHub OIDC token for a short-lived key. One-time setup on nuget.org (Trusted Publishing page): a policy for repository owner `stadtaev`, repository `sharpview`, workflow file `release.yml`, glob pattern `SharpView*` (covers all five package IDs). The workflow's `NuGet login` step names the nuget.org account (`user: stadtaev`). Optionally reserve the `SharpView.` ID prefix so nobody else can publish packages under it.
+Publishing uses nuget.org [trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing), so no API key is stored: the workflow exchanges its GitHub OIDC token for a short-lived key. One-time setup on nuget.org (Trusted Publishing page): a policy for repository owner `stadtaev`, repository `sharpview`, workflow file `release.yml`, glob pattern `SharpView*` (covers all six package IDs). The workflow's `NuGet login` step names the nuget.org account (`user: stadtaev`). Optionally reserve the `SharpView.` ID prefix so nobody else can publish packages under it.
 
 ## Packages
 
 | Package | Purpose |
 | --- | --- |
-| `SharpView` | The `sharpview` .NET tool (`dotnet tool install -g SharpView`). |
+| `SharpView.Cli` | The `sharpview` .NET tool (`dotnet tool install -g SharpView.Cli`). |
+| `SharpView` | MSBuild package: exception findings as build warnings (see [As build warnings](#as-build-warnings)). Carries its own copy of the CLI. |
 | `SharpView.Core` | Fact model, `ProgramIndex` and the queries: reachability, paths, exceptions, project map, layer rules. No Roslyn dependency. |
 | `SharpView.Roslyn` | Loads solutions and projects with MSBuild and Roslyn into a fact snapshot. |
 | `SharpView.Graph` | Generic immutable directed multigraph with search and SCC algorithms. |

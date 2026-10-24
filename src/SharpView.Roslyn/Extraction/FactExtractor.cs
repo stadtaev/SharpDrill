@@ -29,6 +29,7 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
     private readonly List<DependencyFact> dependencies = [];
     private readonly List<ImplementationFact> implementations = [];
     private readonly List<BoundaryHandlingFact> boundaries = [];
+    private readonly List<SuppressionFact> suppressions = [];
     private readonly SortedSet<string> thirdParty = new(StringComparer.Ordinal);
     private readonly Dictionary<SyntaxTree, bool> generatedTrees = [];
     private readonly Dictionary<SyntaxTree, string> checksums = [];
@@ -37,16 +38,16 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
     // Symbols in registration order; hierarchy links are resolved after extraction so baseline registration order is untouched.
     private readonly List<(TypeId Id, INamedTypeSymbol Symbol)> registeredTypes = [];
     private readonly List<(CallableId Id, IMethodSymbol Symbol)> registeredMethods = [];
-    internal SourceEvidence Evidence(SyntaxNode node)
+    internal SourceEvidence Evidence(SyntaxNode node) => Evidence(node.SyntaxTree, node.Span);
+    private SourceEvidence Evidence(SyntaxTree tree, TextSpan span)
     {
-        var tree = node.SyntaxTree;
         if (!checksums.TryGetValue(tree, out var checksum))
         {
             checksum = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(tree.GetText().ToString())));
             checksums[tree] = checksum;
         }
-        var pos = tree.GetLineSpan(node.Span).StartLinePosition;
-        return new(tree.FilePath, checksum, node.SpanStart, node.Span.Length, pos.Line + 1, pos.Character + 1, generatedTrees.GetValueOrDefault(tree));
+        var pos = tree.GetLineSpan(span).StartLinePosition;
+        return new(tree.FilePath, checksum, span.Start, span.Length, pos.Line + 1, pos.Character + 1, generatedTrees.GetValueOrDefault(tree));
     }
     private ImmutableArray<SourceEvidence> Declarations(ISymbol s)
     {
@@ -111,12 +112,44 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
                 if (ns.StartsWith("Microsoft.AspNetCore.", StringComparison.Ordinal) && bound.Name is "MapGet" or "MapPost" or "MapPut" or "MapDelete" or "MapPatch" or "MapMethods")
                     gaps.Add(new(GapKind.Unsupported, fact.Id, null, "Minimal API endpoint is outside controller-action analysis.", Evidence(invocation)));
             }
+            ExtractSuppressions(root, model, token);
             // Top-level statements are one gap per file. Initializers matter only when they can run source code or throw;
             // literals, constants and library constructors/calls (`= 5`, `= new()`, `= string.Empty`) have nothing to model.
             if (root.DescendantNodes().OfType<GlobalStatementSyntax>().FirstOrDefault() is { } topLevel)
                 gaps.Add(new(GapKind.Unsupported, fact.Id, null, "Top-level statements have no owning callable; boundary registrations are extracted separately.", Evidence(topLevel)));
             foreach (var node in root.DescendantNodes().OfType<EqualsValueClauseSyntax>().Where(x => x.Parent is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Parent: FieldDeclarationSyntax } } or PropertyDeclarationSyntax))
                 if (RunsSourceOrThrows(node.Value, model, token)) initializers.Add((node, model, fact));
+        }
+    }
+    // The C# suppression forms, applied to SharpView's own rules (SV + digits) the way the compiler applies them to its
+    // warnings: a pragma from its directive to the matching restore or the end of the file, an attribute over its declaration.
+    private void ExtractSuppressions(SyntaxNode root, SemanticModel model, CancellationToken token)
+    {
+        static bool IsRule(string code) => code.Length > 2 && code.StartsWith("SV", StringComparison.Ordinal) && code[2..].All(char.IsAsciiDigit);
+        var open = new Dictionary<string, int>(StringComparer.Ordinal);
+        void Close(string code, int end)
+        {
+            if (open.Remove(code, out var start)) suppressions.Add(new(code.Length == 0 ? null : code, Evidence(root.SyntaxTree, TextSpan.FromBounds(start, end))));
+        }
+        foreach (var pragma in root.DescendantTrivia(descendIntoTrivia: true).Select(x => x.GetStructure()).OfType<PragmaWarningDirectiveTriviaSyntax>())
+        {
+            // A bare pragma (no codes) covers every warning, SharpView's included; "" stands for it while open.
+            var disable = pragma.DisableOrRestoreKeyword.ValueText == "disable";
+            var codes = pragma.ErrorCodes.Count > 0 ? pragma.ErrorCodes.Select(x => x.ToString().Trim()).Where(IsRule).ToArray() : disable ? [""] : open.Keys.ToArray();
+            foreach (var code in codes)
+                if (disable) open.TryAdd(code, pragma.FullSpan.End);
+                else Close(code, pragma.FullSpan.Start);
+        }
+        foreach (var code in open.Keys.ToArray()) Close(code, root.FullSpan.End);
+        foreach (var attribute in root.DescendantNodes().OfType<AttributeSyntax>())
+        {
+            token.ThrowIfCancellationRequested();
+            if (attribute.Parent is not AttributeListSyntax { Target: null, Parent: { } declaration } || attribute.ArgumentList?.Arguments is not [_, var check, ..]
+                || model.GetSymbolInfo(attribute, token).Symbol?.ContainingType.ToDisplayString() is not ("System.Diagnostics.CodeAnalysis.SuppressMessageAttribute" or "System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessageAttribute")
+                || model.GetConstantValue(check.Expression, token).Value is not string checkId) continue;
+            // CheckId is "SV0001" or "SV0001:Short name", as for compiler and analyzer rules.
+            var code = checkId.Split(':')[0].Trim();
+            if (IsRule(code)) suppressions.Add(new(code, Evidence(declaration)));
         }
     }
     // The platform comes from a framework reference pack (dotnet/packs/Microsoft.AspNetCore.App.Ref, or the same pack, NETStandard.Library
@@ -235,6 +268,7 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
             ExceptionRegions = regions.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
             Implementations = implementations.Distinct().OrderBy(x => x.Declared.Value, StringComparer.Ordinal).ThenBy(x => x.Implementation.Value, StringComparer.Ordinal).ThenBy(x => x.Kind).ToImmutableArray(),
             BoundaryHandling = boundaries.OrderBy(x => x.Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence.SpanStart).ToImmutableArray(),
+            Suppressions = [.. suppressions.OrderBy(x => x.Scope.Path, StringComparer.Ordinal).ThenBy(x => x.Scope.SpanStart).ThenBy(x => x.Rule, StringComparer.Ordinal)],
             ThirdPartyAssemblies = [.. thirdParty.Select(x => new CompilationId(x))],
         };
     }

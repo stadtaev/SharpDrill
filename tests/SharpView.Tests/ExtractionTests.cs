@@ -266,6 +266,33 @@ public sealed class ExtractionTests
             snapshot.BoundaryHandling.Select(x => x.Registration));
     }
     [Fact]
+    public async Task Pragmas_and_SuppressMessage_record_where_SharpView_rules_are_suppressed()
+    {
+        var snapshot = await Extract("""
+            public class C {
+            #pragma warning disable SV0001
+                void A() { throw new System.Exception(); }
+            #pragma warning restore SV0001
+                void B() { throw new System.Exception(); }
+            #pragma warning disable CS0168, SV0003
+                [System.Diagnostics.CodeAnalysis.SuppressMessage("SharpView", "SV0002:Handled by middleware")]
+                void D() { throw new System.Exception(); }
+                [System.Diagnostics.CodeAnalysis.SuppressMessage("Style", "IDE0060")]
+                void E() { }
+            }
+            #pragma warning disable
+            """);
+        // Sorted by position: the SV0001 region, SV0003 open to the end of the file, D's attribute, the bare pragma.
+        Assert.Equal(["SV0001", "SV0003", "SV0002", null], snapshot.Suppressions.Select(x => x.Rule));
+        var (a, b, d) = (Throw("C.A"), Throw("C.B"), Throw("C.D"));
+        Assert.True(snapshot.Suppressions.Any(x => x.Covers("SV0001", a)));
+        Assert.False(snapshot.Suppressions.Any(x => x.Covers("SV0002", a)));
+        Assert.False(snapshot.Suppressions.Any(x => x.Covers("SV0001", b) || x.Covers("SV0003", b)));
+        Assert.True(snapshot.Suppressions.Any(x => x.Covers("SV0002", d)));
+        Assert.True(snapshot.Suppressions.Any(x => x.Covers("SV0003", d)));
+        SourceEvidence Throw(string owner) => snapshot.ThrowSites.Single(x => snapshot.Callables.Single(c => c.Id == x.Owner).DisplaySignature.StartsWith(owner + "(", StringComparison.Ordinal)).Evidence;
+    }
+    [Fact]
     public async Task Controller_convention_excludes_abstract_generic_and_inherited_opt_outs()
     {
         var snapshot = await Extract("""

@@ -1,0 +1,37 @@
+<Project>
+
+  <!-- SharpView: exception findings as build warnings after each build of the referencing project.
+       SV0001 may escape a controller action; SV0002 may escape to a global exception handler; SV0003 passes through a try
+       whose catches do not match; SV0004 third-party call with no catch on the way (only in strict mode, see below);
+       SV0000 the analysis itself failed. Silence a rule with NoWarn, fail on one with WarningsAsErrors. -->
+  <PropertyGroup>
+    <!-- false skips the analysis, e.g. <SharpViewEnabled Condition="'$(CI)' != 'true'">false</SharpViewEnabled> for CI only. -->
+    <SharpViewEnabled Condition="'$(SharpViewEnabled)' == ''">true</SharpViewEnabled>
+    <!-- What to analyse: this project and the projects it references, or a .sln/.slnx. -->
+    <SharpViewInput Condition="'$(SharpViewInput)' == ''">$(MSBuildProjectFullPath)</SharpViewInput>
+    <!-- Extra options for sharpview exceptions: strict (adds SV0004), declared-only, budget N; see sharpview help. -->
+    <SharpViewArguments Condition="'$(SharpViewArguments)' == ''"></SharpViewArguments>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <_SharpViewHost>$(DOTNET_HOST_PATH)</_SharpViewHost>
+    <_SharpViewHost Condition="'$(_SharpViewHost)' == ''">dotnet</_SharpViewHost>
+    <!-- A multi-targeting project is analysed once, for its first framework. -->
+    <_SharpViewFramework>$(TargetFramework)</_SharpViewFramework>
+    <_SharpViewFramework Condition="'$(TargetFrameworks)' != ''">$([System.Text.RegularExpressions.Regex]::Match($(TargetFrameworks), '[^;\s]+'))</_SharpViewFramework>
+    <_SharpViewFrameworkOption Condition="'$(TargetFrameworks)' != ''">--framework $(_SharpViewFramework)</_SharpViewFrameworkOption>
+  </PropertyGroup>
+
+  <Target Name="SharpViewExceptions" AfterTargets="Build"
+          Condition="'$(SharpViewEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(TargetFramework)' == '$(_SharpViewFramework)'">
+    <!-- Findings are MSBuild's canonical "file(line,col): warning CODE: text" lines, which Exec logs as warnings;
+         the rest of the CLI's output is detail for normal verbosity. Exit 1 only means some calls could not be followed. -->
+    <Exec Command="&quot;$(_SharpViewHost)&quot; &quot;$(MSBuildThisFileDirectory)../tools/net10.0/SharpView.Cli.dll&quot; exceptions &quot;$(SharpViewInput)&quot; --format msbuild --configuration &quot;$(Configuration)&quot; $(_SharpViewFrameworkOption) $(SharpViewArguments)"
+          IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="normal">
+      <Output TaskParameter="ExitCode" PropertyName="_SharpViewExitCode" />
+    </Exec>
+    <Warning Condition="'$(_SharpViewExitCode)' == '2'" Code="SV0000" File="$(SharpViewInput)"
+             Text="SharpView could not analyse $(SharpViewInput); build with -v:n to see why. Set SharpViewEnabled=false to skip it." />
+  </Target>
+
+</Project>

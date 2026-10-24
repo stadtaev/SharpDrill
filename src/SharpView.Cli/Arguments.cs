@@ -28,6 +28,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
     internal bool Mermaid { get; init; }
     internal bool Methods { get; init; }
     internal bool Json { get; init; }
+    internal bool MSBuild { get; init; }
     internal string? Output { get; init; }
     internal ImmutableHashSet<string> Given { get; init; } = [];
 
@@ -45,6 +46,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                         --miscaught  passes through a try whose catch clauses do not match its type
                       Findings covered by exception middleware or a global exception filter are listed last.
                       [--uncaught [--strict] | --caught | --miscaught] [--root R] [--budget N] [--declared-only] [--locations]
+                      [--format msbuild]
                       Interface/virtual calls are followed into their source implementations (results are marked
                       as possibilities); --declared-only stops at the declaration instead.
           reach       What each controller action can reach: every method once, with distance and shortest path.
@@ -68,6 +70,10 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
           --budget N             Examined call sites (default 100000). Raise it when the output says a limit was reached.
           --max-nodes N          diagram nodes, including boundaries (default 200).   --max-edges N  diagram edges (default 1000).
           --locations            Print call-site evidence for paths and witnesses.
+          --format msbuild       exceptions: one build warning per finding, "file(line,col): warning SV000N: ...", for MSBuild,
+                                 Visual Studio and VS Code (what the SharpView package runs after each build). Without a view:
+                                 uncaught and miscaught. SV0001 may escape an action, SV0002 may escape to a global exception
+                                 handler, SV0003 miscaught, SV0004 third-party call with no catch on the way (--strict).
           --mermaid              projects: also save the tree as a Mermaid diagram in Markdown.
           --output F             New file for inspect --json, diagram or projects --mermaid; existing files are never overwritten.
                                  Diagrams default to ./diagrams_exports in the current directory.
@@ -119,6 +125,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                 "--mermaid" => parsed with { Mermaid = true },
                 "--methods" => parsed with { Methods = true },
                 "--json" => parsed with { Json = true },
+                "--format" => parsed with { MSBuild = Value() == "msbuild" ? true : throw new ArgumentException("--format accepts only msbuild.") },
                 "--output" => parsed with { Output = Value() },
                 "--configuration" => parsed with { Configuration = Value() },
                 "--framework" => parsed with { Framework = Value() },
@@ -151,5 +158,5 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
     }
 
     private static readonly ImmutableHashSet<string> KnownOptions = ["--root", "--follow-candidates", "--declared-only", "--strict", "--max-depth", "--max-paths",
-        "--budget", "--max-nodes", "--max-edges", "--locations", "--uncaught", "--caught", "--miscaught", "--mermaid", "--methods", "--json", "--output"];
+        "--budget", "--max-nodes", "--max-edges", "--locations", "--uncaught", "--caught", "--miscaught", "--mermaid", "--methods", "--json", "--format", "--output"];
 }

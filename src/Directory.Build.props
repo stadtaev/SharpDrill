@@ -19,8 +19,8 @@
     <PackageOutputPath>$(MSBuildThisFileDirectory)../nupkg</PackageOutputPath>
   </PropertyGroup>
 
-  <!-- Libraries share one README; the tool project packs its own. -->
-  <ItemGroup Condition="'$(PackAsTool)' != 'true'">
+  <!-- Libraries share one README; the tool and MSBuild packages pack their own. -->
+  <ItemGroup Condition="'$(HasOwnReadme)' != 'true'">
     <None Include="$(MSBuildThisFileDirectory)LIBRARIES.md" Pack="true" PackagePath="README.md" Visible="false" />
   </ItemGroup>
 

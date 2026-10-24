@@ -16,6 +16,8 @@ Empty handlers and bare return/empty statement handlers intercept within the mod
 
 Queries return IDs and structured endings; CLI formatting adds arrows and descriptions. The exception result budget bounds all witnesses, including Unknown boundaries. Work counts examined call sites; call-path relationship collapse still charges all supporting evidence. The depth limit counts transitions. Budget limits return explicit flags even when a partially explored path cannot be emitted.
 
+Suppressions are source spans where a SharpView rule is turned off: `#pragma warning disable SV000N` up to its `restore` or the end of the file (a bare `#pragma warning disable` covers every rule, as it does for the compiler), and the declaration carrying `[SuppressMessage(..., "SV000N[:name]")]`. Only `exceptions --format msbuild` applies them, to the location a warning points at; the text views list every finding.
+
 JSON exports a schema-version-3 envelope (all IDs as plain strings), producer version and the full snapshot. Absolute paths and local identities make snapshot IDs local research evidence; use `Key` for portable identity.
 
 ## Consumer model
