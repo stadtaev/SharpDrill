@@ -47,6 +47,30 @@ public sealed class ExceptionScopeTests
     }
 
     [Fact]
+    public void Strict_reports_third_party_calls_that_no_catch_meets_whatever_the_catch_type()
+    {
+        var vendor = new CompilationId("metadata|Vendor");
+        var other = new TypeUse(new TypeId("Other"), "Other", NullabilityKind.NotAnnotated, []);
+        var snapshot = Snapshot([Method("Action"), Method("Bare"), Method("Narrow"), Method("Logs"), Method("Send", BodyStatus.MetadataOnly) with { Compilation = vendor },
+                Method("Console", BodyStatus.MetadataOnly)],
+            [Call("Action", "Bare", "ab"), Call("Action", "Narrow", "an"), Call("Action", "Logs", "al"), Call("Action", "Console", "ac"),
+             Call("Bare", "Send", "bare"), Call("Narrow", "Send", "narrow", region: "n"), Call("Logs", "Send", "logs", region: "l")]) with
+        {
+            Catches = [new(new("narrow"), new("Narrow"), other, null, Evidence, Evidence, HandlerOutcome.Intercepts, null),
+                new(new("log"), new("Logs"), null, null, Evidence, Evidence, HandlerOutcome.Rethrows, null)],
+            ExceptionRegions = [new(new("n"), new("Narrow"), Evidence, [new CatchId("narrow")], false), new(new("l"), new("Logs"), Evidence, [new CatchId("log")], false)],
+            ThirdPartyAssemblies = [vendor],
+        };
+        var strict = ExceptionSummaryQuery.Analyze(snapshot, [Action], new(ThirdPartyCallOrigins: true));
+        // Any catch wraps the call, whatever its type; a catch that only rethrows does not, and .NET calls are not third-party.
+        var escapes = strict.Roots[Action].Escapes;
+        Assert.Equal(["bare", "logs"], escapes.Select(x => strict.ThirdPartyCalls[x.Origin].Value).Distinct().Order());
+        Assert.Equal(["Action", "Bare"], strict.GetWitness(Action, escapes.First(x => strict.ThirdPartyCalls[x.Origin].Value == "bare")).Path.Select(x => x.Value));
+        Assert.True(strict.IsComplete);
+        Assert.Empty(ExceptionSummaryQuery.Analyze(snapshot, [Action]).Roots[Action].Escapes);
+    }
+
+    [Fact]
     public void A_root_without_a_body_is_still_unknown_in_both_analyses()
     {
         var snapshot = Snapshot([Method("Action", BodyStatus.MetadataOnly)], []);

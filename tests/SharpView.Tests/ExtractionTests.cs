@@ -229,6 +229,16 @@ public sealed class ExtractionTests
     }
 
     [Fact]
+    public async Task Referenced_assemblies_outside_the_shared_framework_are_third_party()
+    {
+        // The test host references the shared runtime (shared/Microsoft.NETCore.App) and packages copied to its output.
+        var snapshot = await Extract("public static class Use { public static void Run() { System.Console.WriteLine(); Xunit.Assert.True(true); } }");
+        Assert.Contains(snapshot.ThirdPartyAssemblies, x => x.Value.StartsWith("metadata|xunit.assert,", StringComparison.Ordinal));
+        Assert.DoesNotContain(snapshot.ThirdPartyAssemblies, x => x.Value.StartsWith("metadata|System.Console,", StringComparison.Ordinal) || x.Value.StartsWith("metadata|System.Runtime,", StringComparison.Ordinal));
+        var call = Assert.Single(snapshot.CallSites, x => x.TargetDisplay.StartsWith("Xunit.Assert.True", StringComparison.Ordinal));
+        Assert.Contains(snapshot.Callables.Single(x => x.Id == call.BoundTarget).Compilation, snapshot.ThirdPartyAssemblies);
+    }
+    [Fact]
     public async Task Global_mvc_exception_filters_are_boundary_handling_and_other_filters_are_not()
     {
         var snapshot = await Extract("""

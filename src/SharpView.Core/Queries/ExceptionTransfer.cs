@@ -15,6 +15,9 @@ internal sealed record ExceptionFlow(ThrowSiteId Origin, ThrowSiteId? Subsequent
     // Handlers that may or may not take the exception (a filter, or a static type that does not decide the match); the
     // exception is followed past them. Collected with evidence only.
     public ImmutableList<CatchId> Possible { get; init; } = ImmutableList<CatchId>.Empty;
+    // An exception of any type from a third-party call: every catch clause's type takes it, because strict mode asks whether
+    // the call is wrapped in a catch, not whether a particular type is caught.
+    public bool AnyType { get; init; }
 }
 
 internal sealed record ExceptionTransferResult(ExceptionFlow Flow, ExceptionStatus? Status = null,
@@ -33,6 +36,13 @@ internal static class ExceptionTransfer
         if (program.Callable(origin.Owner).IsAsync && !program.Callable(origin.Owner).ReturnsTask)
             return Unknown(flow, ExceptionReason.AsyncUnsupported, "Async void or custom awaitable propagation is outside the supported model.");
         return ApplyRegions(program, flow, origin.ProtectedRegions, token, collectEvidence);
+    }
+
+    internal static ExceptionTransferResult StartAtCall(ProgramIndex program, ThrowSiteId origin, CallSiteFact site, CancellationToken token)
+    {
+        var flow = new ExceptionFlow(origin, null, new TypeUse(null, "System.Exception", NullabilityKind.Oblivious, []), null, false, false,
+            ImmutableList<SourceEvidence>.Empty, ImmutableList<CatchId>.Empty) { AnyType = true };
+        return ApplyRegions(program, flow, site.ProtectedRegions, token, collectEvidence: false);
     }
 
     internal static ExceptionTransferResult Cross(ProgramIndex program, ExceptionFlow flow, CallSiteFact site, CancellationToken token,
@@ -66,7 +76,7 @@ internal static class ExceptionTransfer
             foreach (var catchId in region.Catches)
             {
                 var handler = program.Catch(catchId);
-                var match = Matches(program.Types, flow.Type, flow.Exact, handler.CaughtType, token);
+                var match = flow.AnyType ? true : Matches(program.Types, flow.Type, flow.Exact, handler.CaughtType, token);
                 if (match == false) continue;
                 matched = true;
                 if (collectEvidence)

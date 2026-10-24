@@ -4,8 +4,9 @@ using SharpView.Graph;
 namespace SharpView.Core;
 
 // FollowCandidates continues through interface/virtual calls into source implementation candidates; effects that
-// pass through one are marked ViaCandidate.
-public sealed record ExceptionSummaryOptions(int MaxWork = 1_000_000, int MaxFacts = 100_000, bool FollowCandidates = false)
+// pass through one are marked ViaCandidate. ThirdPartyCallOrigins also makes every call into a third-party assembly an
+// origin (of any type, which every catch takes); its escapes are the calls with no catch on the way from the root.
+public sealed record ExceptionSummaryOptions(int MaxWork = 1_000_000, int MaxFacts = 100_000, bool FollowCandidates = false, bool ThirdPartyCallOrigins = false)
 {
     public void Validate()
     {
@@ -55,6 +56,8 @@ public sealed class ExceptionSummaryResult
     // not modelled and they never make a summary Unknown.
     internal ImmutableDictionary<CallableId, ImmutableArray<CallableId>> Callees { get; init; } = ImmutableDictionary<CallableId, ImmutableArray<CallableId>>.Empty;
     internal ImmutableDictionary<CallableId, ImmutableArray<CallableId>> LibraryByMethod { get; init; } = ImmutableDictionary<CallableId, ImmutableArray<CallableId>>.Empty;
+    // Origins standing for third-party call sites (ThirdPartyCallOrigins); they have no throw site.
+    public ImmutableDictionary<ThrowSiteId, CallSiteId> ThirdPartyCalls { get; init; } = ImmutableDictionary<ThrowSiteId, CallSiteId>.Empty;
 
     /// <summary>Library methods called anywhere beneath a root (direct calls, and candidates when followed).</summary>
     public ImmutableArray<CallableId> LibraryCallsFrom(CallableId root)
@@ -153,7 +156,7 @@ public static class ExceptionSummaryQuery
         // requested) or a library call. Library methods have no source body, so their exceptions are not modelled:
         // they are recorded, never part of the summary graph, and never make a summary Unknown.
         var siteTargets = new Dictionary<CallSiteId, ImmutableArray<CallableId>>();
-        var librarySites = new HashSet<CallSiteId>();
+        var librarySites = new Dictionary<CallSiteId, CallableId>();
         var libraryByMethod = new Dictionary<CallableId, HashSet<CallableId>>();
         var callees = new Dictionary<CallableId, HashSet<CallableId>>();
         var candidateIncoming = new Dictionary<CallableId, List<CallSiteFact>>();
@@ -173,7 +176,7 @@ public static class ExceptionSummaryQuery
                 {
                     if (site.BoundTarget is { } target && index.ContainsCallable(target))
                     {
-                        if (index.Callable(target).Body == BodyStatus.MetadataOnly) { librarySites.Add(site.Id); AddTo(libraryByMethod, method, target); }
+                        if (index.Callable(target).Body == BodyStatus.MetadataOnly) { librarySites.Add(site.Id, target); AddTo(libraryByMethod, method, target); }
                         else targets = [target];
                     }
                 }
@@ -182,7 +185,7 @@ public static class ExceptionSummaryQuery
                     var candidates = calls.CandidatesOf(site.Id);
                     if (site.BoundTarget is { } declared && index.ContainsCallable(declared)
                         && index.Callable(declared).Body == BodyStatus.MetadataOnly && candidates.IsEmpty)
-                    { librarySites.Add(site.Id); AddTo(libraryByMethod, method, declared); }
+                    { librarySites.Add(site.Id, declared); AddTo(libraryByMethod, method, declared); }
                     else if (options.FollowCandidates)
                     {
                         targets = candidates;
@@ -211,6 +214,8 @@ public static class ExceptionSummaryQuery
         var componentOf = new Dictionary<CallableId, int>();
         for (var i = 0; i < components.Length; i++)
             foreach (var method in components[i]) componentOf.Add(method, i);
+        var thirdParty = options.ThirdPartyCallOrigins ? index.Snapshot.ThirdPartyAssemblies.ToHashSet() : [];
+        var thirdPartyCalls = new SortedDictionary<ThrowSiteId, CallSiteId>(Comparer<ThrowSiteId>.Create((a, b) => string.CompareOrdinal(a.Value, b.Value)));
         var facts = reachable.ToDictionary(x => x, _ => new Dictionary<ExceptionSummaryResult.FlowKey, ExceptionSummaryResult.Stored>());
         var alternatives = new Dictionary<(CallableId, ExceptionSummaryResult.FlowKey), List<ExceptionSummaryResult.Link>>();
         var unknowns = reachable.ToDictionary(x => x, _ => new HashSet<ExceptionUncertainty>());
@@ -292,7 +297,17 @@ public static class ExceptionSummaryQuery
                     token.ThrowIfCancellationRequested();
                     if (factLimit || workLimit) break;
                     if (!Spend()) break;
-                    if (librarySites.Contains(site.Id)) continue;
+                    if (librarySites.TryGetValue(site.Id, out var library))
+                    {
+                        if (thirdParty.Contains(index.Callable(library).Compilation))
+                        {
+                            var origin = new ThrowSiteId("call|" + site.Id.Value); thirdPartyCalls[origin] = site.Id;
+                            var transfer = ExceptionTransfer.StartAtCall(index, origin, site, token);
+                            if (transfer.Status == ExceptionStatus.Unknown) AddUnknown(method, new(transfer.Reason, origin, site.Id, transfer.Message, site.Evidence));
+                            else if (transfer.Status is null) AddFlow(method, transfer.Flow, null);
+                        }
+                        continue;
+                    }
                     if (site.Dispatch != DispatchKind.Direct)
                     {
                         // Followed candidates carry their own effects in; only a call with nowhere to go is uncertain.
@@ -396,6 +411,7 @@ public static class ExceptionSummaryQuery
         {
             Callees = callees.ToImmutableDictionary(x => x.Key, x => x.Value.ToImmutableArray()),
             LibraryByMethod = libraryByMethod.ToImmutableDictionary(x => x.Key, x => x.Value.ToImmutableArray()),
+            ThirdPartyCalls = thirdPartyCalls.ToImmutableDictionary(),
         };
     }
 }

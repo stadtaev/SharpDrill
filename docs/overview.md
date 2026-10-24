@@ -81,6 +81,7 @@ Snippets below are from the sample Web API, with names and paths shortened; the 
 
 - *Default, every throw:* each explicit `throw` with its type, method and location. A map of what the code can raise, independent of any endpoint.
 - *`--uncaught`:* which exceptions may leave a controller action because no catch is on the way, each with the shortest example path. Scales to a whole API, for example to find domain exceptions that reach middleware.
+- *`--uncaught --strict`:* also every call into a third-party library (NuGet package or referenced DLL, not .NET itself) that no catch meets on the way from the action, in a section of its own. Any catch around the call or a caller counts, whatever its type.
 - *`--caught`:* each place an exception meets a matching catch: where it is thrown, where it is caught, and what the handler does (handles, rethrows, replaces). Catches with filters or runtime-dependent matches are marked as possible.
 - *`--miscaught`:* exceptions that pass through a `try` whose catch clauses don't match their type, a common sign of catching the wrong exception. Shows the clauses, and whether something further up catches it.
 

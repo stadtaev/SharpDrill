@@ -23,6 +23,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
     internal bool Locations { get; init; }
     internal bool FollowCandidates { get; init; }
     internal bool DeclaredOnly { get; init; }
+    internal bool Strict { get; init; }
     internal ExceptionView View { get; init; }
     internal bool Mermaid { get; init; }
     internal bool Methods { get; init; }
@@ -43,7 +44,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                         --caught     reaches a matching catch: where it is thrown and where it is caught
                         --miscaught  passes through a try whose catch clauses do not match its type
                       Findings covered by exception middleware or a global exception filter are listed last.
-                      [--uncaught | --caught | --miscaught] [--root R] [--budget N] [--declared-only] [--locations]
+                      [--uncaught [--strict] | --caught | --miscaught] [--root R] [--budget N] [--declared-only] [--locations]
                       Interface/virtual calls are followed into their source implementations (results are marked
                       as possibilities); --declared-only stops at the declaration instead.
           reach       What each controller action can reach: every method once, with distance and shortest path.
@@ -60,6 +61,8 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                                  controller action. reach/paths accept any source method; exceptions/diagram need an action.
           --follow-candidates    reach/diagram: also follow implementation candidates of interface/virtual calls (marked, never runtime facts).
           --declared-only        exceptions: do not follow interface/virtual calls into source implementations.
+          --strict               exceptions --uncaught: also list calls into third-party libraries (NuGet packages, referenced
+                                 DLLs; not .NET itself) that no catch meets on the way from the action, in a section of their own.
           --max-depth N          reach/paths/diagram: call transitions (default 20), never runtime stack depth.
           --max-paths N          paths: reported paths (default 1000).
           --budget N             Examined call sites (default 100000). Raise it when the output says a limit was reached.
@@ -103,6 +106,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                 "--root" => parsed with { Root = Value() },
                 "--follow-candidates" => parsed with { FollowCandidates = true },
                 "--declared-only" => parsed with { DeclaredOnly = true },
+                "--strict" => parsed with { Strict = true },
                 "--max-depth" => parsed with { MaxDepth = Number() },
                 "--max-paths" => parsed with { MaxPaths = Number() },
                 "--budget" => parsed with { Budget = Number() },
@@ -146,6 +150,6 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
         };
     }
 
-    private static readonly ImmutableHashSet<string> KnownOptions = ["--root", "--follow-candidates", "--declared-only", "--max-depth", "--max-paths",
+    private static readonly ImmutableHashSet<string> KnownOptions = ["--root", "--follow-candidates", "--declared-only", "--strict", "--max-depth", "--max-paths",
         "--budget", "--max-nodes", "--max-edges", "--locations", "--uncaught", "--caught", "--miscaught", "--mermaid", "--methods", "--json", "--output"];
 }

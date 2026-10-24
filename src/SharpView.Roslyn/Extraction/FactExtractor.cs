@@ -29,6 +29,7 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
     private readonly List<DependencyFact> dependencies = [];
     private readonly List<ImplementationFact> implementations = [];
     private readonly List<BoundaryHandlingFact> boundaries = [];
+    private readonly SortedSet<string> thirdParty = new(StringComparer.Ordinal);
     private readonly Dictionary<SyntaxTree, bool> generatedTrees = [];
     private readonly Dictionary<SyntaxTree, string> checksums = [];
     private readonly Dictionary<(SyntaxTree Tree, TextSpan Span), int[]> lambdaStarts = [];
@@ -62,6 +63,9 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
         if (assemblyProjects.TryGetValue(compilation.Assembly.Identity.ToString(), out var previous) && previous != fact.Id)
             throw new AnalysisInputException($"Ambiguous source assembly identity {compilation.Assembly.Identity}; analyse separately.");
         assemblyProjects[compilation.Assembly.Identity.ToString()] = fact.Id;
+        foreach (var reference in compilation.References.OfType<PortableExecutableReference>())
+            if (reference.FilePath is { } file && !IsFramework(file) && compilation.GetAssemblyOrModuleSymbol(reference) is IAssemblySymbol assembly)
+                thirdParty.Add("metadata|" + assembly.Identity);
         var generated = (await project.GetSourceGeneratedDocumentsAsync(token)).Select(x => x.FilePath).ToHashSet(StringComparer.Ordinal);
         var ordinary = project.Documents.Select(x => x.FilePath).ToHashSet(StringComparer.Ordinal);
         foreach (var tree in compilation.SyntaxTrees.OrderBy(x => x.FilePath, StringComparer.Ordinal))
@@ -114,6 +118,15 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
             foreach (var node in root.DescendantNodes().OfType<EqualsValueClauseSyntax>().Where(x => x.Parent is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Parent: FieldDeclarationSyntax } } or PropertyDeclarationSyntax))
                 if (RunsSourceOrThrows(node.Value, model, token)) initializers.Add((node, model, fact));
         }
+    }
+    // The platform comes from a framework reference pack (dotnet/packs/Microsoft.AspNetCore.App.Ref, or the same pack, NETStandard.Library
+    // or .NET Framework reference assemblies from the NuGet cache) or a shared runtime directory (shared/Microsoft.NETCore.App).
+    private static bool IsFramework(string path)
+    {
+        var parts = path.Split('/', '\\');
+        return parts.Any(x => x.EndsWith(".App.Ref", StringComparison.OrdinalIgnoreCase) || x.Equals("NETStandard.Library.Ref", StringComparison.OrdinalIgnoreCase)
+                || x.Equals("NETStandard.Library", StringComparison.OrdinalIgnoreCase) || x.StartsWith("Microsoft.NETFramework.ReferenceAssemblies", StringComparison.OrdinalIgnoreCase))
+            || parts.Zip(parts.Skip(1)).Any(x => x.First == "shared" && x.Second.StartsWith("Microsoft.", StringComparison.Ordinal) && x.Second.EndsWith(".App", StringComparison.Ordinal));
     }
     // `options.Filters.Add<F>()`, `Add(typeof(F))`, `Add(new F())` or `AddService<F>()` where F is an MVC exception filter.
     private static INamedTypeSymbol? GlobalExceptionFilter(IMethodSymbol bound, InvocationExpressionSyntax invocation, SemanticModel model, CancellationToken token)
@@ -221,7 +234,8 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
             Catches = catches.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
             ExceptionRegions = regions.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
             Implementations = implementations.Distinct().OrderBy(x => x.Declared.Value, StringComparer.Ordinal).ThenBy(x => x.Implementation.Value, StringComparer.Ordinal).ThenBy(x => x.Kind).ToImmutableArray(),
-            BoundaryHandling = boundaries.OrderBy(x => x.Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence.SpanStart).ToImmutableArray()
+            BoundaryHandling = boundaries.OrderBy(x => x.Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence.SpanStart).ToImmutableArray(),
+            ThirdPartyAssemblies = [.. thirdParty.Select(x => new CompilationId(x))],
         };
     }
 }

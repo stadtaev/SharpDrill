@@ -112,6 +112,9 @@ public sealed record ProgramSnapshot
     public ImmutableArray<ExceptionRegionFact> ExceptionRegions { get; init; } = [];
     public ImmutableArray<ImplementationFact> Implementations { get; init; } = [];
     public ImmutableArray<BoundaryHandlingFact> BoundaryHandling { get; init; } = [];
+    // Metadata compilation IDs of referenced assemblies that no .NET framework reference pack supplies: NuGet packages and
+    // directly referenced DLLs.
+    public ImmutableArray<CompilationId> ThirdPartyAssemblies { get; init; } = [];
     // Full path of the analysed input's directory; consumers use it with SourceEvidence.RelativeTo.
     public string SourceRoot { get; init; } = "";
     // Project files skipped at load because they are test projects (not a gap: excluding them is the default scope).

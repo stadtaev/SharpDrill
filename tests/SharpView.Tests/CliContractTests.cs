@@ -50,6 +50,9 @@ public sealed class CliContractTests
     [InlineData("exceptions", "--declared-only")]
     [InlineData("projects", "--follow-candidates")]
     [InlineData("exceptions", "--uncaught", "--caught")]
+    [InlineData("exceptions", "--strict")]
+    [InlineData("exceptions", "--miscaught", "--strict")]
+    [InlineData("reach", "--strict")]
     [InlineData("exceptions", "--uncaught", "--max-depth", "3")]
     [InlineData("exceptions", "--caught", "--max-paths", "0")]
     [InlineData("reach", "--max-paths", "5")]
@@ -231,6 +234,15 @@ public sealed class CliContractTests
         finally { File.Delete(path); }
     }
 
+    [Fact]
+    public async Task Strict_adds_a_third_party_count_and_leaves_framework_calls_out()
+    {
+        var plain = await Run("exceptions", ResearchFixture.Input, "--uncaught");
+        var strict = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--strict");
+        // The fixture calls only .NET itself, so strict mode adds no section.
+        Assert.Equal(plain.Out, strict.Out);
+        Assert.Contains("12 actions analysed: 3 uncaught exceptions (3 handled by a global exception handler); 0 third-party calls with no catch on the way.", strict.Error);
+    }
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
