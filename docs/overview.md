@@ -60,6 +60,7 @@ Snippets below are from the sample Web API, with names and paths shortened; the 
 | What can this action reach? | `reach` | [reach.txt](samples/reach.txt) |
 | What are all the call paths from an action (or any method)? | `paths` | [paths.txt](samples/paths.txt) |
 | What did SharpView extract? | `inspect` (`--methods`, `--json`) | — |
+| How does a coding agent learn to use SharpView? | `skill` (`--user`) | `.claude/skills/sharpview/SKILL.md` |
 
 ### When to use which command
 

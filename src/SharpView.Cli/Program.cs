@@ -19,6 +19,7 @@ internal static class EntryPoint
         try
         {
             if (args is ["--version"]) { Console.WriteLine(Version); return 0; }
+            if (args is ["skill", .. var options]) return SkillCommand.Run(options);
             var arguments = Arguments.Parse(args);
             if (arguments is null) { Console.WriteLine(Arguments.Help); return 0; }
             MSBuildBootstrap.RegisterSdk();

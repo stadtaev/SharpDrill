@@ -30,6 +30,7 @@
 
   <ItemGroup>
     <None Include="PACKAGE.md" Pack="true" PackagePath="README.md" />
+    <EmbeddedResource Include="Skill/SKILL.md" LogicalName="SKILL.md" />
   </ItemGroup>
 
 </Project>

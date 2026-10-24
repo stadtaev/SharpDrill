@@ -20,6 +20,10 @@ cd MyApi && sharpview projects   # the .sln/.slnx (or single .csproj) in the cur
 
 Update with `dotnet tool update -g SharpView.Cli`. The examples below run from source with `dotnet run --project src/SharpView.Cli --`; with the tool installed, use `sharpview` instead.
 
+### For coding agents
+
+`sharpview skill` writes an agent skill to `.claude/skills/sharpview/SKILL.md` at the repository root, where GitHub Copilot (VS Code, Visual Studio, Copilot CLI, cloud agent) and Claude Code both find it. Commit it so the whole team gets it. `sharpview skill --user` installs it for every repository instead (`~/.copilot/skills` and `~/.claude/skills`). The skill ships inside the tool and carries its version: rerun the command after `dotnet tool update` to refresh it. It never overwrites a `SKILL.md` it did not write.
+
 ### As build warnings
 
 Reference the `SharpView` package from the Web API project, and every build (`dotnet build`, Visual Studio, VS Code, CI) runs `sharpview exceptions --format msbuild` and reports its findings as warnings in the build output, the Error List and the Problems panel:
@@ -75,6 +79,7 @@ Analysing your own solution: restore it first (SharpView never restores, builds 
 | `paths` | What are all call paths from each action (or any `--root` method), with project and transitions? | controller actions |
 | `diagram` | Export a Mermaid call graph in Markdown, grouped by project. | pick one controller action by number |
 | `inspect` | Extraction summary; `--methods` lists callables with their IDs (to pick a `--root`); `--json` writes the full fact snapshot. | — |
+| `skill` | Installs the agent skill for GitHub Copilot and Claude Code (see [For coding agents](#for-coding-agents)). | — |
 
 For practical use cases of each command, such as impact analysis, CI gating, finding roots or debugging extraction, see [When to use which command](docs/overview.md#when-to-use-which-command). Sample outputs for each are in [docs/samples](docs/samples/README.md). Run `--help` for the complete option list.
 

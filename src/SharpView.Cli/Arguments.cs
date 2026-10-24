@@ -57,6 +57,9 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                       [--root R] [--follow-candidates] [--max-depth N] [--max-nodes N] [--max-edges N] [--budget N] [--output F]
           inspect     Extraction summary; --methods lists callables and their IDs; --json writes the fact snapshot (schema v3).
                       [--methods | --json [--output F]]
+          skill       Install the agent skill for GitHub Copilot and Claude Code: .claude/skills/sharpview/SKILL.md at the
+                      repository root, or with --user in ~/.copilot/skills and ~/.claude/skills. No project load.
+                      [--user]
 
         Options:
           --root R               One root: an ID (from inspect --methods) or an exact signature. Defaults to every

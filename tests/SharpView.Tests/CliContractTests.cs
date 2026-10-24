@@ -9,7 +9,8 @@ namespace SharpView.Tests;
 public sealed class CliContractTests
 {
     private static Task<(int Exit, string Out, string Error)> Run(params string[] args) => RunIn(ResearchFixture.Root, args);
-    private static async Task<(int Exit, string Out, string Error)> RunIn(string directory, params string[] args)
+    private static Task<(int Exit, string Out, string Error)> RunIn(string directory, params string[] args) => RunAs(directory, null, args);
+    private static async Task<(int Exit, string Out, string Error)> RunAs(string directory, string? home, params string[] args)
     {
         var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
         var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet")
@@ -18,6 +19,7 @@ public sealed class CliContractTests
             RedirectStandardError = true,
             WorkingDirectory = directory
         };
+        if (home is not null) { start.Environment["HOME"] = home; start.Environment["USERPROFILE"] = home; }
         start.ArgumentList.Add(Path.Combine(ResearchFixture.Root, $"src/SharpView.Cli/bin/{configuration}/net10.0/SharpView.Cli.dll"));
         foreach (var arg in args) start.ArgumentList.Add(arg);
         using var process = Process.Start(start)!;
@@ -68,6 +70,47 @@ public sealed class CliContractTests
         var result = await Run([command, "missing.slnx", .. options]);
         Assert.Equal(2, result.Exit);
         Assert.DoesNotContain("Input not found", result.Error);
+    }
+    [Fact]
+    public async Task Skill_installs_at_the_repository_root_refreshes_its_own_file_and_keeps_foreign_ones()
+    {
+        var repository = Directory.CreateTempSubdirectory("sharpview-skill-");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(repository.FullName, ".git"));
+            var nested = Directory.CreateDirectory(Path.Combine(repository.FullName, "src", "Api")).FullName;
+            var skill = Path.Combine(repository.FullName, ".claude", "skills", "sharpview", "SKILL.md");
+            var first = await RunIn(nested, "skill");
+            Assert.Equal(0, first.Exit);
+            Assert.Equal(skill + "\n", first.Out.ReplaceLineEndings("\n"));
+            var text = File.ReadAllText(skill);
+            Assert.StartsWith("---\nname: sharpview\ndescription: ", text);
+            // The skill must keep up with the CLI: every command, view and warning code is named.
+            foreach (var term in new[] { "sharpview projects", "sharpview exceptions --uncaught", "--strict", "--caught", "--miscaught", "sharpview reach",
+                "sharpview paths", "sharpview diagram", "sharpview inspect --methods", "--format msbuild", "SV0000", "SV0001", "SV0002", "SV0003", "SV0004" })
+                Assert.Contains(term, text);
+            Assert.Equal(0, (await RunIn(nested, "skill")).Exit);
+            File.WriteAllText(skill, "my own skill");
+            var foreign = await RunIn(nested, "skill");
+            Assert.Equal(2, foreign.Exit);
+            Assert.Contains("was not written by sharpview", foreign.Error);
+            Assert.Equal("my own skill", File.ReadAllText(skill));
+            Assert.Equal(2, (await RunIn(nested, "skill", "--global")).Exit);
+        }
+        finally { repository.Delete(true); }
+    }
+    [Fact]
+    public async Task Skill_user_installs_for_copilot_and_claude_code()
+    {
+        var home = Directory.CreateTempSubdirectory("sharpview-home-");
+        try
+        {
+            var result = await RunAs(home.FullName, home.FullName, "skill", "--user");
+            Assert.Equal(0, result.Exit);
+            foreach (var agent in new[] { ".copilot", ".claude" })
+                Assert.StartsWith("---\nname: sharpview\n", File.ReadAllText(Path.Combine(home.FullName, agent, "skills", "sharpview", "SKILL.md")));
+        }
+        finally { home.Delete(true); }
     }
     [Fact]
     public async Task Without_an_input_the_solution_in_the_current_directory_is_analysed()

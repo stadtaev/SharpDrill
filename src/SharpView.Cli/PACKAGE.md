@@ -22,6 +22,7 @@ Requires a .NET 10 (or newer) SDK. Restore the solution first: SharpView never r
 | `paths` | Every call path from an action (or any `--root` method). |
 | `diagram` | A Mermaid call graph of one controller action. |
 | `inspect` | Extraction summary; `--methods` lists root IDs; `--json` writes the full fact snapshot. |
+| `skill` | Installs the agent skill for GitHub Copilot and Claude Code in this repository (`.claude/skills/sharpview/SKILL.md`), or `--user` for every repository. Rerun after updating the tool. |
 
 To get the exception findings as warnings in every build (`dotnet build`, Visual Studio, VS Code, CI), reference the `SharpView` package from the Web API project instead.
 

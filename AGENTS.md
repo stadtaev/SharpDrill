@@ -44,6 +44,8 @@ Pipeline: **Load → Extract facts → Index → Queries → (Rules) → CLI rep
 - `SharpView.Cli` — argument parsing (`Arguments.cs`, strict per-command option sets), one `ICliCommand` per command
   under `Commands/`, shared naming in `Display.cs`. Formatting only; no analysis logic. `ReportCommand` prints grouped
   gaps to stderr after each report; results go to stdout, diagnostics to stderr. Packed as the `SharpView.Cli` tool.
+  `skill` (like `--version`) is handled before argument parsing and loads nothing: it writes the embedded
+  `Skill/SKILL.md`, the agent-facing guide to the CLI. Update it when commands, options or output change.
 - `SharpView.Build` — no code: the `SharpView` MSBuild package. `build/SharpView.targets` runs the packed CLI's
   `exceptions --format msbuild` after each build, so findings become SV000N warnings in dotnet build, VS and VS Code.
 
