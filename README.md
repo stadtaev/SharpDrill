@@ -13,12 +13,32 @@ Results carry source evidence (file:line:column), and anything the analysis cann
 
 ## Install
 
+Both ways need a .NET 10 (or newer) SDK. Restore the analysed solution first; SharpView never restores or builds it.
+
+| You want | Install | Package |
+| --- | --- | --- |
+| The `sharpview` command, run by hand or by an agent | .NET tool | `SharpView.Cli` |
+| Exception findings as warnings in every build, locally and in CI | NuGet package reference | `SharpView` |
+
+### Command-line tool
+
 ```sh
-dotnet tool install -g SharpView.Cli   # requires a .NET 10 or newer SDK
-cd MyApi && sharpview projects   # the .sln/.slnx (or single .csproj) in the current directory; or pass a path
+dotnet tool install -g SharpView.Cli   # once per machine
+cd MyApi && sharpview projects         # the .sln/.slnx (or single .csproj) in the current directory; or pass a path
 ```
 
-Update with `dotnet tool update -g SharpView.Cli`. The examples below run from source with `dotnet run --project src/SharpView.Cli --`; with the tool installed, use `sharpview` instead.
+Update with `dotnet tool update -g SharpView.Cli`. To pin the version per repository and get it in CI with a plain restore, install it as a local tool instead:
+
+```sh
+dotnet new tool-manifest                 # once: creates .config/dotnet-tools.json; commit it
+dotnet tool install SharpView.Cli
+dotnet tool restore                      # on another machine or in CI
+dotnet sharpview exceptions --uncaught
+```
+
+Upgrading from the old `SharpView` tool package: `dotnet tool uninstall -g SharpView`, then install `SharpView.Cli`. The command is still `sharpview`; the `SharpView` ID is now the build package below.
+
+The examples further down run from source with `dotnet run --project src/SharpView.Cli --`; with the tool installed, use `sharpview` instead.
 
 ### For coding agents
 
@@ -26,11 +46,23 @@ Update with `dotnet tool update -g SharpView.Cli`. The examples below run from s
 
 ### As build warnings
 
-Reference the `SharpView` package from the Web API project, and every build (`dotnet build`, Visual Studio, VS Code, CI) runs `sharpview exceptions --format msbuild` and reports its findings as warnings in the build output, the Error List and the Problems panel:
+Add the `SharpView` package to the Web API project (the one with the controllers):
+
+```sh
+dotnet add MyApi/MyApi.csproj package SharpView
+```
+
+or by hand in the `.csproj`. It is a development dependency, so it does not flow to projects that reference this one:
 
 ```xml
-<PackageReference Include="SharpView" Version="x.y.z" />
+<ItemGroup>
+  <PackageReference Include="SharpView" Version="x.y.z" />
+</ItemGroup>
 ```
+
+With central package management, put `<PackageVersion Include="SharpView" Version="x.y.z" />` in `Directory.Packages.props` and leave `Version` off the reference. CI needs nothing extra: `dotnet restore` fetches the package, and `dotnet build` prints the warnings.
+
+From then on every build (`dotnet build`, Visual Studio, VS Code, CI) runs `sharpview exceptions --format msbuild` and reports its findings as warnings in the build output, Visual Studio's Error List and VS Code's Problems panel:
 
 | Code | Finding |
 | --- | --- |
