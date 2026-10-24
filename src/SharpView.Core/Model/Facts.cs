@@ -83,6 +83,13 @@ public sealed record ExceptionRegionFact(ExceptionRegionId Id, CallableId Owner,
 public sealed record ImplementationFact(CallableId Declared, CallableId Implementation, ImplementationKind Kind);
 public sealed record ControllerActionFact(CallableId Method, string Convention);
 public sealed record BoundaryHandlingFact(CompilationId Compilation, string Registration, string BoundMethod, SourceEvidence Evidence);
+// A source span where a SharpView rule (SV0001...) is suppressed: `#pragma warning disable` up to its `restore` (or the
+// end of the file), or the declaration carrying `[SuppressMessage]`. A null Rule is a bare `#pragma warning disable`: every rule.
+public sealed record SuppressionFact(string? Rule, SourceEvidence Scope)
+{
+    public bool Covers(string rule, SourceEvidence at) => (Rule is null || Rule == rule) && at.Path == Scope.Path
+        && at.SpanStart >= Scope.SpanStart && at.SpanStart < Scope.SpanStart + Scope.SpanLength;
+}
 public sealed record AnalysisGap(GapKind Kind, CompilationId? Compilation, CallableId? Owner, string Message, SourceEvidence? Evidence);
 public sealed record CompilationFact(CompilationId Id, string ProjectPath, string AssemblyIdentity,
     string TargetFramework, string Configuration, string LanguageVersion, string NullableContext,
@@ -112,6 +119,10 @@ public sealed record ProgramSnapshot
     public ImmutableArray<ExceptionRegionFact> ExceptionRegions { get; init; } = [];
     public ImmutableArray<ImplementationFact> Implementations { get; init; } = [];
     public ImmutableArray<BoundaryHandlingFact> BoundaryHandling { get; init; } = [];
+    public ImmutableArray<SuppressionFact> Suppressions { get; init; } = [];
+    // Metadata compilation IDs of referenced assemblies that no .NET framework reference pack supplies: NuGet packages and
+    // directly referenced DLLs.
+    public ImmutableArray<CompilationId> ThirdPartyAssemblies { get; init; } = [];
     // Full path of the analysed input's directory; consumers use it with SourceEvidence.RelativeTo.
     public string SourceRoot { get; init; } = "";
     // Project files skipped at load because they are test projects (not a gap: excluding them is the default scope).

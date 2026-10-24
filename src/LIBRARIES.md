@@ -1,6 +1,6 @@
 # SharpView libraries
 
-Building blocks of [SharpView](https://github.com/stadtaev/sharpview), source-backed analysis of ASP.NET Core Web APIs. Install the `SharpView` .NET tool (`dotnet tool install -g SharpView`) to use it from the command line; reference these packages to build your own analyses and rules.
+Building blocks of [SharpView](https://github.com/stadtaev/sharpview), source-backed analysis of ASP.NET Core Web APIs. Install the `SharpView.Cli` .NET tool (`dotnet tool install -g SharpView.Cli`) to use it from the command line, or reference the `SharpView` package to get its exception findings as build warnings; reference these packages to build your own analyses and rules.
 
 | Package | Contents |
 | --- | --- |

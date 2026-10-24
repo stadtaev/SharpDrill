@@ -77,6 +77,20 @@ public sealed class CoreTests
         Assert.Equal(new[] { "Action", "Right", "Shared" }, result.GetWitness(new CallableId("Action"), new ThrowSiteId("origin")).Path.Select(x => x.Value));
     }
 
+    [Theory]
+    [InlineData("a", "c")]
+    [InlineData("z", "b")]
+    public void Exception_summary_witness_is_the_shortest_path_whatever_the_discovery_order(string longSite, string shortSite)
+    {
+        var snapshot = Snapshot([Method("Action"), Method("A"), Method("B"), Method("C"), Method("Leaf")],
+            [Call("Action", "A", longSite), Call("A", "B", "ab"), Call("B", "Leaf", "bl"), Call("Action", "C", shortSite), Call("C", "Leaf", "cl")],
+            [Throw("Leaf")]);
+        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        var witness = result.GetWitness(new CallableId("Action"), new ThrowSiteId("origin"));
+        Assert.Equal(new[] { "Action", "C", "Leaf" }, witness.Path.Select(x => x.Value));
+        Assert.Equal(new[] { shortSite, "cl" }, witness.Sites.Select(x => x.Value));
+    }
+
     [Fact]
     public void Exception_summary_keeps_known_escape_beside_unknown_boundary()
     {

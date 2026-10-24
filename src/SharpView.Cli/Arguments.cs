@@ -23,10 +23,12 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
     internal bool Locations { get; init; }
     internal bool FollowCandidates { get; init; }
     internal bool DeclaredOnly { get; init; }
+    internal bool Strict { get; init; }
     internal ExceptionView View { get; init; }
     internal bool Mermaid { get; init; }
     internal bool Methods { get; init; }
     internal bool Json { get; init; }
+    internal bool MSBuild { get; init; }
     internal string? Output { get; init; }
     internal ImmutableHashSet<string> Given { get; init; } = [];
 
@@ -42,7 +44,9 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                         --uncaught   may escape the action: no catch on the way (one example path per origin)
                         --caught     reaches a matching catch: where it is thrown and where it is caught
                         --miscaught  passes through a try whose catch clauses do not match its type
-                      [--uncaught | --caught | --miscaught] [--root R] [--budget N] [--declared-only] [--locations]
+                      Findings covered by exception middleware or a global exception filter are listed last.
+                      [--uncaught [--strict] | --caught | --miscaught] [--root R] [--budget N] [--declared-only] [--locations]
+                      [--format msbuild]
                       Interface/virtual calls are followed into their source implementations (results are marked
                       as possibilities); --declared-only stops at the declaration instead.
           reach       What each controller action can reach: every method once, with distance and shortest path.
@@ -53,17 +57,26 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                       [--root R] [--follow-candidates] [--max-depth N] [--max-nodes N] [--max-edges N] [--budget N] [--output F]
           inspect     Extraction summary; --methods lists callables and their IDs; --json writes the fact snapshot (schema v3).
                       [--methods | --json [--output F]]
+          skill       Install the agent skill for GitHub Copilot and Claude Code: .claude/skills/sharpview/SKILL.md at the
+                      repository root, or with --user in ~/.copilot/skills and ~/.claude/skills. No project load.
+                      [--user]
 
         Options:
           --root R               One root: an ID (from inspect --methods) or an exact signature. Defaults to every
                                  controller action. reach/paths accept any source method; exceptions/diagram need an action.
           --follow-candidates    reach/diagram: also follow implementation candidates of interface/virtual calls (marked, never runtime facts).
           --declared-only        exceptions: do not follow interface/virtual calls into source implementations.
+          --strict               exceptions --uncaught: also list calls into third-party libraries (NuGet packages, referenced
+                                 DLLs; not .NET itself) that no catch meets on the way from the action, in a section of their own.
           --max-depth N          reach/paths/diagram: call transitions (default 20), never runtime stack depth.
           --max-paths N          paths: reported paths (default 1000).
           --budget N             Examined call sites (default 100000). Raise it when the output says a limit was reached.
           --max-nodes N          diagram nodes, including boundaries (default 200).   --max-edges N  diagram edges (default 1000).
           --locations            Print call-site evidence for paths and witnesses.
+          --format msbuild       exceptions: one build warning per finding, "file(line,col): warning SV000N: ...", for MSBuild,
+                                 Visual Studio and VS Code (what the SharpView package runs after each build). Without a view:
+                                 uncaught and miscaught. SV0001 may escape an action, SV0002 may escape to a global exception
+                                 handler, SV0003 miscaught, SV0004 third-party call with no catch on the way (--strict).
           --mermaid              projects: also save the tree as a Mermaid diagram in Markdown.
           --output F             New file for inspect --json, diagram or projects --mermaid; existing files are never overwritten.
                                  Diagrams default to ./diagrams_exports in the current directory.
@@ -102,6 +115,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                 "--root" => parsed with { Root = Value() },
                 "--follow-candidates" => parsed with { FollowCandidates = true },
                 "--declared-only" => parsed with { DeclaredOnly = true },
+                "--strict" => parsed with { Strict = true },
                 "--max-depth" => parsed with { MaxDepth = Number() },
                 "--max-paths" => parsed with { MaxPaths = Number() },
                 "--budget" => parsed with { Budget = Number() },
@@ -114,6 +128,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                 "--mermaid" => parsed with { Mermaid = true },
                 "--methods" => parsed with { Methods = true },
                 "--json" => parsed with { Json = true },
+                "--format" => parsed with { MSBuild = Value() == "msbuild" ? true : throw new ArgumentException("--format accepts only msbuild.") },
                 "--output" => parsed with { Output = Value() },
                 "--configuration" => parsed with { Configuration = Value() },
                 "--framework" => parsed with { Framework = Value() },
@@ -145,6 +160,6 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
         };
     }
 
-    private static readonly ImmutableHashSet<string> KnownOptions = ["--root", "--follow-candidates", "--declared-only", "--max-depth", "--max-paths",
-        "--budget", "--max-nodes", "--max-edges", "--locations", "--uncaught", "--caught", "--miscaught", "--mermaid", "--methods", "--json", "--output"];
+    private static readonly ImmutableHashSet<string> KnownOptions = ["--root", "--follow-candidates", "--declared-only", "--strict", "--max-depth", "--max-paths",
+        "--budget", "--max-nodes", "--max-edges", "--locations", "--uncaught", "--caught", "--miscaught", "--mermaid", "--methods", "--json", "--format", "--output"];
 }

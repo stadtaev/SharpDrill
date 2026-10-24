@@ -14,11 +14,33 @@ Results carry source evidence (file:line:column), and anything the analysis cann
 ## Install
 
 ```sh
-dotnet tool install -g SharpView   # requires a .NET 10 or newer SDK
+dotnet tool install -g SharpView.Cli   # requires a .NET 10 or newer SDK
 cd MyApi && sharpview projects   # the .sln/.slnx (or single .csproj) in the current directory; or pass a path
 ```
 
-Update with `dotnet tool update -g SharpView`. The examples below run from source with `dotnet run --project src/SharpView.Cli --`; with the tool installed, use `sharpview` instead.
+Update with `dotnet tool update -g SharpView.Cli`. The examples below run from source with `dotnet run --project src/SharpView.Cli --`; with the tool installed, use `sharpview` instead.
+
+### For coding agents
+
+`sharpview skill` writes an agent skill to `.claude/skills/sharpview/SKILL.md` at the repository root, where GitHub Copilot (VS Code, Visual Studio, Copilot CLI, cloud agent) and Claude Code both find it. Commit it so the whole team gets it. `sharpview skill --user` installs it for every repository instead (`~/.copilot/skills` and `~/.claude/skills`). The skill ships inside the tool and carries its version: rerun the command after `dotnet tool update` to refresh it. It never overwrites a `SKILL.md` it did not write.
+
+### As build warnings
+
+Reference the `SharpView` package from the Web API project, and every build (`dotnet build`, Visual Studio, VS Code, CI) runs `sharpview exceptions --format msbuild` and reports its findings as warnings in the build output, the Error List and the Problems panel:
+
+```xml
+<PackageReference Include="SharpView" Version="x.y.z" />
+```
+
+| Code | Finding |
+| --- | --- |
+| `SV0001` | An exception may escape a controller action: no catch on the way. |
+| `SV0002` | The same, but a global exception handler (exception middleware or filter) receives it. |
+| `SV0003` | A throw passes through a `try` whose catch clauses do not match its type. |
+| `SV0004` | A third-party call with no catch on the way (with `<SharpViewArguments>--strict</SharpViewArguments>`). |
+| `SV0000` | The analysis itself failed. |
+
+`#pragma warning disable SV0003` and `[SuppressMessage("SharpView", "SV0003")]` suppress one finding where the warning points; `NoWarn` and `WarningsAsErrors` work as for compiler warnings; `SharpViewEnabled=false` skips the analysis, and `SharpViewInput` points it at a solution instead of the referencing project and its references. It adds a few seconds to each build and does not run in design-time builds. Settings: [src/SharpView.Build/PACKAGE.md](src/SharpView.Build/PACKAGE.md).
 
 ## Quick start (from source)
 
@@ -57,6 +79,7 @@ Analysing your own solution: restore it first (SharpView never restores, builds 
 | `paths` | What are all call paths from each action (or any `--root` method), with project and transitions? | controller actions |
 | `diagram` | Export a Mermaid call graph in Markdown, grouped by project. | pick one controller action by number |
 | `inspect` | Extraction summary; `--methods` lists callables with their IDs (to pick a `--root`); `--json` writes the full fact snapshot. | — |
+| `skill` | Installs the agent skill for GitHub Copilot and Claude Code (see [For coding agents](#for-coding-agents)). | — |
 
 For practical use cases of each command, such as impact analysis, CI gating, finding roots or debugging extraction, see [When to use which command](docs/overview.md#when-to-use-which-command). Sample outputs for each are in [docs/samples](docs/samples/README.md). Run `--help` for the complete option list.
 
@@ -131,13 +154,14 @@ A saved file can return exit code 1 because it contains useful but partial resul
   - The `--uncaught` summary computes a finite fixed point over direct-call strongly connected components. Recursion alone does not make a summary unknown. Origins remain distinct even when their exception types match; call-site catches transform each incoming effect separately.
   - Ownerless extraction gaps are returned once in `GlobalGaps`, not repeated as action witnesses/unknown effects, and do not make a result incomplete. The CLI mentions only those that matter (minimal API endpoints it does not analyse); `inspect` lists every gap.
   - Summary effects and uncertainty coexist. Unknown effects propagate conservatively, including through catch-all handlers, because a missing body or extraction gap may represent more than a normally thrown exception. A summary does not prove the absence of runtime exceptions.
-  - A summary witness is one example for an escaping effect, reconstructed on demand.
+  - A summary witness is the shortest example path for an escaping effect, reconstructed on demand.
   - Implicit exceptions and branch feasibility are not modelled.
-  - `UseExceptionHandler`, `AddExceptionHandler` and `UseDeveloperExceptionPage` registrations are listed separately as *boundary evidence*. They do not prove middleware order or coverage; see Microsoft's [exception-handling documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling?view=aspnetcore-10.0).
+  - **Strict mode** (`--uncaught --strict`) also treats every call into a third-party assembly as an origin and lists, in a section of its own, the calls that no catch meets on the way from the action. Third-party means a referenced assembly that no .NET framework reference pack supplies (NuGet packages and directly referenced DLLs; `Microsoft.*.App.Ref`, `NETStandard.Library` and the shared runtime are .NET itself). Any catch clause around the call or around a caller's call site wraps it, whatever its type; a catch that only rethrows, or whose filter may decline, does not. Global handlers do not count: the rule asks for a catch around the call.
+  - Exceptions that escape an action whose host registers `UseExceptionHandler`, `UseDeveloperExceptionPage` or a global MVC exception filter (`Filters.Add`/`AddService` of an `IExceptionFilter`/`IAsyncExceptionFilter`) are listed last, under a `Handled by a global exception handler:` line naming the registrations. The host is the action's project or a project that references it. `AddExceptionHandler` alone handles nothing. This is registration evidence: it does not prove middleware order, environment conditions (for example a developer page registered only in Development) or what the handler returns. Exception filters applied as attributes on a controller or action are not modelled. See Microsoft's [exception-handling documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling?view=aspnetcore-10.0).
 
 ## Releasing
 
-Every push to `main` that changes code runs [release.yml](.github/workflows/release.yml): restore, build the fixture, test, then publish all five packages (see [Packages](#packages)) with the same version to nuget.org, tag `v<version>` and create a GitHub release with the packages attached. Pull requests and other branches run [ci.yml](.github/workflows/ci.yml) (test and pack only). Changes limited to `docs/` or `README.md` do not publish; they ship with the next code change.
+Every push to `main` that changes code runs [release.yml](.github/workflows/release.yml): restore, build the fixture, test, then publish all six packages (see [Packages](#packages)) with the same version to nuget.org, tag `v<version>` and create a GitHub release with the packages attached. Pull requests and other branches run [ci.yml](.github/workflows/ci.yml) (test and pack only). Changes limited to `docs/` or `README.md` do not publish; they ship with the next code change.
 
 The version is computed by [github-tag-action](https://github.com/mathieudutour/github-tag-action) (pinned to a commit) from [Conventional Commit](https://www.conventionalcommits.org/) subjects since the last `v*` tag. The tag is created only after nuget.org accepts the package:
 
@@ -149,13 +173,14 @@ The version is computed by [github-tag-action](https://github.com/mathieudutour/
 
 The highest bump among the new commits wins. Before the first tag the baseline is 0.0.0, so a `feat:` commit makes the first release 0.1.0. The subject must start with the type: `feat: ...` counts, while "feat" only in the description does not. Add `[skip-release]` to a commit message to leave it out of the version calculation. Local builds report `0.0.0-dev`.
 
-Publishing uses nuget.org [trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing), so no API key is stored: the workflow exchanges its GitHub OIDC token for a short-lived key. One-time setup on nuget.org (Trusted Publishing page): a policy for repository owner `stadtaev`, repository `sharpview`, workflow file `release.yml`, glob pattern `SharpView*` (covers all five package IDs). The workflow's `NuGet login` step names the nuget.org account (`user: stadtaev`). Optionally reserve the `SharpView.` ID prefix so nobody else can publish packages under it.
+Publishing uses nuget.org [trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing), so no API key is stored: the workflow exchanges its GitHub OIDC token for a short-lived key. One-time setup on nuget.org (Trusted Publishing page): a policy for repository owner `stadtaev`, repository `sharpview`, workflow file `release.yml`, glob pattern `SharpView*` (covers all six package IDs). The workflow's `NuGet login` step names the nuget.org account (`user: stadtaev`). Optionally reserve the `SharpView.` ID prefix so nobody else can publish packages under it.
 
 ## Packages
 
 | Package | Purpose |
 | --- | --- |
-| `SharpView` | The `sharpview` .NET tool (`dotnet tool install -g SharpView`). |
+| `SharpView.Cli` | The `sharpview` .NET tool (`dotnet tool install -g SharpView.Cli`). |
+| `SharpView` | MSBuild package: exception findings as build warnings (see [As build warnings](#as-build-warnings)). Carries its own copy of the CLI. |
 | `SharpView.Core` | Fact model, `ProgramIndex` and the queries: reachability, paths, exceptions, project map, layer rules. No Roslyn dependency. |
 | `SharpView.Roslyn` | Loads solutions and projects with MSBuild and Roslyn into a fact snapshot. |
 | `SharpView.Graph` | Generic immutable directed multigraph with search and SCC algorithms. |

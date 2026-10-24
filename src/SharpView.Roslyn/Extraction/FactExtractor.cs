@@ -29,6 +29,8 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
     private readonly List<DependencyFact> dependencies = [];
     private readonly List<ImplementationFact> implementations = [];
     private readonly List<BoundaryHandlingFact> boundaries = [];
+    private readonly List<SuppressionFact> suppressions = [];
+    private readonly SortedSet<string> thirdParty = new(StringComparer.Ordinal);
     private readonly Dictionary<SyntaxTree, bool> generatedTrees = [];
     private readonly Dictionary<SyntaxTree, string> checksums = [];
     private readonly Dictionary<(SyntaxTree Tree, TextSpan Span), int[]> lambdaStarts = [];
@@ -36,16 +38,16 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
     // Symbols in registration order; hierarchy links are resolved after extraction so baseline registration order is untouched.
     private readonly List<(TypeId Id, INamedTypeSymbol Symbol)> registeredTypes = [];
     private readonly List<(CallableId Id, IMethodSymbol Symbol)> registeredMethods = [];
-    internal SourceEvidence Evidence(SyntaxNode node)
+    internal SourceEvidence Evidence(SyntaxNode node) => Evidence(node.SyntaxTree, node.Span);
+    private SourceEvidence Evidence(SyntaxTree tree, TextSpan span)
     {
-        var tree = node.SyntaxTree;
         if (!checksums.TryGetValue(tree, out var checksum))
         {
             checksum = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(tree.GetText().ToString())));
             checksums[tree] = checksum;
         }
-        var pos = tree.GetLineSpan(node.Span).StartLinePosition;
-        return new(tree.FilePath, checksum, node.SpanStart, node.Span.Length, pos.Line + 1, pos.Character + 1, generatedTrees.GetValueOrDefault(tree));
+        var pos = tree.GetLineSpan(span).StartLinePosition;
+        return new(tree.FilePath, checksum, span.Start, span.Length, pos.Line + 1, pos.Character + 1, generatedTrees.GetValueOrDefault(tree));
     }
     private ImmutableArray<SourceEvidence> Declarations(ISymbol s)
     {
@@ -62,6 +64,9 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
         if (assemblyProjects.TryGetValue(compilation.Assembly.Identity.ToString(), out var previous) && previous != fact.Id)
             throw new AnalysisInputException($"Ambiguous source assembly identity {compilation.Assembly.Identity}; analyse separately.");
         assemblyProjects[compilation.Assembly.Identity.ToString()] = fact.Id;
+        foreach (var reference in compilation.References.OfType<PortableExecutableReference>())
+            if (reference.FilePath is { } file && !IsFramework(file) && compilation.GetAssemblyOrModuleSymbol(reference) is IAssemblySymbol assembly)
+                thirdParty.Add("metadata|" + assembly.Identity);
         var generated = (await project.GetSourceGeneratedDocumentsAsync(token)).Select(x => x.FilePath).ToHashSet(StringComparer.Ordinal);
         var ordinary = project.Documents.Select(x => x.FilePath).ToHashSet(StringComparer.Ordinal);
         foreach (var tree in compilation.SyntaxTrees.OrderBy(x => x.FilePath, StringComparer.Ordinal))
@@ -102,9 +107,12 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
                 var ns = bound.ContainingNamespace.ToDisplayString();
                 if (ns.StartsWith("Microsoft.AspNetCore.", StringComparison.Ordinal) && bound.Name is "UseExceptionHandler" or "AddExceptionHandler" or "UseDeveloperExceptionPage")
                     boundaries.Add(new(fact.Id, bound.Name, bound.ToDisplayString(), Evidence(invocation)));
+                if (GlobalExceptionFilter(bound, invocation, model, token) is { } filter)
+                    boundaries.Add(new(fact.Id, $"Filters.{bound.Name}({filter.Name})", bound.ToDisplayString(), Evidence(invocation)));
                 if (ns.StartsWith("Microsoft.AspNetCore.", StringComparison.Ordinal) && bound.Name is "MapGet" or "MapPost" or "MapPut" or "MapDelete" or "MapPatch" or "MapMethods")
                     gaps.Add(new(GapKind.Unsupported, fact.Id, null, "Minimal API endpoint is outside controller-action analysis.", Evidence(invocation)));
             }
+            ExtractSuppressions(root, model, token);
             // Top-level statements are one gap per file. Initializers matter only when they can run source code or throw;
             // literals, constants and library constructors/calls (`= 5`, `= new()`, `= string.Empty`) have nothing to model.
             if (root.DescendantNodes().OfType<GlobalStatementSyntax>().FirstOrDefault() is { } topLevel)
@@ -112,6 +120,58 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
             foreach (var node in root.DescendantNodes().OfType<EqualsValueClauseSyntax>().Where(x => x.Parent is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Parent: FieldDeclarationSyntax } } or PropertyDeclarationSyntax))
                 if (RunsSourceOrThrows(node.Value, model, token)) initializers.Add((node, model, fact));
         }
+    }
+    // The C# suppression forms, applied to SharpView's own rules (SV + digits) the way the compiler applies them to its
+    // warnings: a pragma from its directive to the matching restore or the end of the file, an attribute over its declaration.
+    private void ExtractSuppressions(SyntaxNode root, SemanticModel model, CancellationToken token)
+    {
+        static bool IsRule(string code) => code.Length > 2 && code.StartsWith("SV", StringComparison.Ordinal) && code[2..].All(char.IsAsciiDigit);
+        var open = new Dictionary<string, int>(StringComparer.Ordinal);
+        void Close(string code, int end)
+        {
+            if (open.Remove(code, out var start)) suppressions.Add(new(code.Length == 0 ? null : code, Evidence(root.SyntaxTree, TextSpan.FromBounds(start, end))));
+        }
+        foreach (var pragma in root.DescendantTrivia(descendIntoTrivia: true).Select(x => x.GetStructure()).OfType<PragmaWarningDirectiveTriviaSyntax>())
+        {
+            // A bare pragma (no codes) covers every warning, SharpView's included; "" stands for it while open.
+            var disable = pragma.DisableOrRestoreKeyword.ValueText == "disable";
+            var codes = pragma.ErrorCodes.Count > 0 ? pragma.ErrorCodes.Select(x => x.ToString().Trim()).Where(IsRule).ToArray() : disable ? [""] : open.Keys.ToArray();
+            foreach (var code in codes)
+                if (disable) open.TryAdd(code, pragma.FullSpan.End);
+                else Close(code, pragma.FullSpan.Start);
+        }
+        foreach (var code in open.Keys.ToArray()) Close(code, root.FullSpan.End);
+        foreach (var attribute in root.DescendantNodes().OfType<AttributeSyntax>())
+        {
+            token.ThrowIfCancellationRequested();
+            if (attribute.Parent is not AttributeListSyntax { Target: null, Parent: { } declaration } || attribute.ArgumentList?.Arguments is not [_, var check, ..]
+                || model.GetSymbolInfo(attribute, token).Symbol?.ContainingType.ToDisplayString() is not ("System.Diagnostics.CodeAnalysis.SuppressMessageAttribute" or "System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessageAttribute")
+                || model.GetConstantValue(check.Expression, token).Value is not string checkId) continue;
+            // CheckId is "SV0001" or "SV0001:Short name", as for compiler and analyzer rules.
+            var code = checkId.Split(':')[0].Trim();
+            if (IsRule(code)) suppressions.Add(new(code, Evidence(declaration)));
+        }
+    }
+    // The platform comes from a framework reference pack (dotnet/packs/Microsoft.AspNetCore.App.Ref, or the same pack, NETStandard.Library
+    // or .NET Framework reference assemblies from the NuGet cache) or a shared runtime directory (shared/Microsoft.NETCore.App).
+    private static bool IsFramework(string path)
+    {
+        var parts = path.Split('/', '\\');
+        return parts.Any(x => x.EndsWith(".App.Ref", StringComparison.OrdinalIgnoreCase) || x.Equals("NETStandard.Library.Ref", StringComparison.OrdinalIgnoreCase)
+                || x.Equals("NETStandard.Library", StringComparison.OrdinalIgnoreCase) || x.StartsWith("Microsoft.NETFramework.ReferenceAssemblies", StringComparison.OrdinalIgnoreCase))
+            || parts.Zip(parts.Skip(1)).Any(x => x.First == "shared" && x.Second.StartsWith("Microsoft.", StringComparison.Ordinal) && x.Second.EndsWith(".App", StringComparison.Ordinal));
+    }
+    // `options.Filters.Add<F>()`, `Add(typeof(F))`, `Add(new F())` or `AddService<F>()` where F is an MVC exception filter.
+    private static INamedTypeSymbol? GlobalExceptionFilter(IMethodSymbol bound, InvocationExpressionSyntax invocation, SemanticModel model, CancellationToken token)
+    {
+        if (bound.Name is not ("Add" or "AddService") || bound.ContainingType.ToDisplayString() != "Microsoft.AspNetCore.Mvc.Filters.FilterCollection") return null;
+        var type = bound.TypeArguments.FirstOrDefault() ?? (model.GetOperation(invocation, token) as IInvocationOperation)?.Arguments.FirstOrDefault()?.Value switch
+        {
+            ITypeOfOperation x => x.TypeOperand,
+            IConversionOperation x => x.Operand.Type,
+            var x => x?.Type,
+        };
+        return type is INamedTypeSymbol named && named.AllInterfaces.Any(x => x.ToDisplayString() is "Microsoft.AspNetCore.Mvc.Filters.IExceptionFilter" or "Microsoft.AspNetCore.Mvc.Filters.IAsyncExceptionFilter") ? named : null;
     }
     // True when the code can raise an exception the model tracks: an explicit throw or a call into source.
     private static bool RunsSourceOrThrows(SyntaxNode code, SemanticModel model, CancellationToken token) =>
@@ -207,7 +267,9 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
             Catches = catches.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
             ExceptionRegions = regions.OrderBy(x => x.Id.Value, StringComparer.Ordinal).ToImmutableArray(),
             Implementations = implementations.Distinct().OrderBy(x => x.Declared.Value, StringComparer.Ordinal).ThenBy(x => x.Implementation.Value, StringComparer.Ordinal).ThenBy(x => x.Kind).ToImmutableArray(),
-            BoundaryHandling = boundaries.OrderBy(x => x.Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence.SpanStart).ToImmutableArray()
+            BoundaryHandling = boundaries.OrderBy(x => x.Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence.SpanStart).ToImmutableArray(),
+            Suppressions = [.. suppressions.OrderBy(x => x.Scope.Path, StringComparer.Ordinal).ThenBy(x => x.Scope.SpanStart).ThenBy(x => x.Rule, StringComparer.Ordinal)],
+            ThirdPartyAssemblies = [.. thirdParty.Select(x => new CompilationId(x))],
         };
     }
 }

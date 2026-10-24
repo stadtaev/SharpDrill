@@ -229,6 +229,70 @@ public sealed class ExtractionTests
     }
 
     [Fact]
+    public async Task Referenced_assemblies_outside_the_shared_framework_are_third_party()
+    {
+        // The test host references the shared runtime (shared/Microsoft.NETCore.App) and packages copied to its output.
+        var snapshot = await Extract("public static class Use { public static void Run() { System.Console.WriteLine(); Xunit.Assert.True(true); } }");
+        Assert.Contains(snapshot.ThirdPartyAssemblies, x => x.Value.StartsWith("metadata|xunit.assert,", StringComparison.Ordinal));
+        Assert.DoesNotContain(snapshot.ThirdPartyAssemblies, x => x.Value.StartsWith("metadata|System.Console,", StringComparison.Ordinal) || x.Value.StartsWith("metadata|System.Runtime,", StringComparison.Ordinal));
+        var call = Assert.Single(snapshot.CallSites, x => x.TargetDisplay.StartsWith("Xunit.Assert.True", StringComparison.Ordinal));
+        Assert.Contains(snapshot.Callables.Single(x => x.Id == call.BoundTarget).Compilation, snapshot.ThirdPartyAssemblies);
+    }
+    [Fact]
+    public async Task Global_mvc_exception_filters_are_boundary_handling_and_other_filters_are_not()
+    {
+        var snapshot = await Extract("""
+            using System; using System.Threading.Tasks;
+            namespace Microsoft.AspNetCore.Mvc.Filters {
+                public interface IFilterMetadata { }
+                public interface IExceptionFilter : IFilterMetadata { } public interface IAsyncExceptionFilter : IFilterMetadata { }
+                public interface IActionFilter : IFilterMetadata { }
+                public class FilterCollection {
+                    public void Add<T>() where T : IFilterMetadata { } public void Add(Type type) { } public void Add(IFilterMetadata filter) { }
+                    public void AddService<T>() where T : IFilterMetadata { }
+                }
+            }
+            public class Problems : Microsoft.AspNetCore.Mvc.Filters.IExceptionFilter { }
+            public class AsyncProblems : Microsoft.AspNetCore.Mvc.Filters.IAsyncExceptionFilter { }
+            public class Timing : Microsoft.AspNetCore.Mvc.Filters.IActionFilter { }
+            public static class Startup {
+                public static void Configure(Microsoft.AspNetCore.Mvc.Filters.FilterCollection filters) {
+                    filters.Add<Problems>(); filters.Add(typeof(AsyncProblems)); filters.Add(new Problems()); filters.AddService<AsyncProblems>();
+                    filters.Add<Timing>(); filters.Add(new Timing());
+                }
+            }
+            """);
+        Assert.Equal(new[] { "Filters.Add(Problems)", "Filters.Add(AsyncProblems)", "Filters.Add(Problems)", "Filters.AddService(AsyncProblems)" },
+            snapshot.BoundaryHandling.Select(x => x.Registration));
+    }
+    [Fact]
+    public async Task Pragmas_and_SuppressMessage_record_where_SharpView_rules_are_suppressed()
+    {
+        var snapshot = await Extract("""
+            public class C {
+            #pragma warning disable SV0001
+                void A() { throw new System.Exception(); }
+            #pragma warning restore SV0001
+                void B() { throw new System.Exception(); }
+            #pragma warning disable CS0168, SV0003
+                [System.Diagnostics.CodeAnalysis.SuppressMessage("SharpView", "SV0002:Handled by middleware")]
+                void D() { throw new System.Exception(); }
+                [System.Diagnostics.CodeAnalysis.SuppressMessage("Style", "IDE0060")]
+                void E() { }
+            }
+            #pragma warning disable
+            """);
+        // Sorted by position: the SV0001 region, SV0003 open to the end of the file, D's attribute, the bare pragma.
+        Assert.Equal(["SV0001", "SV0003", "SV0002", null], snapshot.Suppressions.Select(x => x.Rule));
+        var (a, b, d) = (Throw("C.A"), Throw("C.B"), Throw("C.D"));
+        Assert.True(snapshot.Suppressions.Any(x => x.Covers("SV0001", a)));
+        Assert.False(snapshot.Suppressions.Any(x => x.Covers("SV0002", a)));
+        Assert.False(snapshot.Suppressions.Any(x => x.Covers("SV0001", b) || x.Covers("SV0003", b)));
+        Assert.True(snapshot.Suppressions.Any(x => x.Covers("SV0002", d)));
+        Assert.True(snapshot.Suppressions.Any(x => x.Covers("SV0003", d)));
+        SourceEvidence Throw(string owner) => snapshot.ThrowSites.Single(x => snapshot.Callables.Single(c => c.Id == x.Owner).DisplaySignature.StartsWith(owner + "(", StringComparison.Ordinal)).Evidence;
+    }
+    [Fact]
     public async Task Controller_convention_excludes_abstract_generic_and_inherited_opt_outs()
     {
         var snapshot = await Extract("""

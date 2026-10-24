@@ -4,8 +4,9 @@ using SharpView.Graph;
 namespace SharpView.Core;
 
 // FollowCandidates continues through interface/virtual calls into source implementation candidates; effects that
-// pass through one are marked ViaCandidate.
-public sealed record ExceptionSummaryOptions(int MaxWork = 1_000_000, int MaxFacts = 100_000, bool FollowCandidates = false)
+// pass through one are marked ViaCandidate. ThirdPartyCallOrigins also makes every call into a third-party assembly an
+// origin (of any type, which every catch takes); its escapes are the calls with no catch on the way from the root.
+public sealed record ExceptionSummaryOptions(int MaxWork = 1_000_000, int MaxFacts = 100_000, bool FollowCandidates = false, bool ThirdPartyCallOrigins = false)
 {
     public void Validate()
     {
@@ -31,15 +32,18 @@ public sealed class ExceptionSummaryResult
     internal sealed record Link(CallableId Callee, FlowKey Key, CallSiteId Site);
     internal sealed record Stored(ExceptionFlow Flow, Link? Next);
     private readonly ImmutableDictionary<CallableId, ImmutableDictionary<FlowKey, Stored>> facts;
+    // Links found after a fact's first one; witnesses search all of them for the shortest path.
+    private readonly IReadOnlyDictionary<(CallableId, FlowKey), List<Link>> alternatives;
 
     internal ExceptionSummaryResult(ImmutableDictionary<CallableId, ExceptionMethodSummary> methods,
         ImmutableDictionary<CallableId, ExceptionMethodSummary> roots,
         ImmutableDictionary<CallSiteId, ExceptionCrossingSummary> crossings,
         ImmutableDictionary<CallableId, ImmutableDictionary<FlowKey, Stored>> facts,
+        IReadOnlyDictionary<(CallableId, FlowKey), List<Link>> alternatives,
         bool workLimitReached, bool factLimitReached, int workItemsProcessed, int factsAdded,
         ImmutableArray<AnalysisGap> globalGaps)
     {
-        Methods = methods; Roots = roots; Crossings = crossings; this.facts = facts;
+        Methods = methods; Roots = roots; Crossings = crossings; this.facts = facts; this.alternatives = alternatives;
         WorkLimitReached = workLimitReached; FactLimitReached = factLimitReached;
         WorkItemsProcessed = workItemsProcessed; FactsAdded = factsAdded; GlobalGaps = globalGaps;
     }
@@ -52,6 +56,8 @@ public sealed class ExceptionSummaryResult
     // not modelled and they never make a summary Unknown.
     internal ImmutableDictionary<CallableId, ImmutableArray<CallableId>> Callees { get; init; } = ImmutableDictionary<CallableId, ImmutableArray<CallableId>>.Empty;
     internal ImmutableDictionary<CallableId, ImmutableArray<CallableId>> LibraryByMethod { get; init; } = ImmutableDictionary<CallableId, ImmutableArray<CallableId>>.Empty;
+    // Origins standing for third-party call sites (ThirdPartyCallOrigins); they have no throw site.
+    public ImmutableDictionary<ThrowSiteId, CallSiteId> ThirdPartyCalls { get; init; } = ImmutableDictionary<ThrowSiteId, CallSiteId>.Empty;
 
     /// <summary>Library methods called anywhere beneath a root (direct calls, and candidates when followed).</summary>
     public ImmutableArray<CallableId> LibraryCallsFrom(CallableId root)
@@ -73,46 +79,57 @@ public sealed class ExceptionSummaryResult
     public int WorkItemsProcessed { get; }
     public int FactsAdded { get; }
 
-    // The first discovered provenance chain is acyclic: every link points to a fact added earlier.
+    // The shortest path among the root's facts for this origin; a proven path is preferred to one through a candidate.
     public ExceptionSummaryWitness GetWitness(CallableId root, ThrowSiteId origin)
     {
         if (!Roots.TryGetValue(root, out var summary) || !summary.Escapes.Any(x => x.Origin == origin))
             throw new ArgumentException("No escaping fact for this root and origin.");
-        var entry = facts[root].Where(x => x.Key.Origin == origin && x.Value.Flow.Type is not null)
+        var entries = facts[root].Where(x => x.Key.Origin == origin && x.Value.Flow.Type is not null)
             .OrderBy(x => x.Value.Flow.ViaCandidate)
             .ThenBy(x => x.Value.Flow.SubsequentOrigin?.Value, StringComparer.Ordinal)
-            .ThenBy(x => x.Value.Flow.Type?.DisplayName, StringComparer.Ordinal).First();
-        return Reconstruct(root, entry.Key);
+            .ThenBy(x => x.Value.Flow.Type?.DisplayName, StringComparer.Ordinal).ToArray();
+        return Shortest(root, entries.Where(x => x.Value.Flow.ViaCandidate == entries[0].Value.Flow.ViaCandidate).Select(x => x.Key));
     }
 
     public ExceptionSummaryWitness GetWitness(CallableId root, ExceptionEscapeFact escape)
     {
         if (!Roots.TryGetValue(root, out var summary) || !summary.Escapes.Contains(escape))
             throw new ArgumentException("No matching escaping fact for this root.");
-        var entry = facts[root].Where(x => x.Key.Origin == escape.Origin && x.Value.Flow.SubsequentOrigin == escape.SubsequentOrigin
+        var entries = facts[root].Where(x => x.Key.Origin == escape.Origin && x.Value.Flow.SubsequentOrigin == escape.SubsequentOrigin
             && x.Value.Flow.Type?.DisplayName == escape.ExceptionType && x.Value.Flow.Exact == escape.IsExactType
             && (x.Value.Flow.Changed ? ExceptionReason.ChangedMayEscape : ExceptionReason.MayEscape) == escape.ReasonCode
             && x.Value.Flow.ViaCandidate == escape.ViaCandidate)
             .OrderBy(x => x.Key.StaticType?.DisplayName, StringComparer.Ordinal)
-            .ThenBy(x => x.Key.ExactType?.DisplayName, StringComparer.Ordinal).First();
-        return Reconstruct(root, entry.Key);
+            .ThenBy(x => x.Key.ExactType?.DisplayName, StringComparer.Ordinal).Select(x => x.Key);
+        return Shortest(root, entries);
     }
 
-    private ExceptionSummaryWitness Reconstruct(CallableId root, FlowKey start)
+    // Breadth-first over every provenance link from the root's facts down to a seed (a fact without a link: the throw's
+    // own method). Ties go to the earliest recorded link, so the result is deterministic.
+    private ExceptionSummaryWitness Shortest(CallableId root, IEnumerable<FlowKey> starts)
     {
-        var path = ImmutableArray.CreateBuilder<CallableId>();
-        var sites = ImmutableArray.CreateBuilder<CallSiteId>();
-        var method = root; var key = start;
-        var seen = new HashSet<(CallableId, FlowKey)>();
-        while (true)
+        var parents = new Dictionary<(CallableId Method, FlowKey Key), ((CallableId Method, FlowKey Key) From, CallSiteId Site)?>();
+        var pending = new Queue<(CallableId Method, FlowKey Key)>();
+        foreach (var key in starts) if (parents.TryAdd((root, key), null)) pending.Enqueue((root, key));
+        while (pending.TryDequeue(out var state))
         {
-            if (!seen.Add((method, key))) throw new InvalidOperationException("Cyclic summary provenance.");
-            path.Add(method);
-            var next = facts[method][key].Next;
-            if (next is null) break;
-            sites.Add(next.Site); method = next.Callee; key = next.Key;
+            var first = facts[state.Method][state.Key].Next;
+            if (first is null)
+            {
+                var path = new List<CallableId>(); var sites = new List<CallSiteId>();
+                for (var at = state; ; )
+                {
+                    path.Add(at.Method);
+                    if (parents[at] is not { } parent) break;
+                    sites.Add(parent.Site); at = parent.From;
+                }
+                path.Reverse(); sites.Reverse();
+                return new(state.Key.Origin, [.. path], [.. sites]);
+            }
+            foreach (var link in alternatives.TryGetValue(state, out var more) ? [first, .. more] : (IEnumerable<Link>)[first])
+                if (parents.TryAdd((link.Callee, link.Key), (state, link.Site))) pending.Enqueue((link.Callee, link.Key));
         }
-        return new(start.Origin, path.ToImmutable(), sites.ToImmutable());
+        throw new InvalidOperationException("Summary provenance does not reach an origin.");
     }
 }
 
@@ -139,7 +156,7 @@ public static class ExceptionSummaryQuery
         // requested) or a library call. Library methods have no source body, so their exceptions are not modelled:
         // they are recorded, never part of the summary graph, and never make a summary Unknown.
         var siteTargets = new Dictionary<CallSiteId, ImmutableArray<CallableId>>();
-        var librarySites = new HashSet<CallSiteId>();
+        var librarySites = new Dictionary<CallSiteId, CallableId>();
         var libraryByMethod = new Dictionary<CallableId, HashSet<CallableId>>();
         var callees = new Dictionary<CallableId, HashSet<CallableId>>();
         var candidateIncoming = new Dictionary<CallableId, List<CallSiteFact>>();
@@ -159,7 +176,7 @@ public static class ExceptionSummaryQuery
                 {
                     if (site.BoundTarget is { } target && index.ContainsCallable(target))
                     {
-                        if (index.Callable(target).Body == BodyStatus.MetadataOnly) { librarySites.Add(site.Id); AddTo(libraryByMethod, method, target); }
+                        if (index.Callable(target).Body == BodyStatus.MetadataOnly) { librarySites.Add(site.Id, target); AddTo(libraryByMethod, method, target); }
                         else targets = [target];
                     }
                 }
@@ -168,7 +185,7 @@ public static class ExceptionSummaryQuery
                     var candidates = calls.CandidatesOf(site.Id);
                     if (site.BoundTarget is { } declared && index.ContainsCallable(declared)
                         && index.Callable(declared).Body == BodyStatus.MetadataOnly && candidates.IsEmpty)
-                    { librarySites.Add(site.Id); AddTo(libraryByMethod, method, declared); }
+                    { librarySites.Add(site.Id, declared); AddTo(libraryByMethod, method, declared); }
                     else if (options.FollowCandidates)
                     {
                         targets = candidates;
@@ -197,7 +214,10 @@ public static class ExceptionSummaryQuery
         var componentOf = new Dictionary<CallableId, int>();
         for (var i = 0; i < components.Length; i++)
             foreach (var method in components[i]) componentOf.Add(method, i);
+        var thirdParty = options.ThirdPartyCallOrigins ? index.Snapshot.ThirdPartyAssemblies.ToHashSet() : [];
+        var thirdPartyCalls = new SortedDictionary<ThrowSiteId, CallSiteId>(Comparer<ThrowSiteId>.Create((a, b) => string.CompareOrdinal(a.Value, b.Value)));
         var facts = reachable.ToDictionary(x => x, _ => new Dictionary<ExceptionSummaryResult.FlowKey, ExceptionSummaryResult.Stored>());
+        var alternatives = new Dictionary<(CallableId, ExceptionSummaryResult.FlowKey), List<ExceptionSummaryResult.Link>>();
         var unknowns = reachable.ToDictionary(x => x, _ => new HashSet<ExceptionUncertainty>());
         var crossingFlows = new Dictionary<CallSiteId, HashSet<ExceptionEscapeFact>>();
         var crossingUnknowns = new Dictionary<CallSiteId, HashSet<ExceptionUncertainty>>();
@@ -227,7 +247,11 @@ public static class ExceptionSummaryQuery
         bool AddFlow(CallableId method, ExceptionFlow flow, ExceptionSummaryResult.Link? link)
         {
             var key = Key(flow);
-            if (facts[method].ContainsKey(key)) return true;
+            if (facts[method].ContainsKey(key))
+            {
+                if (link is not null) (alternatives.TryGetValue((method, key), out var list) ? list : alternatives[(method, key)] = []).Add(link);
+                return true;
+            }
             if (count >= options.MaxFacts) { factLimit = true; return false; }
             facts[method].Add(key, new(flow, link)); count++; queues[componentOf[method]].Enqueue((method, key)); return true;
         }
@@ -273,7 +297,17 @@ public static class ExceptionSummaryQuery
                     token.ThrowIfCancellationRequested();
                     if (factLimit || workLimit) break;
                     if (!Spend()) break;
-                    if (librarySites.Contains(site.Id)) continue;
+                    if (librarySites.TryGetValue(site.Id, out var library))
+                    {
+                        if (thirdParty.Contains(index.Callable(library).Compilation))
+                        {
+                            var origin = new ThrowSiteId("call|" + site.Id.Value); thirdPartyCalls[origin] = site.Id;
+                            var transfer = ExceptionTransfer.StartAtCall(index, origin, site, token);
+                            if (transfer.Status == ExceptionStatus.Unknown) AddUnknown(method, new(transfer.Reason, origin, site.Id, transfer.Message, site.Evidence));
+                            else if (transfer.Status is null) AddFlow(method, transfer.Flow, null);
+                        }
+                        continue;
+                    }
                     if (site.Dispatch != DispatchKind.Direct)
                     {
                         // Followed candidates carry their own effects in; only a call with nowhere to go is uncertain.
@@ -373,10 +407,11 @@ public static class ExceptionSummaryQuery
         });
         var frozenFacts = facts.ToImmutableDictionary(x => x.Key, x => x.Value.ToImmutableDictionary());
         return new(methods, roots.Distinct().ToImmutableDictionary(x => x, x => methods[x]), crossings,
-            frozenFacts, workLimit, factLimit, work, count, [.. index.Snapshot.Gaps.Where(x => x.Owner is null)])
+            frozenFacts, alternatives, workLimit, factLimit, work, count, [.. index.Snapshot.Gaps.Where(x => x.Owner is null)])
         {
             Callees = callees.ToImmutableDictionary(x => x.Key, x => x.Value.ToImmutableArray()),
             LibraryByMethod = libraryByMethod.ToImmutableDictionary(x => x.Key, x => x.Value.ToImmutableArray()),
+            ThirdPartyCalls = thirdPartyCalls.ToImmutableDictionary(),
         };
     }
 }

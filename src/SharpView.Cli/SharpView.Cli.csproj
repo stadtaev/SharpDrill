@@ -17,17 +17,20 @@
     <RollForward>LatestMajor</RollForward>
   </PropertyGroup>
 
-  <!-- .NET tool package: dotnet tool install -g SharpView. Released versions come from git tags (release workflow). -->
+  <!-- .NET tool package: dotnet tool install -g SharpView.Cli (the SharpView ID is the MSBuild package, src/SharpView.Build).
+       Released versions come from git tags (release workflow). -->
   <PropertyGroup>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>sharpview</ToolCommandName>
-    <PackageId>SharpView</PackageId>
+    <PackageId>SharpView.Cli</PackageId>
+    <HasOwnReadme>true</HasOwnReadme>
     <Description>Source-backed analysis of ASP.NET Core Web APIs for people and agents: the MSBuild project reference map with build settings, where exceptions are thrown, caught, miscaught or may escape an action, call paths and reachability from controller actions, and Mermaid diagrams. Uses Roslyn and your installed .NET SDK; never builds or edits the analysed code.</Description>
     <PackageTags>roslyn;static-analysis;aspnetcore;exceptions;call-graph;mermaid;dotnet-tool;architecture</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="PACKAGE.md" Pack="true" PackagePath="README.md" />
+    <EmbeddedResource Include="Skill/SKILL.md" LogicalName="SKILL.md" />
   </ItemGroup>
 
 </Project>

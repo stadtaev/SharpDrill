@@ -33,4 +33,24 @@ public sealed class ConventionTests
         Assert.Equal(new CallableId("Orders.Get"), action.Method);
         Assert.False(AspNetConventions.IsControllerAction(index, index.Callable(new("VendorBase.Helper"))));
     }
+
+    [Fact]
+    public void Global_handlers_cover_actions_of_the_registering_project_and_of_projects_it_references()
+    {
+        static CompilationFact Project(string name, params string[] references) =>
+            new(new(name), $"/src/{name}.csproj", name, "net10.0", "Debug", "Preview", "Enable", [], []) { ProjectReferences = [.. references.Select(x => $"/src/{x}.csproj")] };
+        static BoundaryHandlingFact Registration(string project, string name) => new(new(project), name, name, new($"/src/{project}/Program.cs", "", 0, 1, 1, 1, false));
+        var index = new ProgramIndex(new ProgramSnapshot
+        {
+            Compilations = [Project("Host", "Web"), Project("Web", "Shared"), Project("Shared"), Project("Other"), Project("Worker")],
+            Callables = [Method("Web.Get", "T", new("Web")), Method("Shared.Get", "T", new("Shared")), Method("Other.Get", "T", new("Other")), Method("Host.Get", "T", new("Host"))],
+            BoundaryHandling = [Registration("Host", "UseExceptionHandler"), Registration("Other", "AddExceptionHandler"), Registration("Worker", "UseDeveloperExceptionPage")],
+        });
+        string[] Handlers(string action) => [.. AspNetConventions.GlobalHandlers(index, new(action)).Select(x => x.Registration)];
+        Assert.Equal(["UseExceptionHandler"], Handlers("Host.Get"));
+        Assert.Equal(["UseExceptionHandler"], Handlers("Web.Get"));
+        Assert.Equal(["UseExceptionHandler"], Handlers("Shared.Get"));
+        // AddExceptionHandler alone handles nothing; a registration in an unrelated project does not run these actions.
+        Assert.Empty(Handlers("Other.Get"));
+    }
 }

@@ -60,6 +60,7 @@ Snippets below are from the sample Web API, with names and paths shortened; the 
 | What can this action reach? | `reach` | [reach.txt](samples/reach.txt) |
 | What are all the call paths from an action (or any method)? | `paths` | [paths.txt](samples/paths.txt) |
 | What did SharpView extract? | `inspect` (`--methods`, `--json`) | — |
+| How does a coding agent learn to use SharpView? | `skill` (`--user`) | `.claude/skills/sharpview/SKILL.md` |
 
 ### When to use which command
 
@@ -80,11 +81,14 @@ Snippets below are from the sample Web API, with names and paths shortened; the 
 **`exceptions` — where can things go wrong?** Four views over the same throw and catch facts:
 
 - *Default, every throw:* each explicit `throw` with its type, method and location. A map of what the code can raise, independent of any endpoint.
-- *`--uncaught`:* which exceptions may leave a controller action because no catch is on the way, each with one example path. Scales to a whole API, for example to find domain exceptions that reach middleware.
+- *`--uncaught`:* which exceptions may leave a controller action because no catch is on the way, each with the shortest example path. Scales to a whole API, for example to find domain exceptions that reach middleware.
+- *`--uncaught --strict`:* also every call into a third-party library (NuGet package or referenced DLL, not .NET itself) that no catch meets on the way from the action, in a section of its own. Any catch around the call or a caller counts, whatever its type.
 - *`--caught`:* each place an exception meets a matching catch: where it is thrown, where it is caught, and what the handler does (handles, rethrows, replaces). Catches with filters or runtime-dependent matches are marked as possible.
 - *`--miscaught`:* exceptions that pass through a `try` whose catch clauses don't match their type, a common sign of catching the wrong exception. Shows the clauses, and whether something further up catches it.
 
 A `Not followed:` line on stderr says where the analysis stopped and needs a human.
+
+*`--format msbuild`* prints the uncaught and miscaught findings (or one view's) as one MSBuild warning per line: `SV0001` may escape an action, `SV0002` may escape to a global exception handler, `SV0003` miscaught, `SV0004` third-party call with `--strict`. The `SharpView` package runs it after each build, so the findings land in the build output, Visual Studio's Error List and VS Code's Problems panel. `#pragma warning disable SV000N` and `[SuppressMessage("SharpView", "SV000N")]` at the warning's location suppress it.
 
 **`reach` — what can this endpoint touch?** Each reachable method once, with distance and one shortest path. Its cost grows with the size of the code, not the number of paths, so it is the right default on large solutions.
 
@@ -155,6 +159,7 @@ Caught: Research.Infrastructure.StorageException
 `--miscaught`, a `try` that did not catch it:
 
 ```text
+Handled by a global exception handler: UseExceptionHandler (Research.Api/Program.cs:5)
 Miscaught: Research.Infrastructure.StorageException
   Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
   Missed by: try in Service.Incompatible (catches only System.ArgumentException)  Research.Application/Service.cs:8
@@ -164,6 +169,7 @@ Miscaught: Research.Infrastructure.StorageException
 `--uncaught`, one entry per escaping throw, with the actions it escapes from and an example path:
 
 ```text
+Handled by a global exception handler: UseExceptionHandler (Research.Api/Program.cs:5)
 Uncaught: Research.Infrastructure.StorageException
   Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
   Escapes:   OrdersController.Filter, OrdersController.Get, OrdersController.Incompatible and 1 more
@@ -173,7 +179,7 @@ Uncaught: Research.Infrastructure.StorageException
     -> Repository.Read
 ```
 
-"May escape" is never called "unhandled": middleware may still handle it. A catch is *miscaught* only when every clause definitely does not match; filters and runtime-dependent matches are possible catches instead.
+"May escape" means no catch on the way from the action. Findings whose actions are covered by registered exception middleware or a global exception filter are listed last, under a `Handled by a global exception handler:` line. A catch is *miscaught* only when every clause definitely does not match; filters and runtime-dependent matches are possible catches instead.
 
 ## Writing your own rule
 

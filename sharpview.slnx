@@ -5,6 +5,7 @@
     <Platform Name="x86" />
   </Configurations>
   <Folder Name="/src/">
+    <Project Path="src/SharpView.Build/SharpView.Build.csproj" />
     <Project Path="src/SharpView.Cli/SharpView.Cli.csproj" />
     <Project Path="src/SharpView.Core/SharpView.Core.csproj" />
     <Project Path="src/SharpView.Export.Mermaid/SharpView.Export.Mermaid.csproj" />

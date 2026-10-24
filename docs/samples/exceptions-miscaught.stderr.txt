@@ -1,2 +1,2 @@
-12 actions analysed: 1 miscaught.
+12 actions analysed: 1 miscaught (1 handled by a global exception handler).
 Not followed: 1 interface or virtual call without a source implementation (e.g. Research.Application/Service.cs:12); 1 recursive call (e.g. Research.Application/Service.cs:13); 1 task that is never awaited (e.g. Research.Application/Service.cs:15).
