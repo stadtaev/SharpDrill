@@ -15,7 +15,7 @@ Results carry source evidence (file:line:column), and anything the analysis cann
 
 ```sh
 dotnet tool install -g SharpView   # requires a .NET 10 or newer SDK
-sharpview projects MyApi.slnx
+cd MyApi && sharpview projects   # the .sln/.slnx (or single .csproj) in the current directory; or pass a path
 ```
 
 Update with `dotnet tool update -g SharpView`. The examples below run from source with `dotnet run --project src/SharpView.Cli --`; with the tool installed, use `sharpview` instead.

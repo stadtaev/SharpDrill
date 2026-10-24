@@ -8,14 +8,15 @@ namespace SharpView.Tests;
 
 public sealed class CliContractTests
 {
-    private static async Task<(int Exit, string Out, string Error)> Run(params string[] args)
+    private static Task<(int Exit, string Out, string Error)> Run(params string[] args) => RunIn(ResearchFixture.Root, args);
+    private static async Task<(int Exit, string Out, string Error)> RunIn(string directory, params string[] args)
     {
         var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
         var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            WorkingDirectory = ResearchFixture.Root
+            WorkingDirectory = directory
         };
         start.ArgumentList.Add(Path.Combine(ResearchFixture.Root, $"src/SharpView.Cli/bin/{configuration}/net10.0/SharpView.Cli.dll"));
         foreach (var arg in args) start.ArgumentList.Add(arg);
@@ -60,6 +61,30 @@ public sealed class CliContractTests
         var result = await Run([command, "missing.slnx", .. options]);
         Assert.Equal(2, result.Exit);
         Assert.DoesNotContain("Input not found", result.Error);
+    }
+    [Fact]
+    public async Task Without_an_input_the_solution_in_the_current_directory_is_analysed()
+    {
+        var fromDirectory = await RunIn(Path.GetDirectoryName(ResearchFixture.Input)!, "projects");
+        Assert.Equal(0, fromDirectory.Exit);
+        Assert.Equal((await Run("projects", ResearchFixture.Input)).Out, fromDirectory.Out);
+        Assert.Equal(fromDirectory.Out, (await Run("projects", Path.GetDirectoryName(ResearchFixture.Input)!)).Out);
+    }
+    [Fact]
+    public async Task A_directory_without_one_input_names_what_it_found()
+    {
+        var none = await RunIn(Path.Combine(ResearchFixture.Root, "docs"), "projects");
+        Assert.Equal(2, none.Exit);
+        Assert.Contains("No .sln, .slnx or .csproj in", none.Error);
+        var directory = Directory.CreateTempSubdirectory("sharpview-");
+        try
+        {
+            foreach (var name in new[] { "A.sln", "B.slnx", "C.csproj" }) File.WriteAllText(Path.Combine(directory.FullName, name), "");
+            var several = await Run("projects", directory.FullName);
+            Assert.Equal(2, several.Exit);
+            Assert.Contains(": A.sln, B.slnx. Pass one.", several.Error);
+        }
+        finally { directory.Delete(true); }
     }
     [Fact]
     public async Task Traversal_limits_have_nonzero_status_and_visible_marker()

@@ -4,7 +4,7 @@ Source-backed analysis of ASP.NET Core Web APIs, for people and for agents. Ever
 
 ```sh
 dotnet tool install -g SharpView
-sharpview projects MyApi.slnx
+cd MyApi && sharpview projects   # the .sln/.slnx (or single .csproj) in the current directory; or pass a path
 ```
 
 Requires a .NET 10 (or newer) SDK. Restore the solution first: SharpView never restores, builds or edits the analysed code. Loading evaluates MSBuild projects and may run project tooling and source generators, so it is not a sandbox.

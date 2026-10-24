@@ -32,7 +32,8 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
 
     internal const string Help = """
         SharpView — source-backed analysis of ASP.NET Core Web APIs (.NET SDK; restored inputs required)
-        Usage: sharpview <command> <input.csproj|input.sln|input.slnx> [options]
+        Usage: sharpview <command> [input.csproj|input.sln|input.slnx|directory] [options]
+               Without an input, the solution (or else the single project) in the current directory.
 
         Commands:
           projects    Project reference tree with each project's framework, nullable settings and compiler warning count.
@@ -80,12 +81,11 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
     internal static Arguments? Parse(string[] args)
     {
         if (args.Length == 0 || args.Contains("--help") || args is ["-h"]) return null;
-        if (args.Length < 2) throw new ArgumentException("Provide a command and input. Use --help.");
         var handler = Commands.Resolve(args[0]);
-        if (args[1].StartsWith('-')) throw new ArgumentException("Provide an input path before options.");
-        var parsed = new Arguments(args[0], handler, args[1]);
+        var input = args.Length > 1 && !args[1].StartsWith('-') ? args[1] : null;
+        var parsed = new Arguments(args[0], handler, input ?? "");
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        for (var i = 2; i < args.Length; i++)
+        for (var i = input is null ? 1 : 2; i < args.Length; i++)
         {
             var option = args[i];
             if (!handler.Options.Contains(option) && !LoadingOptions.Contains(option))
@@ -127,7 +127,22 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
         parsed = parsed with { Given = [.. seen] };
         handler.Validate(parsed);
         if (parsed.Output is not null && File.Exists(parsed.Output)) throw new ArgumentException("Output already exists; refusing to overwrite an input or other existing file.");
-        return parsed;
+        return parsed with { Input = ResolveInput(input ?? Directory.GetCurrentDirectory()) };
+    }
+
+    /// <summary>A directory stands for its one solution, or else its one project; anything else is left to the loader to judge.</summary>
+    internal static string ResolveInput(string path)
+    {
+        if (!Directory.Exists(path)) return path;
+        // Filter by extension: on Windows the pattern *.sln also matches .slnx.
+        string[] Find(params string[] extensions) => [.. Directory.EnumerateFiles(path).Where(x => extensions.Contains(Path.GetExtension(x))).Order(StringComparer.Ordinal)];
+        var candidates = Find(".sln", ".slnx") is { Length: > 0 } solutions ? solutions : Find(".csproj");
+        return candidates switch
+        {
+            [var single] => single,
+            [] => throw new ArgumentException($"No .sln, .slnx or .csproj in {Path.GetFullPath(path)}. Pass the input path."),
+            _ => throw new ArgumentException($"Several inputs in {Path.GetFullPath(path)}: {string.Join(", ", candidates.Select(Path.GetFileName))}. Pass one."),
+        };
     }
 
     private static readonly ImmutableHashSet<string> KnownOptions = ["--root", "--follow-candidates", "--declared-only", "--max-depth", "--max-paths",
