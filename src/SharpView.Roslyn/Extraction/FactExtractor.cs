@@ -102,6 +102,8 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
                 var ns = bound.ContainingNamespace.ToDisplayString();
                 if (ns.StartsWith("Microsoft.AspNetCore.", StringComparison.Ordinal) && bound.Name is "UseExceptionHandler" or "AddExceptionHandler" or "UseDeveloperExceptionPage")
                     boundaries.Add(new(fact.Id, bound.Name, bound.ToDisplayString(), Evidence(invocation)));
+                if (GlobalExceptionFilter(bound, invocation, model, token) is { } filter)
+                    boundaries.Add(new(fact.Id, $"Filters.{bound.Name}({filter.Name})", bound.ToDisplayString(), Evidence(invocation)));
                 if (ns.StartsWith("Microsoft.AspNetCore.", StringComparison.Ordinal) && bound.Name is "MapGet" or "MapPost" or "MapPut" or "MapDelete" or "MapPatch" or "MapMethods")
                     gaps.Add(new(GapKind.Unsupported, fact.Id, null, "Minimal API endpoint is outside controller-action analysis.", Evidence(invocation)));
             }
@@ -112,6 +114,18 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
             foreach (var node in root.DescendantNodes().OfType<EqualsValueClauseSyntax>().Where(x => x.Parent is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Parent: FieldDeclarationSyntax } } or PropertyDeclarationSyntax))
                 if (RunsSourceOrThrows(node.Value, model, token)) initializers.Add((node, model, fact));
         }
+    }
+    // `options.Filters.Add<F>()`, `Add(typeof(F))`, `Add(new F())` or `AddService<F>()` where F is an MVC exception filter.
+    private static INamedTypeSymbol? GlobalExceptionFilter(IMethodSymbol bound, InvocationExpressionSyntax invocation, SemanticModel model, CancellationToken token)
+    {
+        if (bound.Name is not ("Add" or "AddService") || bound.ContainingType.ToDisplayString() != "Microsoft.AspNetCore.Mvc.Filters.FilterCollection") return null;
+        var type = bound.TypeArguments.FirstOrDefault() ?? (model.GetOperation(invocation, token) as IInvocationOperation)?.Arguments.FirstOrDefault()?.Value switch
+        {
+            ITypeOfOperation x => x.TypeOperand,
+            IConversionOperation x => x.Operand.Type,
+            var x => x?.Type,
+        };
+        return type is INamedTypeSymbol named && named.AllInterfaces.Any(x => x.ToDisplayString() is "Microsoft.AspNetCore.Mvc.Filters.IExceptionFilter" or "Microsoft.AspNetCore.Mvc.Filters.IAsyncExceptionFilter") ? named : null;
     }
     // True when the code can raise an exception the model tracks: an explicit throw or a call into source.
     private static bool RunsSourceOrThrows(SyntaxNode code, SemanticModel model, CancellationToken token) =>

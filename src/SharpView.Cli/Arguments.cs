@@ -42,6 +42,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                         --uncaught   may escape the action: no catch on the way (one example path per origin)
                         --caught     reaches a matching catch: where it is thrown and where it is caught
                         --miscaught  passes through a try whose catch clauses do not match its type
+                      Findings covered by exception middleware or a global exception filter are listed last.
                       [--uncaught | --caught | --miscaught] [--root R] [--budget N] [--declared-only] [--locations]
                       Interface/virtual calls are followed into their source implementations (results are marked
                       as possibilities); --declared-only stops at the declaration instead.

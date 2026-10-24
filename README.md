@@ -131,9 +131,9 @@ A saved file can return exit code 1 because it contains useful but partial resul
   - The `--uncaught` summary computes a finite fixed point over direct-call strongly connected components. Recursion alone does not make a summary unknown. Origins remain distinct even when their exception types match; call-site catches transform each incoming effect separately.
   - Ownerless extraction gaps are returned once in `GlobalGaps`, not repeated as action witnesses/unknown effects, and do not make a result incomplete. The CLI mentions only those that matter (minimal API endpoints it does not analyse); `inspect` lists every gap.
   - Summary effects and uncertainty coexist. Unknown effects propagate conservatively, including through catch-all handlers, because a missing body or extraction gap may represent more than a normally thrown exception. A summary does not prove the absence of runtime exceptions.
-  - A summary witness is one example for an escaping effect, reconstructed on demand.
+  - A summary witness is the shortest example path for an escaping effect, reconstructed on demand.
   - Implicit exceptions and branch feasibility are not modelled.
-  - `UseExceptionHandler`, `AddExceptionHandler` and `UseDeveloperExceptionPage` registrations are listed separately as *boundary evidence*. They do not prove middleware order or coverage; see Microsoft's [exception-handling documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling?view=aspnetcore-10.0).
+  - Exceptions that escape an action whose host registers `UseExceptionHandler`, `UseDeveloperExceptionPage` or a global MVC exception filter (`Filters.Add`/`AddService` of an `IExceptionFilter`/`IAsyncExceptionFilter`) are listed last, under a `Handled by a global exception handler:` line naming the registrations. The host is the action's project or a project that references it. `AddExceptionHandler` alone handles nothing. This is registration evidence: it does not prove middleware order, environment conditions (for example a developer page registered only in Development) or what the handler returns. Exception filters applied as attributes on a controller or action are not modelled. See Microsoft's [exception-handling documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling?view=aspnetcore-10.0).
 
 ## Releasing
 

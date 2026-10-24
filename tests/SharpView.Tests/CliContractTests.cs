@@ -207,7 +207,8 @@ public sealed class CliContractTests
         Assert.Contains("  Missed by: try in Service.Incompatible (catches only System.ArgumentException)  Research.Application", text);
         Assert.Contains("  Then:      may escape the controller action", text);
         Assert.Contains("    -> Service.Incompatible\n", text);
-        Assert.Contains("12 actions analysed: 1 miscaught.", result.Error);
+        Assert.StartsWith("Handled by a global exception handler: UseExceptionHandler (Research.Api/Program.cs:5)\nMiscaught: ", text);
+        Assert.Contains("12 actions analysed: 1 miscaught (1 handled by a global exception handler).", result.Error);
     }
     [Fact]
     public async Task Projects_print_the_reference_tree_with_build_settings()

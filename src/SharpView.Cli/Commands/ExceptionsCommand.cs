@@ -64,7 +64,7 @@ internal sealed class ExceptionsCommand : ReportCommand
     {
         var (arguments, display) = (context.Arguments, context.Display);
         var result = ExceptionQuery.Analyze(context.Index, roots, PathQuery(arguments), token);
-        var count = 0;
+        var count = 0; var handled = 0;
         // A path that reaches a fake or test class only through an assumed implementation is a guess about what DI picks.
         bool Hidden(ThrowSiteFact origin, ExceptionWitness witness) =>
             witness.ViaCandidate && (display.IsTestDouble(origin.Owner) || witness.Path.Any(display.IsTestDouble));
@@ -76,13 +76,18 @@ internal sealed class ExceptionsCommand : ReportCommand
                 WriteCaught(context, item); count++;
             }
         else
-            foreach (var item in ExceptionHandlingQuery.Miscaught(result))
+        {
+            var handlers = new GlobalHandlers(context.Index);
+            // Stable: findings keep their order within each section.
+            foreach (var item in ExceptionHandlingQuery.Miscaught(result).Where(x => !Hidden(context.Index.ThrowSite(x.Origin), x.Example))
+                .OrderBy(x => handlers.Covers(x.EscapesFrom, x.Outcomes.Contains(ExceptionStatus.MayEscape))))
             {
                 token.ThrowIfCancellationRequested();
-                if (Hidden(context.Index.ThrowSite(item.Origin), item.Example)) continue;
+                if (handlers.Covers(item.EscapesFrom, item.Outcomes.Contains(ExceptionStatus.MayEscape)) && handled++ == 0) handlers.WriteHeader(context, count > 0);
                 WriteMiscaught(context, item); count++;
             }
-        Console.Error.WriteLine($"{Display.Plural(roots.Length, "action")} analysed: {count} {(caught ? "caught" : "miscaught")}.");
+        }
+        Console.Error.WriteLine($"{Display.Plural(roots.Length, "action")} analysed: {count} {(caught ? "caught" : "miscaught")}{HandledCount(handled)}.");
         WriteNotFollowed(context, result.Results.Where(x => (x.SubsequentStatus ?? x.Status) == ExceptionStatus.Unknown)
             .Select(x => (x.ReasonCode, x.Evidence.LastOrDefault())));
         if (result.WorkLimitReached || result.OutputLimitReached || result.DepthLimitReached) WriteLimit(arguments);
@@ -95,15 +100,19 @@ internal sealed class ExceptionsCommand : ReportCommand
     {
         var (index, display, output) = (context.Index, context.Display, context.Output);
         var summaries = ExceptionSummaryQuery.Analyze(index, roots, SummaryQuery(context.Arguments), token);
+        var handlers = new GlobalHandlers(index);
         var escapes = roots.OrderBy(x => index.Callable(x).DisplaySignature, StringComparer.Ordinal).ThenBy(x => x.Value, StringComparer.Ordinal)
             .SelectMany(root => summaries.Roots[root].Escapes.Select(escape => (Root: root, Escape: escape)))
             .Where(x => x.Escape.ExceptionType is not null)
-            .GroupBy(x => (x.Escape.Origin, x.Escape.SubsequentOrigin, x.Escape.ExceptionType))
-            .OrderBy(x => index.ThrowSite(x.Key.Origin).Evidence.Path, StringComparer.Ordinal).ThenBy(x => index.ThrowSite(x.Key.Origin).Evidence.SpanStart)
+            .GroupBy(x => (x.Escape.Origin, x.Escape.SubsequentOrigin, x.Escape.ExceptionType, Handled: handlers.Covers([x.Root], true)))
+            .OrderBy(x => x.Key.Handled)
+            .ThenBy(x => index.ThrowSite(x.Key.Origin).Evidence.Path, StringComparer.Ordinal).ThenBy(x => index.ThrowSite(x.Key.Origin).Evidence.SpanStart)
             .ThenBy(x => x.Key.SubsequentOrigin?.Value, StringComparer.Ordinal).ToArray();
+        var handled = 0;
         foreach (var group in escapes)
         {
             token.ThrowIfCancellationRequested();
+            if (group.Key.Handled && handled++ == 0) handlers.WriteHeader(context, group != escapes[0]);
             var actions = group.Select(x => x.Root).Distinct().ToArray();
             // A proven path makes the better example than one through an assumed implementation.
             var example = group.OrderBy(x => x.Escape.ViaCandidate).First();
@@ -114,15 +123,40 @@ internal sealed class ExceptionsCommand : ReportCommand
             var witness = summaries.GetWitness(example.Root, example.Escape);
             WritePath(context, witness.Path, witness.Sites, example.Escape.ViaCandidate, []);
         }
-        Console.Error.WriteLine($"{Display.Plural(roots.Length, "action")} analysed: {Display.Plural(escapes.Length, "uncaught exception")}.");
-        var boundary = context.Snapshot.BoundaryHandling.FirstOrDefault();
-        if (escapes.Length > 0 && boundary is not null)
-            Console.Error.WriteLine($"Uncaught means no catch on the way from the action; {boundary.Registration} ({display.Where(boundary.Evidence)}) still handles them at runtime.");
+        Console.Error.WriteLine($"{Display.Plural(roots.Length, "action")} analysed: {Display.Plural(escapes.Length, "uncaught exception")}{HandledCount(handled)}.");
         WriteNotFollowed(context, roots.SelectMany(x => summaries.Roots[x].Unknowns)
             .Where(x => x.ReasonCode is not (ExceptionReason.WorkLimit or ExceptionReason.FactLimit))
             .Select(x => (x.ReasonCode, x.Site is { } s ? index.CallSite(s).Evidence : x.Evidence)));
         if (summaries.WorkLimitReached || summaries.FactLimitReached) WriteLimit(context.Arguments);
         return !summaries.IsComplete;
+    }
+
+    private static string HandledCount(int handled) => handled == 0 ? "" : $" ({handled} handled by a global exception handler)";
+
+    // Exceptions that escape the action still reach exception middleware or a global exception filter registered by the
+    // host; those findings are listed last, under one line naming the registrations.
+    private sealed class GlobalHandlers(ProgramIndex index)
+    {
+        private readonly Dictionary<CallableId, ImmutableArray<BoundaryHandlingFact>> byRoot = [];
+        private readonly SortedSet<BoundaryHandlingFact> used = new(Comparer<BoundaryHandlingFact>.Create((a, b) =>
+            string.CompareOrdinal(a.Evidence.Path, b.Evidence.Path) is var c and not 0 ? c : a.Evidence.SpanStart.CompareTo(b.Evidence.SpanStart)));
+
+        private ImmutableArray<BoundaryHandlingFact> Of(CallableId root) =>
+            byRoot.TryGetValue(root, out var found) ? found : byRoot[root] = AspNetConventions.GlobalHandlers(index, root);
+
+        // True when the exception may escape and every action it escapes from has a global handler.
+        public bool Covers(IReadOnlyCollection<CallableId> roots, bool escapes)
+        {
+            if (!escapes || roots.Count == 0 || roots.Any(x => Of(x).IsEmpty)) return false;
+            foreach (var root in roots) used.UnionWith(Of(root));
+            return true;
+        }
+
+        public void WriteHeader(ReportContext context, bool separate)
+        {
+            if (separate) context.Output.WriteLine();
+            context.Output.WriteLine($"Handled by a global exception handler: {string.Join(", ", used.Select(x => $"{x.Registration} ({context.Display.Where(x.Evidence)})"))}");
+        }
     }
 
     // Where the analysis could not follow an exception, grouped by cause, one line in all.

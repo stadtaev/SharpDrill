@@ -12,11 +12,13 @@ public sealed record CaughtException(ThrowSiteId Origin, CatchId Catch, CatchCer
 }
 
 /// <summary>An origin passing through a try/catch whose clauses do not match it; Outcomes are its final statuses
-/// over every witness path (it may still be intercepted further up). Undetermined is a witness whose outcome is Unknown.</summary>
+/// over every witness path (it may still be intercepted further up). Undetermined is a witness whose outcome is Unknown.
+/// EscapesFrom are the roots of the witnesses where it may escape.</summary>
 public sealed record MiscaughtException(ThrowSiteId Origin, MissedRegion Missed, ImmutableArray<ExceptionStatus> Outcomes, ExceptionWitness Example)
 {
     public bool ViaCandidate => Example.ViaCandidate;
     public ExceptionWitness? Undetermined { get; init; }
+    public ImmutableArray<CallableId> EscapesFrom { get; init; } = [];
 }
 
 /// <summary>Projections of detailed witnesses (ExceptionQuery) onto handlers, deduplicated across roots and paths.
@@ -48,6 +50,7 @@ public static class ExceptionHandlingQuery
     {
         var groups = new Dictionary<(ThrowSiteId, ExceptionRegionId), (MissedRegion Missed, SortedSet<ExceptionStatus> Outcomes, ExceptionWitness Example)>();
         var undetermined = new Dictionary<(ThrowSiteId, ExceptionRegionId), ExceptionWitness>();
+        var escapes = new Dictionary<(ThrowSiteId, ExceptionRegionId), SortedSet<string>>();
         var order = new List<(ThrowSiteId, ExceptionRegionId)>();
         foreach (var witness in result.Results)
         {
@@ -59,9 +62,11 @@ public static class ExceptionHandlingQuery
                 else if (Better(witness, group.Example)) groups[key] = group = (group.Missed, group.Outcomes, witness);
                 group.Outcomes.Add(witness.SubsequentStatus ?? witness.Status);
                 if ((witness.SubsequentStatus ?? witness.Status) == ExceptionStatus.Unknown) undetermined.TryAdd(key, witness);
+                if ((witness.SubsequentStatus ?? witness.Status) == ExceptionStatus.MayEscape)
+                    (escapes.TryGetValue(key, out var roots) ? roots : escapes[key] = new(StringComparer.Ordinal)).Add(witness.Action.Value);
             }
         }
         return [.. order.Select(key => (Key: key, Group: groups[key])).Select(x => new MiscaughtException(x.Group.Example.Origin!.Value, x.Group.Missed, [.. x.Group.Outcomes], x.Group.Example)
-            { Undetermined = undetermined.GetValueOrDefault(x.Key) })];
+            { Undetermined = undetermined.GetValueOrDefault(x.Key), EscapesFrom = [.. escapes.GetValueOrDefault(x.Key, []).Select(r => new CallableId(r))] })];
     }
 }

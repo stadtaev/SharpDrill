@@ -51,14 +51,14 @@ public sealed class CliTests
         Assert.True(doc.RootElement.GetProperty("snapshot").GetProperty("exceptionRegions").GetArrayLength() > 0);
     }
     [Fact]
-    public async Task Exceptions_report_action_escape_and_boundary_evidence_separately()
+    public async Task Exceptions_list_escapes_reaching_a_global_handler_under_its_registration()
     {
         var result = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Get()");
         Assert.Equal(0, result.Exit);
-        Assert.StartsWith("Uncaught: Research.Infrastructure.StorageException\n  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6\n  Escapes:   OrdersController.Get\n", result.Out.ReplaceLineEndings("\n"));
-        // The registered middleware is mentioned once, as context, not repeated per finding.
-        Assert.Contains("UseExceptionHandler (Research.Api/Program.cs:5) still handles them at runtime.", result.Error);
-        Assert.DoesNotContain("UseExceptionHandler", result.Out);
+        // The registered middleware is named once, as the section header, not repeated per finding.
+        Assert.StartsWith("Handled by a global exception handler: UseExceptionHandler (Research.Api/Program.cs:5)\nUncaught: Research.Infrastructure.StorageException\n  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6\n  Escapes:   OrdersController.Get\n", result.Out.ReplaceLineEndings("\n"));
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(result.Out, "UseExceptionHandler"));
+        Assert.Equal("1 action analysed: 1 uncaught exception (1 handled by a global exception handler).\n", result.Error.ReplaceLineEndings("\n"));
     }
     [Fact]
     public async Task Paths_show_projects_and_distance_is_transitions()

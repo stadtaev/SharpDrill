@@ -155,6 +155,7 @@ Caught: Research.Infrastructure.StorageException
 `--miscaught`, a `try` that did not catch it:
 
 ```text
+Handled by a global exception handler: UseExceptionHandler (Research.Api/Program.cs:5)
 Miscaught: Research.Infrastructure.StorageException
   Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
   Missed by: try in Service.Incompatible (catches only System.ArgumentException)  Research.Application/Service.cs:8
@@ -164,6 +165,7 @@ Miscaught: Research.Infrastructure.StorageException
 `--uncaught`, one entry per escaping throw, with the actions it escapes from and an example path:
 
 ```text
+Handled by a global exception handler: UseExceptionHandler (Research.Api/Program.cs:5)
 Uncaught: Research.Infrastructure.StorageException
   Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
   Escapes:   OrdersController.Filter, OrdersController.Get, OrdersController.Incompatible and 1 more
@@ -173,7 +175,7 @@ Uncaught: Research.Infrastructure.StorageException
     -> Repository.Read
 ```
 
-"May escape" is never called "unhandled": middleware may still handle it. A catch is *miscaught* only when every clause definitely does not match; filters and runtime-dependent matches are possible catches instead.
+"May escape" means no catch on the way from the action. Findings whose actions are covered by registered exception middleware or a global exception filter are listed last, under a `Handled by a global exception handler:` line. A catch is *miscaught* only when every clause definitely does not match; filters and runtime-dependent matches are possible catches instead.
 
 ## Writing your own rule
 

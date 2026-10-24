@@ -26,7 +26,7 @@ $CLI diagram $F --root "$R" --output diagram.md    # diagram.md
 
 Their `.stderr.txt` companions contain the one-line summary and, when the analysis stopped somewhere, a `Not followed:` line. The caught and miscaught views exit **1** on the fixture because it deliberately contains an interface without implementation, recursion and a task that is never awaited; the other samples exit 0.
 
-The fixture exercises caught, unrelated and incompatible catches, rethrow/replacement, filters, recursion, interface dispatch, awaited/caught operations, unobserved tasks and separately reported ASP.NET exception middleware registration. Additional edge cases are tested through independent Core snapshots and in-memory semantic extraction.
+The fixture exercises caught, unrelated and incompatible catches, rethrow/replacement, filters, recursion, interface dispatch, awaited/caught operations, unobserved tasks and ASP.NET exception middleware registration (its findings are listed under `Handled by a global exception handler:`). Additional edge cases are tested through independent Core snapshots and in-memory semantic extraction.
 
 The host's own `sharpview.slnx` was also inspected as a loader smoke check. An external Web API experiment remains pending; these samples establish fixture behavior only.
 

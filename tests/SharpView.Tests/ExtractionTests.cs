@@ -229,6 +229,33 @@ public sealed class ExtractionTests
     }
 
     [Fact]
+    public async Task Global_mvc_exception_filters_are_boundary_handling_and_other_filters_are_not()
+    {
+        var snapshot = await Extract("""
+            using System; using System.Threading.Tasks;
+            namespace Microsoft.AspNetCore.Mvc.Filters {
+                public interface IFilterMetadata { }
+                public interface IExceptionFilter : IFilterMetadata { } public interface IAsyncExceptionFilter : IFilterMetadata { }
+                public interface IActionFilter : IFilterMetadata { }
+                public class FilterCollection {
+                    public void Add<T>() where T : IFilterMetadata { } public void Add(Type type) { } public void Add(IFilterMetadata filter) { }
+                    public void AddService<T>() where T : IFilterMetadata { }
+                }
+            }
+            public class Problems : Microsoft.AspNetCore.Mvc.Filters.IExceptionFilter { }
+            public class AsyncProblems : Microsoft.AspNetCore.Mvc.Filters.IAsyncExceptionFilter { }
+            public class Timing : Microsoft.AspNetCore.Mvc.Filters.IActionFilter { }
+            public static class Startup {
+                public static void Configure(Microsoft.AspNetCore.Mvc.Filters.FilterCollection filters) {
+                    filters.Add<Problems>(); filters.Add(typeof(AsyncProblems)); filters.Add(new Problems()); filters.AddService<AsyncProblems>();
+                    filters.Add<Timing>(); filters.Add(new Timing());
+                }
+            }
+            """);
+        Assert.Equal(new[] { "Filters.Add(Problems)", "Filters.Add(AsyncProblems)", "Filters.Add(Problems)", "Filters.AddService(AsyncProblems)" },
+            snapshot.BoundaryHandling.Select(x => x.Registration));
+    }
+    [Fact]
     public async Task Controller_convention_excludes_abstract_generic_and_inherited_opt_outs()
     {
         var snapshot = await Extract("""

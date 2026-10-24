@@ -38,6 +38,29 @@ public static class AspNetConventions
         return classes.Any(x => x.DisplayName == ControllerBase || Has(x.Attributes, ControllerAttribute));
     }
 
+    // Registrations that handle every exception leaving the action: exception middleware or a global MVC exception filter
+    // registered in the action's project or in a project that references it (the host). AddExceptionHandler alone handles
+    // nothing without UseExceptionHandler. This is registration evidence: middleware order and environment conditions are not checked.
+    public static ImmutableArray<BoundaryHandlingFact> GlobalHandlers(ProgramIndex index, CallableId action)
+    {
+        var compilations = index.Snapshot.Compilations;
+        var byId = compilations.ToDictionary(x => x.Id);
+        var byPath = compilations.DistinctBy(x => x.ProjectPath).ToDictionary(x => x.ProjectPath, StringComparer.Ordinal);
+        if (!byId.TryGetValue(index.Callable(action).Compilation, out var own)) return [];
+        bool Runs(CompilationId host)
+        {
+            if (!byId.TryGetValue(host, out var hosting)) return false;
+            var pending = new Stack<string>([hosting.ProjectPath]); var seen = new HashSet<string>(StringComparer.Ordinal);
+            while (pending.TryPop(out var path))
+            {
+                if (path == own.ProjectPath) return true;
+                if (seen.Add(path) && byPath.TryGetValue(path, out var project)) foreach (var reference in project.ProjectReferences) pending.Push(reference);
+            }
+            return false;
+        }
+        return [.. index.Snapshot.BoundaryHandling.Where(x => x.Registration != "AddExceptionHandler" && Runs(x.Compilation))];
+    }
+
     private static bool Has(ImmutableArray<AttributeFact> attributes, string name) => attributes.Any(x => x.Name == name);
 
     private static bool IsGeneric(ProgramIndex index, TypeFact type)
