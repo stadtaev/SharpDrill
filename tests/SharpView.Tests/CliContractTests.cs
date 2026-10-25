@@ -100,6 +100,31 @@ public sealed class CliContractTests
         finally { repository.Delete(true); }
     }
     [Fact]
+    public void Skill_hint_asks_for_an_install_or_an_update_and_otherwise_stays_quiet()
+    {
+        var root = Directory.CreateTempSubdirectory("sharpview-hint-");
+        try
+        {
+            var (repository, home) = (Directory.CreateDirectory(Path.Combine(root.FullName, "repo")).FullName, Directory.CreateDirectory(Path.Combine(root.FullName, "home")).FullName);
+            Directory.CreateDirectory(Path.Combine(repository, ".git"));
+            var nested = Directory.CreateDirectory(Path.Combine(repository, "src")).FullName;
+            void Write(string folder, string text) { Directory.CreateDirectory(Path.Combine(folder, "skills", "sharpview")); File.WriteAllText(Path.Combine(folder, "skills", "sharpview", "SKILL.md"), text); }
+            static string Ours(string version) => $"---\nname: sharpview\ndescription: x\n# Written by `sharpview skill` {version}. Rerun it to refresh this file.\n---\n";
+            Assert.Equal("Tip: run `sharpview skill` so GitHub Copilot and Claude Code can use SharpView in this repository.", Cli.SkillCommand.HintFor(nested, home, "0.3.0"));
+            Write(Path.Combine(home, ".copilot"), Ours("0.2.1"));
+            Assert.Equal($"Tip: the SharpView skill in {Path.Combine(home, ".copilot", "skills", "sharpview", "SKILL.md")} is from 0.2.1; run `sharpview skill --user` to update it.",
+                Cli.SkillCommand.HintFor(nested, home, "0.3.0"));
+            // Local builds do not compare versions; a current skill, or one sharpview did not write, needs nothing.
+            Assert.Null(Cli.SkillCommand.HintFor(nested, home, "0.0.0-dev"));
+            Write(Path.Combine(home, ".copilot"), Ours("0.3.0"));
+            Assert.Null(Cli.SkillCommand.HintFor(nested, home, "0.3.0"));
+            Directory.Delete(Path.Combine(home, ".copilot"), true);
+            Write(Path.Combine(repository, ".github"), "---\nname: sharpview\n---\nour own words");
+            Assert.Null(Cli.SkillCommand.HintFor(nested, home, "0.3.0"));
+        }
+        finally { root.Delete(true); }
+    }
+    [Fact]
     public async Task Skill_user_installs_for_copilot_and_claude_code()
     {
         var home = Directory.CreateTempSubdirectory("sharpview-home-");
@@ -304,6 +329,8 @@ public sealed class CliContractTests
         var strict = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--strict");
         // The fixture calls only .NET itself, so strict mode adds no section.
         Assert.Equal(plain.Out, strict.Out);
+        // The skill tip is for a person at a terminal; redirected stderr (agents, CI) never gets it.
+        Assert.DoesNotContain("Tip:", strict.Error);
         Assert.Contains("12 actions analysed: 3 uncaught exceptions (3 handled by a global exception handler); 0 third-party calls with no catch on the way.", strict.Error);
     }
     [Theory]

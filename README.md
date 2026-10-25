@@ -98,7 +98,7 @@ sharpview:
 
 ### For coding agents
 
-`sharpview skill` writes an agent skill to `.claude/skills/sharpview/SKILL.md` at the repository root, where GitHub Copilot (VS Code, Visual Studio, Copilot CLI, cloud agent) and Claude Code both find it. Commit it so the whole team gets it. `sharpview skill --user` installs it for every repository instead (`~/.copilot/skills` and `~/.claude/skills`). The skill ships inside the tool and carries its version: rerun the command after `dotnet tool update` to refresh it. It never overwrites a `SKILL.md` it did not write.
+`sharpview skill` writes an agent skill to `.claude/skills/sharpview/SKILL.md` at the repository root, where GitHub Copilot (VS Code, Visual Studio, Copilot CLI, cloud agent) and Claude Code both find it. Commit it so the whole team gets it. `sharpview skill --user` installs it for every repository instead (`~/.copilot/skills` and `~/.claude/skills`). The skill ships inside the tool and carries its version: rerun the command after `dotnet tool update` to refresh it. It never overwrites a `SKILL.md` it did not write. `dotnet tool install` cannot run code, so nothing is installed automatically: in a terminal, other commands end with a one-line tip when no agent can find the skill or the one installed is from another version (never for agents, CI or `--format msbuild`).
 
 ### Optional: warnings in every build
 
