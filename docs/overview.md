@@ -88,7 +88,7 @@ Snippets below are from the sample Web API, with names and paths shortened; the 
 
 A `Not followed:` line on stderr says where the analysis stopped and needs a human.
 
-*`--format msbuild`* prints the uncaught and miscaught findings (or one view's) as one MSBuild warning per line: `SV0001` may escape an action, `SV0002` may escape to a global exception handler, `SV0003` miscaught, `SV0004` third-party call with `--strict`. The `SharpView` package runs it after each build, so the findings land in the build output, Visual Studio's Error List and VS Code's Problems panel. `#pragma warning disable SV000N` and `[SuppressMessage("SharpView", "SV000N")]` at the warning's location suppress it.
+*`--format msbuild`* prints the uncaught and miscaught findings (or one view's) as one MSBuild warning per line: `SV0001` may escape an action, `SV0002` may escape to a global exception handler, `SV0003` miscaught, `SV0004` third-party call with `--strict`. Run it in CI (the README has a GitLab CI job) or as a VS Code task with the `$msCompile` problem matcher; the optional `SharpView` package runs it after each build instead, so the findings also land in Visual Studio's Error List. `#pragma warning disable SV000N` and `[SuppressMessage("SharpView", "SV000N")]` at the warning's location suppress it.
 
 **`reach` — what can this endpoint touch?** Each reachable method once, with distance and one shortest path. Its cost grows with the size of the code, not the number of paths, so it is the right default on large solutions.
 

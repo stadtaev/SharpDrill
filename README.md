@@ -13,66 +13,102 @@ Results carry source evidence (file:line:column), and anything the analysis cann
 
 ## Install
 
-Both ways need a .NET 10 (or newer) SDK. Restore the analysed solution first; SharpView never restores or builds it.
-
-| You want | Install | Package |
-| --- | --- | --- |
-| The `sharpview` command, run by hand or by an agent | .NET tool | `SharpView.Cli` |
-| Exception findings as warnings in every build, locally and in CI | NuGet package reference | `SharpView` |
-
-### Command-line tool
+SharpView is a .NET tool: it analyses a whole solution at once, from each controller action through every project it calls into. It needs a .NET 10 (or newer) SDK; restore the analysed solution first (SharpView never restores or builds it).
 
 ```sh
 dotnet tool install -g SharpView.Cli   # once per machine
 cd MyApi && sharpview projects         # the .sln/.slnx (or single .csproj) in the current directory; or pass a path
 ```
 
-Update with `dotnet tool update -g SharpView.Cli`. To pin the version per repository and get it in CI with a plain restore, install it as a local tool instead:
+Update with `dotnet tool update -g SharpView.Cli`. Upgrading from the old `SharpView` tool package: `dotnet tool uninstall -g SharpView` first. The command is still `sharpview`; the `SharpView` ID is now the optional [build package](#optional-warnings-in-every-build).
+
+The examples further down run from source with `dotnet run --project src/SharpView.Cli --`; with the tool installed, use `sharpview` instead.
+
+### In a repository and CI
+
+For a team, install it as a local tool: the version is pinned in the repository and every machine and pipeline gets the same one with `dotnet tool restore`.
 
 ```sh
-dotnet new tool-manifest                 # once: creates .config/dotnet-tools.json; commit it
+dotnet new tool-manifest                 # once: creates dotnet-tools.json; commit it
 dotnet tool install SharpView.Cli
 dotnet tool restore                      # on another machine or in CI
 dotnet sharpview exceptions --uncaught
 ```
 
-Upgrading from the old `SharpView` tool package: `dotnet tool uninstall -g SharpView`, then install `SharpView.Cli`. The command is still `sharpview`; the `SharpView` ID is now the build package below.
+### Exception findings as warnings
 
-The examples further down run from source with `dotnet run --project src/SharpView.Cli --`; with the tool installed, use `sharpview` instead.
+`sharpview exceptions --format msbuild` prints the uncaught and miscaught findings as one warning per line, in the `file(line,col): warning CODE: message` format that build logs, VS Code and Visual Studio understand:
 
-### For coding agents
-
-`sharpview skill` writes an agent skill to `.claude/skills/sharpview/SKILL.md` at the repository root, where GitHub Copilot (VS Code, Visual Studio, Copilot CLI, cloud agent) and Claude Code both find it. Commit it so the whole team gets it. `sharpview skill --user` installs it for every repository instead (`~/.copilot/skills` and `~/.claude/skills`). The skill ships inside the tool and carries its version: rerun the command after `dotnet tool update` to refresh it. It never overwrites a `SKILL.md` it did not write.
-
-### As build warnings
-
-Add the `SharpView` package to the Web API project (the one with the controllers):
-
-```sh
-dotnet add MyApi/MyApi.csproj package SharpView
+```text
+/src/Research.Application/Service.cs(8,45): warning SV0003: Research.Infrastructure.StorageException thrown in Repository.Read (Repository.cs:6) passes through this try, which catches only ArgumentException; then may escape the controller action; path: OrdersController.Incompatible -> Service.Incompatible -> Repository.Read
 ```
-
-or by hand in the `.csproj`. It is a development dependency, so it does not flow to projects that reference this one:
-
-```xml
-<ItemGroup>
-  <PackageReference Include="SharpView" Version="x.y.z" />
-</ItemGroup>
-```
-
-With central package management, put `<PackageVersion Include="SharpView" Version="x.y.z" />` in `Directory.Packages.props` and leave `Version` off the reference. CI needs nothing extra: `dotnet restore` fetches the package, and `dotnet build` prints the warnings.
-
-From then on every build (`dotnet build`, Visual Studio, VS Code, CI) runs `sharpview exceptions --format msbuild` and reports its findings as warnings in the build output, Visual Studio's Error List and VS Code's Problems panel:
 
 | Code | Finding |
 | --- | --- |
 | `SV0001` | An exception may escape a controller action: no catch on the way. |
 | `SV0002` | The same, but a global exception handler (exception middleware or filter) receives it. |
 | `SV0003` | A throw passes through a `try` whose catch clauses do not match its type. |
-| `SV0004` | A third-party call with no catch on the way (with `<SharpViewArguments>--strict</SharpViewArguments>`). |
-| `SV0000` | The analysis itself failed. |
+| `SV0004` | A third-party call with no catch on the way (only with `--strict`). |
 
-`#pragma warning disable SV0003` and `[SuppressMessage("SharpView", "SV0003")]` suppress one finding where the warning points; `NoWarn` and `WarningsAsErrors` work as for compiler warnings; `SharpViewEnabled=false` skips the analysis, and `SharpViewInput` points it at a solution instead of the referencing project and its references. It adds a few seconds to each build and does not run in design-time builds. Settings: [src/SharpView.Build/PACKAGE.md](src/SharpView.Build/PACKAGE.md).
+To accept one finding, suppress it where the warning points (the throw, the `try` or the call), as for a compiler warning. The count of suppressed findings goes to stderr.
+
+```csharp
+#pragma warning disable SV0003 // ArgumentException is the only one we can recover from here
+try { Load(); } catch (ArgumentException) { }
+#pragma warning restore SV0003
+
+[SuppressMessage("SharpView", "SV0002:Mapped to 404 by middleware")]
+public Order Find(int id) => orders.Get(id) ?? throw new NotFoundException(id);
+```
+
+**GitLab CI.** A job that keeps the warnings as an artifact and fails when an exception may escape an action with nothing to catch it (SV0001). Drop the last line to only report:
+
+```yaml
+sharpview:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:10.0
+  script:
+    - dotnet restore MyApi.slnx
+    - dotnet tool restore
+    # Exit 1 only means some calls could not be followed; 2 means the analysis could not run.
+    - code=0; dotnet sharpview exceptions MyApi.slnx --format msbuild > sharpview.txt || code=$?
+    - cat sharpview.txt
+    - test "$code" -le 1
+    - if grep -q "warning SV0001" sharpview.txt; then echo "Uncaught exceptions found (SV0001)"; exit 1; fi
+  artifacts:
+    when: always
+    paths: [sharpview.txt]
+```
+
+**VS Code.** A task that fills the Problems panel (Terminal → Run Task → sharpview), in `.vscode/tasks.json`:
+
+```json
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "sharpview",
+      "type": "shell",
+      "command": "dotnet sharpview exceptions --format msbuild",
+      "problemMatcher": "$msCompile"
+    }
+  ]
+}
+```
+
+### For coding agents
+
+`sharpview skill` writes an agent skill to `.claude/skills/sharpview/SKILL.md` at the repository root, where GitHub Copilot (VS Code, Visual Studio, Copilot CLI, cloud agent) and Claude Code both find it. Commit it so the whole team gets it. `sharpview skill --user` installs it for every repository instead (`~/.copilot/skills` and `~/.claude/skills`). The skill ships inside the tool and carries its version: rerun the command after `dotnet tool update` to refresh it. It never overwrites a `SKILL.md` it did not write.
+
+### Optional: warnings in every build
+
+For Visual Studio's Error List after an ordinary build, with nobody running the tool, reference the `SharpView` package from the Web API project (the one with the controllers). It is a development dependency, so it does not flow to projects that reference this one:
+
+```sh
+dotnet add MyApi/MyApi.csproj package SharpView
+```
+
+Every build of that project (`dotnet build`, Visual Studio, VS Code, CI) then runs `exceptions --format msbuild` on the project and the projects it references, and the findings become build warnings, with `SV0000` when the analysis itself fails. A package attaches to one project because .NET builds solutions project by project; set `SharpViewInput` to the `.sln`/`.slnx` to analyse the whole solution, for example when it has several API hosts. It adds a few seconds to every build (it does not run in the IDE's background design-time builds), which is why the tool is the default route. `NoWarn` and `WarningsAsErrors` apply to SV codes as to compiler warnings, and `SharpViewEnabled=false` skips the analysis. Settings: [src/SharpView.Build/PACKAGE.md](src/SharpView.Build/PACKAGE.md).
 
 ## Quick start (from source)
 
@@ -212,7 +248,7 @@ Publishing uses nuget.org [trusted publishing](https://learn.microsoft.com/en-us
 | Package | Purpose |
 | --- | --- |
 | `SharpView.Cli` | The `sharpview` .NET tool (`dotnet tool install -g SharpView.Cli`). |
-| `SharpView` | MSBuild package: exception findings as build warnings (see [As build warnings](#as-build-warnings)). Carries its own copy of the CLI. |
+| `SharpView` | Optional MSBuild package: exception findings as warnings in every build (see [Optional: warnings in every build](#optional-warnings-in-every-build)). Carries its own copy of the CLI. |
 | `SharpView.Core` | Fact model, `ProgramIndex` and the queries: reachability, paths, exceptions, project map, layer rules. No Roslyn dependency. |
 | `SharpView.Roslyn` | Loads solutions and projects with MSBuild and Roslyn into a fact snapshot. |
 | `SharpView.Graph` | Generic immutable directed multigraph with search and SCC algorithms. |

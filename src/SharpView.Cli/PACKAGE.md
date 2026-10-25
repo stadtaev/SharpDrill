@@ -24,7 +24,7 @@ Requires a .NET 10 (or newer) SDK. Restore the solution first: SharpView never r
 | `inspect` | Extraction summary; `--methods` lists root IDs; `--json` writes the full fact snapshot. |
 | `skill` | Installs the agent skill for GitHub Copilot and Claude Code in this repository (`.claude/skills/sharpview/SKILL.md`), or `--user` for every repository. Rerun after updating the tool. |
 
-To get the exception findings as warnings in every build (`dotnet build`, Visual Studio, VS Code, CI), reference the `SharpView` package from the Web API project instead.
+`sharpview exceptions --format msbuild` prints the uncaught and miscaught findings as build-log warnings (`SV0001` may escape an action, `SV0002` reaches a global exception handler, `SV0003` miscaught, `SV0004` third-party call with `--strict`), for a CI job or a VS Code task with the `$msCompile` problem matcher. `#pragma warning disable SV000N` or `[SuppressMessage("SharpView", "SV000N")]` where a warning points accepts that finding. For teams, install it as a local tool (`dotnet new tool-manifest`, `dotnet tool install SharpView.Cli`) so CI gets the same version with `dotnet tool restore`; the repository README has a GitLab CI job. To get the warnings in every build instead, Visual Studio's Error List included, reference the optional `SharpView` package from the Web API project.
 
 Run `sharpview --help` for every option. Exit codes: 0 complete, 1 usable but with gaps, Unknown results or limits, 2 invalid request, 130 cancelled.
 

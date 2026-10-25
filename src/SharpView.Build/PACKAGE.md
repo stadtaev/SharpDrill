@@ -2,6 +2,8 @@
 
 Reports [SharpView](https://github.com/stadtaev/sharpview)'s exception findings as build warnings after each build: in `dotnet build`, Visual Studio's Error List and VS Code's Problems panel. Build agents need nothing extra; `dotnet restore` brings it.
 
+The usual way to run SharpView is the `SharpView.Cli` tool, in CI or on demand: `dotnet sharpview exceptions MyApi.slnx --format msbuild` prints the same warnings without adding seconds to every build. Use this package when you want them in every build without anyone running the tool.
+
 ```xml
 <!-- the Web API project -->
 <ItemGroup>
