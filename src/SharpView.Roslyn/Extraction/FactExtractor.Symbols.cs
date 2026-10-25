@@ -39,7 +39,8 @@ internal sealed partial class FactExtractor
             INamedTypeSymbol n => n.TypeArguments.Select(x => UseShallow(x)).ToImmutableArray(),
             _ => []
         };
-        return new(symbol is INamedTypeSymbol named ? RegisterType(named) : null, TypeName(symbol),
+        // An unresolved (error) type has no assembly to own it; it stays a name without a declaration.
+        return new(symbol is INamedTypeSymbol { TypeKind: not TypeKind.Error } named ? RegisterType(named) : null, TypeName(symbol),
             symbol.NullableAnnotation == NullableAnnotation.Annotated ? NullabilityKind.Annotated : symbol.NullableAnnotation == NullableAnnotation.NotAnnotated ? NullabilityKind.NotAnnotated : NullabilityKind.Oblivious, components);
     }
     private TypeUse UseShallow(ITypeSymbol s) => s is ITypeParameterSymbol ? new(null, TypeName(s), NullabilityKind.Oblivious, []) : Use(s);

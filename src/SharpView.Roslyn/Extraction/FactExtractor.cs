@@ -204,16 +204,17 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
             IOperation? operation = entry.Node switch
             {
                 AnonymousFunctionExpressionSyntax n => (entry.Model.GetOperation(n, token) as IAnonymousFunctionOperation)?.Body,
-                LocalFunctionStatementSyntax n => entry.Model.GetOperation((SyntaxNode?)n.Body ?? n.ExpressionBody!.Expression, token),
-                PropertyDeclarationSyntax { ExpressionBody: { } expression } => entry.Model.GetOperation(expression.Expression, token),
-                IndexerDeclarationSyntax { ExpressionBody: { } expression } => entry.Model.GetOperation(expression.Expression, token),
+                // The arrow clause, not its expression: a parenthesized or `!`-suppressed expression has no operation of its own.
+                LocalFunctionStatementSyntax n => entry.Model.GetOperation((SyntaxNode?)n.Body ?? n.ExpressionBody!, token),
+                PropertyDeclarationSyntax { ExpressionBody: { } expression } => entry.Model.GetOperation(expression, token),
+                IndexerDeclarationSyntax { ExpressionBody: { } expression } => entry.Model.GetOperation(expression, token),
                 _ => entry.Model.GetOperation(entry.Node, token)
             };
             if (operation is not null) walker.Visit(operation);
             else if (methods[id].Body == BodyStatus.Source) walker.InternalGap($"Source body has no operation tree ({Microsoft.CodeAnalysis.CSharp.CSharpExtensions.Kind(entry.Node)}).", entry.Node);
             walker.ExtractRegions(entry.Node);
             // An implicit `: base()` is an ordinary implicit call to the base's parameterless constructor.
-            if (entry.Symbol.MethodKind == MethodKind.Constructor && entry.Node is ConstructorDeclarationSyntax { Initializer: null } && entry.Symbol.ContainingType.BaseType is { SpecialType: not SpecialType.System_Object } baseType)
+            if (entry.Symbol.MethodKind == MethodKind.Constructor && entry.Node is ConstructorDeclarationSyntax { Initializer: null } && entry.Symbol.ContainingType.BaseType is { SpecialType: not SpecialType.System_Object, TypeKind: not TypeKind.Error } baseType)
             {
                 var baseConstructor = baseType.InstanceConstructors.FirstOrDefault(x => x.Parameters.All(p => p.IsOptional || p.IsParams));
                 if (baseConstructor is null) walker.InternalGap("Implicit base constructor could not be resolved.", entry.Node);

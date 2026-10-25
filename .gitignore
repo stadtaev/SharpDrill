@@ -6,3 +6,6 @@
 *.suo
 diagrams_exports/
 nupkg/
+
+# Private real-world fixture, kept local only
+tests/Fixtures/private-api/

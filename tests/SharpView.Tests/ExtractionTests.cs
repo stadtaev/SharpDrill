@@ -79,6 +79,29 @@ public sealed class ExtractionTests
     }
 
     [Fact]
+    public async Task Expression_bodies_wrapped_in_parentheses_or_suppression_are_walked()
+    {
+        var snapshot = await Extract("""
+            public class Sample {
+                public bool Wrapped => (Leaf() == 0 || Leaf() == 1);
+                public string Suppressed => Name()!;
+                public int this[int i] => (Leaf());
+                public int Local() { int Inner() => (Leaf()); return Inner(); }
+                public static int Leaf() => 42;
+                public static string? Name() => null;
+            }
+            """);
+        Assert.DoesNotContain(snapshot.Gaps, x => x.Message.Contains("no operation tree", StringComparison.Ordinal));
+        foreach (var (owner, target, count) in new[] { ("Sample.get_Wrapped()", "Sample.Leaf()", 2), ("Sample.get_Suppressed()", "Sample.Name()", 1), ("Sample.get_Item(int)", "Sample.Leaf()", 1) })
+        {
+            var getter = Assert.Single(snapshot.Callables, x => x.DisplaySignature == owner);
+            Assert.Equal(count, snapshot.CallSites.Count(x => x.Caller == getter.Id && x.TargetDisplay == target));
+        }
+        var local = Assert.Single(snapshot.Callables, x => x.Kind == CallableKind.LocalFunction);
+        Assert.Single(snapshot.CallSites, x => x.Caller == local.Id && x.TargetDisplay == "Sample.Leaf()");
+    }
+
+    [Fact]
     public async Task Nested_callables_own_calls_without_invented_parent_edges()
     {
         var snapshot = await Extract("""
