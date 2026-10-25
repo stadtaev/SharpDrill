@@ -266,13 +266,15 @@ public sealed class CliContractTests
         var result = await Run("exceptions", ResearchFixture.Input, "--caught");
         Assert.Equal(1, result.Exit);
         var text = result.Out.Replace("\r\n", "\n");
-        Assert.Contains("  Caught by: catch (Research.Infrastructure.StorageException) in Service.Caught  Research.Application", text);
-        Assert.Contains("  Thrown:    Repository.Read  Research.Infrastructure", text);
-        Assert.Contains("  Path:\n       OrdersController.", text);
-        Assert.Contains("Handler:   rethrows it", text);
-        Assert.Contains("Handler:   throws a different exception instead", text);
-        Assert.Contains("Handler:   handles it (only if the filter accepts it)", text);
+        Assert.Contains("   Caught by:  Service.Caught  Research.Application/Service.cs:6\n               catch (Research.Infrastructure.StorageException)\n", text);
+        Assert.Contains("   Thrown:     Repository.Read  Research.Infrastructure", text);
+        Assert.Contains("   Path:       OrdersController.", text);
+        Assert.Contains("Handler:    rethrows it", text);
+        Assert.Contains("Handler:    throws a different exception instead", text);
+        Assert.Contains("Handler:    handles it (only if the filter accepts it)", text);
         Assert.DoesNotContain("Service.Incompatible()", text);
+        // Findings follow an overview by exception type, each numbered and separated by a blank line.
+        Assert.StartsWith("Overview: 7 caught exceptions\n  7  Research.Infrastructure.StorageException\n\n1. Research.Infrastructure.StorageException\n", text);
     }
     [Fact]
     public async Task Miscaught_reports_the_try_whose_clauses_do_not_match_and_what_happens_next()
@@ -280,11 +282,11 @@ public sealed class CliContractTests
         var result = await Run("exceptions", ResearchFixture.Input, "--miscaught");
         Assert.Equal(1, result.Exit);
         var text = result.Out.Replace("\r\n", "\n");
-        Assert.Contains("Miscaught: Research.Infrastructure.StorageException", text);
-        Assert.Contains("  Missed by: try in Service.Incompatible (catches only System.ArgumentException)  Research.Application", text);
-        Assert.Contains("  Then:      may escape the controller action", text);
-        Assert.Contains("    -> Service.Incompatible\n", text);
-        Assert.StartsWith("Handled by a global exception handler: UseExceptionHandler (Research.Api/Program.cs:5)\nMiscaught: ", text);
+        Assert.Contains("1. Research.Infrastructure.StorageException", text);
+        Assert.Contains("   Missed by:  Service.Incompatible  Research.Application/Service.cs:8\n               try { ... } catch (System.ArgumentException)\n", text);
+        Assert.Contains("   Then:       may escape the controller action", text);
+        Assert.Contains("OrdersController.Incompatible -> Service.Incompatible -> Repository.Read\n", text);
+        Assert.StartsWith("Handled by a global exception handler:\n  - UseExceptionHandler  Research.Api/Program.cs:5\n\n1. ", text);
         Assert.Contains("12 actions analysed: 1 miscaught (1 handled by a global exception handler).", result.Error);
     }
     [Fact]

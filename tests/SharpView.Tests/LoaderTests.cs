@@ -76,12 +76,27 @@ public sealed class LoaderTests
                   <ItemGroup><PackageReference Include="xunit" Version="2.9.3" /></ItemGroup>
                 </Project>
                 """);
+            // The test package only in the per-framework evaluation, and a project that gets it through a shared fixture library.
+            var pact = Path.Combine(directory, "Api.Pact.csproj");
+            await File.WriteAllTextAsync(pact, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFrameworks>net8.0;net10.0</TargetFrameworks></PropertyGroup>
+                  <ItemGroup Condition="'$(TargetFramework)' != ''"><PackageReference Include="PactNet" Version="5.0.0" /></ItemGroup>
+                </Project>
+                """);
+            var consumer = Path.Combine(directory, "Api.Contracts.csproj");
+            await File.WriteAllTextAsync(consumer, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFrameworks>net8.0;net10.0</TargetFrameworks></PropertyGroup>
+                  <ItemGroup><ProjectReference Include="Api.Pact.csproj" /></ItemGroup>
+                </Project>
+                """);
             var fixture = Path.Combine(ResearchFixture.Root, "tests/Fixtures/ResearchSolution");
-            var projects = new[] { "Research.Api", "Research.Application", "Research.Infrastructure" }.Select(x => Path.Combine(fixture, x, x + ".csproj")).Append(tests);
+            var projects = new[] { "Research.Api", "Research.Application", "Research.Infrastructure" }.Select(x => Path.Combine(fixture, x, x + ".csproj")).Append(tests).Append(pact).Append(consumer);
             await File.WriteAllTextAsync(input, $"<Solution>{string.Concat(projects.Select(x => $"<Project Path=\"{x}\" />"))}</Solution>");
             var snapshot = await RoslynProgramLoader.LoadAsync(new(input));
             Assert.Equal(3, snapshot.Compilations.Length);
-            Assert.Equal(tests, Assert.Single(snapshot.ExcludedTestProjects));
+            Assert.Equal(new[] { consumer, pact, tests }.Order(StringComparer.Ordinal), snapshot.ExcludedTestProjects);
             await Assert.ThrowsAsync<ArgumentException>(() => RoslynProgramLoader.LoadAsync(new(input, IncludeTests: true)));
         }
         finally { Directory.Delete(directory, true); }

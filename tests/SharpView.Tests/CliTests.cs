@@ -56,7 +56,7 @@ public sealed class CliTests
         var result = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Get()");
         Assert.Equal(0, result.Exit);
         // The registered middleware is named once, as the section header, not repeated per finding.
-        Assert.StartsWith("Handled by a global exception handler: UseExceptionHandler (Research.Api/Program.cs:5)\nUncaught: Research.Infrastructure.StorageException\n  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6\n  Escapes:   OrdersController.Get\n", result.Out.ReplaceLineEndings("\n"));
+        Assert.Equal("Handled by a global exception handler:\n  - UseExceptionHandler  Research.Api/Program.cs:5\n\n1. Research.Infrastructure.StorageException\n   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6\n   Path:       OrdersController.Get -> Service.Load -> Repository.Read\n", result.Out.ReplaceLineEndings("\n"));
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(result.Out, "UseExceptionHandler"));
         Assert.Equal("1 action analysed: 1 uncaught exception (1 handled by a global exception handler).\n", result.Error.ReplaceLineEndings("\n"));
     }

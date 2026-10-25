@@ -1,8 +1,6 @@
-Handled by a global exception handler: UseExceptionHandler (Research.Api/Program.cs:5)
-Uncaught: Research.Infrastructure.StorageException
-  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
-  Escapes:   OrdersController.Get
-  Path:
-       OrdersController.Get
-    -> Service.Load
-    -> Repository.Read
+Handled by a global exception handler:
+  - UseExceptionHandler  Research.Api/Program.cs:5
+
+1. Research.Infrastructure.StorageException
+   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
+   Path:       OrdersController.Get -> Service.Load -> Repository.Read

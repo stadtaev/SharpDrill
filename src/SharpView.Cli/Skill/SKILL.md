@@ -36,11 +36,12 @@ Useful options: `--root "<exact signature or ID>"` limits a run to one action (`
 
 - Results go to stdout. Stderr has the summary line, compile errors and limits.
 - `Not followed:` lists where the analysis stopped: an interface with no implementation in source, a task that is never awaited, a `finally` that may throw. Report these to the user as open questions. Do not guess what happens there.
-- An exception entry shows where it is `Thrown` (and `Rethrown`), the actions it `Escapes` from, and an example `Path` from the action down to the throw.
-- `Path (possible, not proven)` and `(assumed implementation)` mean the path goes through an interface or virtual call into an implementation found in source. SharpView does not read DI registrations, so it cannot know which implementation runs.
-- `Handled by a global exception handler: ...` heads the findings that exception middleware or a global MVC exception filter still receives. They are lower priority, but the client still gets whatever that handler returns, often a 500.
+- A report with more than one finding opens with `Overview:` and a count per exception type. Findings are numbered (`1.`, `2.`, ...) and separated by blank lines.
+- An exception entry shows where it is `Thrown` (and `Rethrown`) and an example `Path` from the action down to the throw. `Escapes` lists the actions when there is more than the one the path starts at. `(in the action)` after `Thrown` means the throw is in the action itself, so there is no path line.
+- In a path, `->` is a direct call and `~>` an interface or virtual call into an implementation found in source; such a path is marked `(possible, not proven)`. SharpView does not read DI registrations, so it cannot know which implementation runs.
+- `Handled by a global exception handler:` with the registrations below it heads the findings that exception middleware or a global MVC exception filter still receives. They are lower priority, but the client still gets whatever that handler returns, often a 500.
 - The `--strict` section lists third-party calls (NuGet packages and referenced DLLs, not .NET itself) that no catch meets anywhere on the way from the action. Any catch type around the call or a caller counts as wrapping it. A catch that only rethrows does not.
-- `--miscaught` entries say which `try` missed (`Missed by`) and what happens next (`Then`).
+- `--miscaught` entries say which `try` missed (`Missed by`, with its catch clauses on the next line) and what happens next (`Then`). `--caught` entries name the method with the catch (`Caught by`) and what it does (`Handler`).
 - Library and framework code is a boundary: the exceptions it throws are not modelled, and neither are implicit exceptions such as a null dereference. No finding does not prove that nothing is thrown.
 
 Exit codes: 0 complete, 1 usable but with gaps, Unknown results or limits (normal on real code), 2 invalid request or fatal, 130 cancelled.

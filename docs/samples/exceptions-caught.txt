@@ -1,56 +1,51 @@
-Caught: Research.Infrastructure.StorageException
-  Thrown:    Repository.ReadAsync  Research.Infrastructure/Repository.cs:8
-  Caught by: catch (Research.Infrastructure.StorageException) in Service.AwaitCaught  Research.Application/Service.cs:14
-  Handler:   handles it
-  Path:
-       OrdersController.AwaitCaught
-    -> Service.AwaitCaught
-    -> Repository.ReadAsync
-Caught: Research.Infrastructure.StorageException
-  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
-  Caught by: catch (Research.Infrastructure.StorageException) in Service.Caught  Research.Application/Service.cs:6
-  Handler:   handles it
-  Path:
-       OrdersController.Caught
-    -> Service.Caught
-    -> Repository.Read
-Caught: Research.Infrastructure.StorageException
-  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
-  Caught by: catch (Research.Infrastructure.StorageException) when (...) in Service.Filter  Research.Application/Service.cs:11
-  Handler:   handles it (only if the filter accepts it)
-  Path:
-       OrdersController.Filter
-    -> Service.Filter
-    -> Repository.Read
-Caught: Research.Infrastructure.StorageException
-  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
-  Caught by: catch (Research.Infrastructure.StorageException) in Service.Nested  Research.Application/Service.cs:18
-  Handler:   rethrows it
-  Path:
-       OrdersController.Nested
-    -> Service.Nested
-    -> Repository.Read
-Caught: Research.Infrastructure.StorageException
-  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
-  Caught by: catch (System.Exception) in Service.Nested  Research.Application/Service.cs:18
-  Handler:   handles it
-  Path:
-       OrdersController.Nested
-    -> Service.Nested
-    -> Repository.Read
-Caught: Research.Infrastructure.StorageException
-  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
-  Caught by: catch (Research.Infrastructure.StorageException) in Service.Replace  Research.Application/Service.cs:10
-  Handler:   throws a different exception instead
-  Path:
-       OrdersController.Replace
-    -> Service.Replace
-    -> Repository.Read
-Caught: Research.Infrastructure.StorageException
-  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
-  Caught by: catch (Research.Infrastructure.StorageException) in Service.Rethrow  Research.Application/Service.cs:9
-  Handler:   rethrows it
-  Path:
-       OrdersController.Rethrow
-    -> Service.Rethrow
-    -> Repository.Read
+Overview: 7 caught exceptions
+  7  Research.Infrastructure.StorageException
+
+1. Research.Infrastructure.StorageException
+   Thrown:     Repository.ReadAsync  Research.Infrastructure/Repository.cs:8
+   Caught by:  Service.AwaitCaught  Research.Application/Service.cs:14
+               catch (Research.Infrastructure.StorageException)
+   Handler:    handles it
+   Path:       OrdersController.AwaitCaught -> Service.AwaitCaught -> Repository.ReadAsync
+
+2. Research.Infrastructure.StorageException
+   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
+   Caught by:  Service.Caught  Research.Application/Service.cs:6
+               catch (Research.Infrastructure.StorageException)
+   Handler:    handles it
+   Path:       OrdersController.Caught -> Service.Caught -> Repository.Read
+
+3. Research.Infrastructure.StorageException
+   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
+   Caught by:  Service.Filter  Research.Application/Service.cs:11
+               catch (Research.Infrastructure.StorageException) when (...)
+   Handler:    handles it (only if the filter accepts it)
+   Path:       OrdersController.Filter -> Service.Filter -> Repository.Read
+
+4. Research.Infrastructure.StorageException
+   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
+   Caught by:  Service.Nested  Research.Application/Service.cs:18
+               catch (Research.Infrastructure.StorageException)
+   Handler:    rethrows it
+   Path:       OrdersController.Nested -> Service.Nested -> Repository.Read
+
+5. Research.Infrastructure.StorageException
+   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
+   Caught by:  Service.Nested  Research.Application/Service.cs:18
+               catch (System.Exception)
+   Handler:    handles it
+   Path:       OrdersController.Nested -> Service.Nested -> Repository.Read
+
+6. Research.Infrastructure.StorageException
+   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
+   Caught by:  Service.Replace  Research.Application/Service.cs:10
+               catch (Research.Infrastructure.StorageException)
+   Handler:    throws a different exception instead
+   Path:       OrdersController.Replace -> Service.Replace -> Repository.Read
+
+7. Research.Infrastructure.StorageException
+   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
+   Caught by:  Service.Rethrow  Research.Application/Service.cs:9
+               catch (Research.Infrastructure.StorageException)
+   Handler:    rethrows it
+   Path:       OrdersController.Rethrow -> Service.Rethrow -> Repository.Read

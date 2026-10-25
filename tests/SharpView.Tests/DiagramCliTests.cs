@@ -106,8 +106,8 @@ public sealed class DiagramCliTests
     {
         var result = await Run("", "exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Get()");
         Assert.Equal(0, result.Exit);
-        Assert.Contains("Uncaught: Research.Infrastructure.StorageException", result.Out);
-        Assert.Contains("  Path:\n       OrdersController.Get\n    -> Service.Load\n", result.Out.ReplaceLineEndings("\n"));
+        Assert.Contains("1. Research.Infrastructure.StorageException", result.Out);
+        Assert.Contains("   Path:       OrdersController.Get -> Service.Load -> Repository.Read\n", result.Out.ReplaceLineEndings("\n"));
         // The exception type's compiler-provided constructor is not "missing code": the action itself is fully known.
         Assert.DoesNotContain("Not followed", result.Error);
         var unobserved = await Run("", "exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Unobserved()");

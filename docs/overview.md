@@ -143,43 +143,51 @@ Research.Infrastructure.StorageException  Repository.Read  Research.Infrastructu
 System.Exception (or a subclass)  Repository.StaticType  Research.Infrastructure/Repository.cs:10
 ```
 
-`--caught`, where it is thrown and where it is caught:
+`--caught`, where it is thrown and where it is caught. Every report that lists more than one finding starts with an
+`Overview:` line and a count per exception type; findings are numbered and separated by blank lines:
 
 ```text
-Caught: Research.Infrastructure.StorageException
-  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
-  Caught by: catch (Research.Infrastructure.StorageException) in Service.Caught  Research.Application/Service.cs:6
-  Handler:   handles it
-  Path:
-       OrdersController.Caught
-    -> Service.Caught
-    -> Repository.Read
+Overview: 7 caught exceptions
+  7  Research.Infrastructure.StorageException
+
+1. Research.Infrastructure.StorageException
+   Thrown:     Repository.ReadAsync  Research.Infrastructure/Repository.cs:8
+   Caught by:  Service.AwaitCaught  Research.Application/Service.cs:14
+               catch (Research.Infrastructure.StorageException)
+   Handler:    handles it
+   Path:       OrdersController.AwaitCaught -> Service.AwaitCaught -> Repository.ReadAsync
 ```
 
 `--miscaught`, a `try` that did not catch it:
 
 ```text
-Handled by a global exception handler: UseExceptionHandler (Research.Api/Program.cs:5)
-Miscaught: Research.Infrastructure.StorageException
-  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
-  Missed by: try in Service.Incompatible (catches only System.ArgumentException)  Research.Application/Service.cs:8
-  Then:      may escape the controller action
+Handled by a global exception handler:
+  - UseExceptionHandler  Research.Api/Program.cs:5
+
+1. Research.Infrastructure.StorageException
+   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
+   Missed by:  Service.Incompatible  Research.Application/Service.cs:8
+               try { ... } catch (System.ArgumentException)
+   Then:       may escape the controller action
+   Path:       OrdersController.Incompatible -> Service.Incompatible -> Repository.Read
 ```
 
-`--uncaught`, one entry per escaping throw, with the actions it escapes from and an example path:
+`--uncaught`, one entry per escaping throw, with an example path from an action; `Escapes:` lists the actions when
+there is more than the one the path starts at:
 
 ```text
-Handled by a global exception handler: UseExceptionHandler (Research.Api/Program.cs:5)
-Uncaught: Research.Infrastructure.StorageException
-  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
-  Escapes:   OrdersController.Filter, OrdersController.Get, OrdersController.Incompatible and 1 more
-  Path:
-       OrdersController.Filter
-    -> Service.Filter
-    -> Repository.Read
+2. Research.Infrastructure.StorageException
+   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
+   Escapes:    OrdersController.Filter, OrdersController.Get, OrdersController.Incompatible and 1 more
+   Path:       OrdersController.Filter -> Service.Filter -> Repository.Read
 ```
 
-"May escape" means no catch on the way from the action. Findings whose actions are covered by registered exception middleware or a global exception filter are listed last, under a `Handled by a global exception handler:` line. A catch is *miscaught* only when every clause definitely does not match; filters and runtime-dependent matches are possible catches instead.
+A path stays on one line while it fits in 120 columns, otherwise it continues one call per line. `~>` marks a step into
+an implementation found in source behind an interface or virtual call, and such a path is followed by
+`(possible, not proven: ...)`. A throw in the action itself has no path line; its `Thrown:` line ends with
+`(in the action)`. `--locations` adds a `Locations:` list.
+
+"May escape" means no catch on the way from the action. Findings whose actions are covered by registered exception middleware or a global exception filter are listed last, under a `Handled by a global exception handler:` header that lists the registrations. A catch is *miscaught* only when every clause definitely does not match; filters and runtime-dependent matches are possible catches instead.
 
 ## Writing your own rule
 

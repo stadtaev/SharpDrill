@@ -1,9 +1,9 @@
-Handled by a global exception handler: UseExceptionHandler (Research.Api/Program.cs:5)
-Miscaught: Research.Infrastructure.StorageException
-  Thrown:    Repository.Read  Research.Infrastructure/Repository.cs:6
-  Missed by: try in Service.Incompatible (catches only System.ArgumentException)  Research.Application/Service.cs:8
-  Then:      may escape the controller action
-  Path:
-       OrdersController.Incompatible
-    -> Service.Incompatible
-    -> Repository.Read
+Handled by a global exception handler:
+  - UseExceptionHandler  Research.Api/Program.cs:5
+
+1. Research.Infrastructure.StorageException
+   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
+   Missed by:  Service.Incompatible  Research.Application/Service.cs:8
+               try { ... } catch (System.ArgumentException)
+   Then:       may escape the controller action
+   Path:       OrdersController.Incompatible -> Service.Incompatible -> Repository.Read
