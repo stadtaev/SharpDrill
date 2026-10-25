@@ -55,7 +55,9 @@ internal static class SkillCommand
         if (version.EndsWith("-dev", StringComparison.Ordinal)) return null;
         foreach (var (user, path) in found)
             if (File.ReadLines(path).FirstOrDefault(x => x.StartsWith(Marker, StringComparison.Ordinal)) is { } line
-                && line[Marker.Length..].Trim().Split(' ')[0].TrimEnd('.') is var written && written != version)
+                && line[Marker.Length..].Trim().Split(' ')[0].TrimEnd('.') is var written && written != version
+                // The file may come from a cloned repository: print only version-shaped text, never escape sequences.
+                && System.Text.RegularExpressions.Regex.IsMatch(written, "^[0-9A-Za-z.+-]{1,64}$"))
                 return $"Tip: the SharpView skill in {path} is from {written}; run `sharpview skill{(user ? " --user" : "")}` to update it.";
         return null;
     }

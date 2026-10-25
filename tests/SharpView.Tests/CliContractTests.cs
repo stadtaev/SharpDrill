@@ -118,6 +118,9 @@ public sealed class CliContractTests
             Assert.Null(Cli.SkillCommand.HintFor(nested, home, "0.0.0-dev"));
             Write(Path.Combine(home, ".copilot"), Ours("0.3.0"));
             Assert.Null(Cli.SkillCommand.HintFor(nested, home, "0.3.0"));
+            // A planted marker cannot put terminal escape sequences on the console.
+            Write(Path.Combine(home, ".copilot"), Ours("\u001b]0;pwned\u0007"));
+            Assert.Null(Cli.SkillCommand.HintFor(nested, home, "0.3.0"));
             Directory.Delete(Path.Combine(home, ".copilot"), true);
             Write(Path.Combine(repository, ".github"), "---\nname: sharpview\n---\nour own words");
             Assert.Null(Cli.SkillCommand.HintFor(nested, home, "0.3.0"));
