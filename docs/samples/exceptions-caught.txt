@@ -34,7 +34,7 @@ Overview: 7 caught exceptions
    Caught by:  Service.Nested  Research.Application/Service.cs:18
                catch (System.Exception)
    Handler:    handles it
-   Path:       OrdersController.Nested -> Service.Nested -> Repository.Read
+   Path:       same as 4
 
 6. Research.Infrastructure.StorageException
    Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6

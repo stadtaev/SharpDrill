@@ -404,4 +404,64 @@ public sealed class CliContractTests
         var result = await Run(["exceptions", "missing.slnx", "--uncaught", option, .. value]);
         Assert.Equal(2, result.Exit); Assert.Contains($"exceptions does not accept {option}", result.Error);
     }
+    [Fact]
+    public async Task Uncaught_merges_throws_of_one_method_and_refers_to_a_shared_path()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "sharpview paths " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var input = Path.Combine(directory, "Paths.csproj");
+        try
+        {
+            await File.WriteAllTextAsync(input, "<Project Sdk=\"Microsoft.NET.Sdk.Web\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Library</OutputType></PropertyGroup></Project>");
+            await File.WriteAllTextAsync(Path.Combine(directory, "Code.cs"), """
+                using Microsoft.AspNetCore.Mvc;
+                public interface IStore { int Load(int id); }
+                public sealed class SqlStore : IStore { public int Load(int id) => Cache.Get(id); }
+                public sealed class FileStore : IStore { public int Load(int id) => 0; }
+                public static class Cache
+                {
+                    public static int Get(int id) => id < 0 ? throw new System.ArgumentException("negative") : Decode(id);
+                    private static int Decode(int id)
+                    {
+                        if (id == 1) throw new System.FormatException("one");
+                        if (id == 2) throw new System.FormatException("two");
+                        return Parse(id);
+                    }
+                    private static int Parse(int id) => id == 3 ? throw new System.OverflowException() : id;
+                }
+                [ApiController]
+                public sealed class ItemsController(IStore store) : ControllerBase
+                {
+                    [HttpGet("a")] public int A(int id) => Pass(id);
+                    [HttpGet("b")] public int B(int id) => Pass(id);
+                    private int Pass(int id) => store.Load(id);
+                }
+                """);
+            using (var restore = Process.Start(new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet", ["restore", input]) { RedirectStandardOutput = true })!)
+            { await restore.StandardOutput.ReadToEndAsync(); await restore.WaitForExitAsync(); Assert.Equal(0, restore.ExitCode); }
+            var result = await RunIn(directory, "exceptions", input, "--uncaught");
+            Assert.Equal(0, result.Exit);
+            Assert.EndsWith("""
+                1. System.ArgumentException
+                   Thrown:     Cache.Get  Code.cs:7
+                   Escapes:    ItemsController.A, ItemsController.B
+                   Path:       ItemsController.A -> ItemsController.Pass ~> SqlStore.Load (1 of 2 implementations) -> Cache.Get
+
+                2. System.FormatException
+                   Thrown:     Cache.Decode  Code.cs:10, 11
+                   Escapes:    ItemsController.A, ItemsController.B
+                   Path:       as in 1 up to Cache.Get, then -> Cache.Decode
+
+                3. System.OverflowException
+                   Thrown:     Cache.Parse  Code.cs:14
+                   Escapes:    ItemsController.A, ItemsController.B
+                   Path:       as in 1 up to Cache.Get, then -> Cache.Decode -> Cache.Parse
+
+                """, result.Out.ReplaceLineEndings("\n"));
+            // Build warnings keep one per throw, each with its full path.
+            var warnings = await RunIn(directory, "exceptions", input, "--format", "msbuild");
+            Assert.Equal(4, warnings.Out.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
+        }
+        finally { Directory.Delete(directory, true); }
+    }
 }

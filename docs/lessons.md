@@ -58,7 +58,7 @@ This applies to library virtual and interface calls too, when nothing in source 
 
 The founding principle, "declared, candidate and runtime are different things", is sound, and the default we derived from it was useless for the most common shape of ASP.NET code: controller → `IService` → implementation. With candidates off, every service call ended the analysis, so a throw in a service could never appear in `--uncaught`, `--caught` or `--miscaught`. The output was *correct* and *empty*.
 
-The principle does not require the strict default; it requires that possibilities are **marked**. Exception views now follow source implementation candidates by default and label every result that crossed one (`-[candidate]->`, "possible, not proven"). A proven direct path to the same throw replaces the candidate one. `--declared-only` restores the strict behaviour. A call with no implementation in source stays Unknown and says so ("no source implementation found").
+The principle does not require the strict default; it requires that possibilities are **marked**. Exception views now follow source implementation candidates by default and label every result that crossed one (`~>`, with `(1 of N implementations)` where source has several). A proven direct path to the same throw replaces the candidate one. `--declared-only` restores the strict behaviour. A call with no implementation in source stays Unknown and says so ("no source implementation found").
 
 Following candidates exposed a precision problem we had not met before:
 

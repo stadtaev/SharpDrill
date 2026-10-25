@@ -172,7 +172,7 @@ Handled by a global exception handler:
    Path:       OrdersController.Incompatible -> Service.Incompatible -> Repository.Read
 ```
 
-`--uncaught`, one entry per escaping throw, with an example path from an action; `Escapes:` lists the actions when
+`--uncaught`, one entry per exception type escaping from one method (its throw lines listed together), with an example path from an action; `Escapes:` lists the actions when
 there is more than the one the path starts at:
 
 ```text
@@ -183,8 +183,9 @@ there is more than the one the path starts at:
 ```
 
 A path stays on one line while it fits in 120 columns, otherwise it continues one call per line. `~>` marks a step into
-an implementation found in source behind an interface or virtual call, and such a path is followed by
-`(possible, not proven: ...)`. A throw in the action itself has no path line; its `Thrown:` line ends with
+an implementation found in source behind an interface or virtual call; when source has several, the step adds
+`(1 of N implementations)`, since that is where the path is a guess. A path that shares at least three steps with an
+earlier finding's path reads `same as 2` or `as in 2 up to <method>, then -> ...` (not under `--locations`). A throw in the action itself has no path line; its `Thrown:` line ends with
 `(in the action)`. `--locations` adds a `Locations:` list.
 
 "May escape" means no catch on the way from the action. Findings whose actions are covered by registered exception middleware or a global exception filter are listed last, under a `Handled by a global exception handler:` header that lists the registrations. A catch is *miscaught* only when every clause definitely does not match; filters and runtime-dependent matches are possible catches instead.

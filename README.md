@@ -140,7 +140,7 @@ Analysing your own solution: restore it first (SharpView never restores, builds 
 | --- | --- | --- |
 | `projects` | How do the projects reference each other, and how is each one built (framework, nullable, warnings as errors, compiler warnings)? `--mermaid` also saves the tree as a diagram. | — |
 | `exceptions` | Where is each explicit exception thrown (method, type, project)? | — |
-| `exceptions --uncaught` | Which throws may escape an action because no catch is on the way? One example path per origin. | controller actions |
+| `exceptions --uncaught` | Which throws may escape an action because no catch is on the way? One example path per exception type and method. | controller actions |
 | `exceptions --caught` | Which throws reach a matching catch, and where are they thrown and caught? | controller actions |
 | `exceptions --miscaught` | Which throws pass through a `try` whose catch clauses don't match their type? | controller actions |
 | `reach` | What can each action reach: once per method, with distance, project and shortest path? | controller actions (or any `--root`) |

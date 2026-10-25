@@ -111,7 +111,8 @@ internal sealed class ExceptionsCommand : ReportCommand
     }
 
     // One block per exception that may leave an action: the throw (and the rethrow it passed through), the actions it
-    // escapes from, and one example path. The same throw escaping many actions is listed once.
+    // escapes from, and one example path. The same throw escaping many actions is listed once, and so are throws of one
+    // type in one method (build warnings keep one per throw, since each points at its throw).
     private static bool Uncaught(ReportContext context, ImmutableArray<CallableId> roots, CancellationToken token)
     {
         var (index, display, output) = (context.Index, context.Display, context.Output);
@@ -120,9 +121,10 @@ internal sealed class ExceptionsCommand : ReportCommand
         var ordered = roots.OrderBy(x => index.Callable(x).DisplaySignature, StringComparer.Ordinal).ThenBy(x => x.Value, StringComparer.Ordinal).ToArray();
         var escapes = ordered.SelectMany(root => summaries.Roots[root].Escapes.Select(escape => (Root: root, Escape: escape)))
             .Where(x => x.Escape.ExceptionType is not null && !summaries.ThirdPartyCalls.ContainsKey(x.Escape.Origin))
-            .GroupBy(x => (x.Escape.Origin, x.Escape.SubsequentOrigin, x.Escape.ExceptionType, Handled: handlers.Covers([x.Root], true)))
+            .GroupBy(x => (Thrower: context.Arguments.MSBuild ? x.Escape.Origin.Value : index.ThrowSite(x.Escape.Origin).Owner.Value, x.Escape.SubsequentOrigin, x.Escape.ExceptionType, Handled: handlers.Covers([x.Root], true)))
+            .Select(x => (x.Key, Origins: x.Select(e => index.ThrowSite(e.Escape.Origin)).Distinct().OrderBy(e => e.Evidence.Path, StringComparer.Ordinal).ThenBy(e => e.Evidence.SpanStart).ToArray(), Items: x.ToArray()))
             .OrderBy(x => x.Key.Handled)
-            .ThenBy(x => index.ThrowSite(x.Key.Origin).Evidence.Path, StringComparer.Ordinal).ThenBy(x => index.ThrowSite(x.Key.Origin).Evidence.SpanStart)
+            .ThenBy(x => x.Origins[0].Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Origins[0].Evidence.SpanStart)
             .ThenBy(x => x.Key.SubsequentOrigin?.Value, StringComparer.Ordinal).ToArray();
         var (handled, report) = (0, new Report(output));
         var unwrapped = context.Arguments.Strict ? UnwrappedCalls(index, summaries, ordered) : [];
@@ -134,24 +136,24 @@ internal sealed class ExceptionsCommand : ReportCommand
         {
             token.ThrowIfCancellationRequested();
             if (group.Key.Handled && handled++ == 0 && !context.Arguments.MSBuild) handlers.WriteHeader(context, report);
-            var actions = group.Select(x => x.Root).Distinct().ToArray();
-            // A proven path makes the better example than one through an assumed implementation.
-            var example = group.OrderBy(x => x.Escape.ViaCandidate).First();
+            var actions = group.Items.Select(x => x.Root).Distinct().ToArray();
+            // A proven path makes the better example than one through an assumed implementation; then the shortest.
+            var example = group.Items.OrderBy(x => x.Escape.ViaCandidate).ThenBy(x => summaries.GetWitness(x.Root, x.Escape).Path.Length).First();
             if (context.Arguments.MSBuild)
             {
                 var rethrown = group.Key.SubsequentOrigin is { } at && index.TryGetThrowSite(at, out var again) ? $", rethrown in {display.Short(again.Owner)} ({FileLine(again.Evidence)})" : "";
                 var to = group.Key.Handled ? $" to the global exception handler {handlers.Names(actions)}" : "";
-                Warn(context, group.Key.Handled ? "SV0002" : "SV0001", index.ThrowSite(group.Key.Origin).Evidence,
+                Warn(context, group.Key.Handled ? "SV0002" : "SV0001", group.Origins[0].Evidence,
                     $"{group.Key.ExceptionType} may escape {Actions(display, actions)}{to}{rethrown}; {Chain(context, summaries.GetWitness(example.Root, example.Escape).Path, example.Escape.ViaCandidate)}");
                 continue;
             }
             var witness = summaries.GetWitness(example.Root, example.Escape);
             report.Begin(group.Key.ExceptionType!);
-            WriteOrigin(context, report, "Thrown", index.ThrowSite(group.Key.Origin), witness.Path);
-            if (group.Key.SubsequentOrigin is { } rethrow && index.TryGetThrowSite(rethrow, out var site)) WriteOrigin(context, report, "Rethrown", site, []);
+            WriteOrigin(context, report, "Thrown", group.Origins, witness.Path);
+            if (group.Key.SubsequentOrigin is { } rethrow && index.TryGetThrowSite(rethrow, out var site)) WriteOrigin(context, report, "Rethrown", [site], []);
             // The path starts at the action, so a single action is already named there.
             if (actions is not [var only] || witness.Path.FirstOrDefault() != only) report.Line("Escapes", Actions(display, actions));
-            WritePath(context, report, witness.Path, witness.Sites, example.Escape.ViaCandidate, []);
+            WritePath(context, report, witness.Path, witness.Sites, []);
         }
         if (context.Arguments.Strict) WriteUnwrapped(context, report, summaries, unwrapped, token);
         Console.Error.WriteLine($"{Display.Plural(roots.Length, "action")} analysed: {Display.Plural(escapes.Length, "uncaught exception")}{HandledCount(handled)}"
@@ -192,7 +194,7 @@ internal sealed class ExceptionsCommand : ReportCommand
             report.Begin(target);
             report.Line("Called", $"{display.Short(site.Caller)}  {display.Where(site.Evidence)}{(witness.Path is [_] ? "  (in the action)" : "")}");
             if (actions is not [var only] || witness.Path.FirstOrDefault() != only) report.Line("Escapes", Actions(display, actions));
-            WritePath(context, report, witness.Path, witness.Sites, example.Escape.ViaCandidate, []);
+            WritePath(context, report, witness.Path, witness.Sites, []);
         }
     }
 
@@ -296,7 +298,7 @@ internal sealed class ExceptionsCommand : ReportCommand
         var origin = index.ThrowSite(caught.Origin);
         var handler = index.Catch(caught.Catch);
         report.Begin(Thrown(origin));
-        WriteOrigin(context, report, "Thrown", origin, caught.Example.Path);
+        WriteOrigin(context, report, "Thrown", [origin], caught.Example.Path);
         report.Line("Caught by", $"{display.Short(handler.Owner)}  {display.Where(handler.Evidence)}");
         report.More(Clause(handler));
         report.Line("Handler", $"{Outcome(handler.Outcome)}{(caught.Certainty == CatchCertainty.Possible ? handler.Filter is null ? " (only if the runtime type matches)" : " (only if the filter accepts it)" : "")}");
@@ -309,7 +311,7 @@ internal sealed class ExceptionsCommand : ReportCommand
         var origin = index.ThrowSite(miscaught.Origin);
         var region = index.Region(miscaught.Missed.Region);
         report.Begin(miscaught.Missed.ExceptionType ?? Thrown(origin));
-        WriteOrigin(context, report, "Thrown", origin, miscaught.Example.Path);
+        WriteOrigin(context, report, "Thrown", [origin], miscaught.Example.Path);
         report.Line("Missed by", $"{display.Short(region.Owner)}  {display.Where(region.ProtectedBlock)}");
         report.More($"try {{ ... }} {string.Join(" ", region.Catches.Select(x => Clause(index.Catch(x))))}");
         report.Line("Then", string.Join("; ", miscaught.Outcomes.Select(x => Fate(context, x, miscaught.Undetermined))));
@@ -320,38 +322,67 @@ internal sealed class ExceptionsCommand : ReportCommand
     private static string Clause(CatchFact handler) =>
         (handler.CaughtType is { } type ? $"catch ({type.DisplayName})" : "catch") + (handler.Filter is null ? "" : " when (...)");
 
-    // A one-step path means the throw is in the action itself; the path line is then left out.
-    private static void WriteOrigin(ReportContext context, Report report, string label, ThrowSiteFact origin, ImmutableArray<CallableId> path) =>
-        report.Line(label, $"{context.Display.Short(origin.Owner)}  {context.Display.Where(origin.Evidence)}{(path is [_] ? "  (in the action)" : "")}");
+    // Throws of one method, one line per file. A one-step path means the throw is in the action itself; the path line is
+    // then left out.
+    private static void WriteOrigin(ReportContext context, Report report, string label, IReadOnlyList<ThrowSiteFact> origins, ImmutableArray<CallableId> path) =>
+        report.Line(label, $"{context.Display.Short(origins[0].Owner)}  "
+            + string.Join("; ", origins.GroupBy(x => x.Evidence.Path).Select(x => context.Display.Where(x.First().Evidence) + string.Concat(x.Skip(1).Select(e => $", {e.Evidence.StartLine}"))))
+            + (path is [_] ? "  (in the action)" : ""));
 
     private static void WriteExample(ReportContext context, Report report, ExceptionWitness witness) =>
-        WritePath(context, report, witness.Path, witness.Sites, witness.ViaCandidate, witness.Evidence);
+        WritePath(context, report, witness.Path, witness.Sites, witness.Evidence);
 
     // From the action down to the throw, on one line when it fits. A step through an interface/virtual call (~>) assumes
-    // which implementation runs, so a path with such a step is possible, not proven.
-    private static void WritePath(ReportContext context, Report report, ImmutableArray<CallableId> path, ImmutableArray<CallSiteId> sites, bool assumed, ImmutableArray<SourceEvidence> evidence)
+    // which implementation runs; when source has several, the step says so, since that is where the path is a guess. A
+    // path that repeats most of an earlier finding's path refers to it and spells out only the rest (--locations keeps
+    // every step, since each has its own location).
+    private static void WritePath(ReportContext context, Report report, ImmutableArray<CallableId> path, ImmutableArray<CallSiteId> sites, ImmutableArray<SourceEvidence> evidence)
     {
         var (index, display) = (context.Index, context.Display);
-        var steps = path.Select((x, i) => (Arrow: i == 0 ? "" : i - 1 < sites.Length && index.CallSite(sites[i - 1]).Dispatch != DispatchKind.Direct ? "~> " : "-> ", Name: display.Short(x))).ToArray();
+        string Choice(int i) => i > 0 && i - 1 < sites.Length && index.CallSite(sites[i - 1]).Dispatch != DispatchKind.Direct
+            && index.CallGraph.CandidatesOf(sites[i - 1]).Length is var n and > 1 ? $" (1 of {n} implementations)" : "";
+        var steps = path.Select((x, i) => (Arrow: i == 0 ? "" : i - 1 < sites.Length && index.CallSite(sites[i - 1]).Dispatch != DispatchKind.Direct ? "~> " : "-> ", Name: display.Short(x) + Choice(i))).ToArray();
         if (steps.Length > 1)
         {
-            var inline = string.Join(" ", steps.Select(x => x.Arrow + x.Name));
-            if (report.Fits(inline)) report.Line("Path", inline);
-            else { report.Line("Path", steps[0].Name); foreach (var (arrow, name) in steps[1..]) report.Step(arrow, name); }
-            if (assumed) report.More("(possible, not proven: ~> assumes which implementation runs)");
+            var (earlier, shared, same) = context.Arguments.Locations ? default : report.Earlier(path);
+            if (shared >= SharedSteps)
+            {
+                var tail = steps[shared..];
+                var head = same ? $"same as {earlier}" : $"as in {earlier} up to {steps[shared - 1].Name}" + (tail.Length == 0 ? "" : ", then");
+                var inline = string.Join(" ", [head, .. tail.Select(x => x.Arrow + x.Name)]);
+                if (report.Fits(inline)) report.Line("Path", inline);
+                else { report.Line("Path", head); foreach (var (arrow, name) in tail) report.Step(arrow, name); }
+            }
+            else
+            {
+                var inline = string.Join(" ", steps.Select(x => x.Arrow + x.Name));
+                if (report.Fits(inline)) report.Line("Path", inline);
+                else { report.Line("Path", steps[0].Name); foreach (var (arrow, name) in steps[1..]) report.Step(arrow, name); }
+                report.Remember(path);
+            }
         }
         if (!context.Arguments.Locations) return;
         var places = (evidence.IsEmpty ? sites.Select(x => index.CallSite(x).Evidence) : evidence).Select(display.Where).ToArray();
         for (var i = 0; i < places.Length; i++) if (i == 0) report.Line("Locations", places[i]); else report.More(places[i]);
     }
 
+    // Fewer shared steps than this are cheaper to repeat than to look up.
+    private const int SharedSteps = 3;
+
     // Numbered findings separated by blank lines, after an overview by exception type; labels share one column so the
     // values line up.
     private sealed class Report(TextWriter output)
     {
         private const int Column = 15, Width = 120;
+        private readonly List<(int Number, ImmutableArray<CallableId> Path)> paths = [];
         private int number;
         private bool written;
+
+        // Paths written in full, so a later finding can refer to the one sharing its longest prefix.
+        public void Remember(ImmutableArray<CallableId> path) => paths.Add((number, path));
+        public (int Number, int Shared, bool Same) Earlier(ImmutableArray<CallableId> path) => paths
+            .Select(x => (x.Number, Shared: x.Path.Zip(path).TakeWhile(p => p.First == p.Second).Count(), Same: x.Path.SequenceEqual(path)))
+            .OrderByDescending(x => x.Shared).ThenByDescending(x => x.Same).ThenBy(x => x.Number).FirstOrDefault();
 
         private void Separate() { if (written) output.WriteLine(); written = true; }
 
