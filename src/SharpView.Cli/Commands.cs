@@ -19,6 +19,8 @@ internal static class Commands
     internal static async Task<int> RunAsync(Arguments arguments, CancellationToken token)
     {
         var index = new ProgramIndex(await RoslynProgramLoader.LoadAsync(arguments.Request, token));
-        return await arguments.Handler.RunAsync(index, arguments, token);
+        var exit = await arguments.Handler.RunAsync(index, arguments, token);
+        SkillCommand.Hint(arguments);
+        return exit;
     }
 }
