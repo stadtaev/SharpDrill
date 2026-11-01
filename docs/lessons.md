@@ -72,7 +72,7 @@ The compiler binds a call written in source to the receiver type's own member. W
 
 All uncertainty witnesses and all real results shared one counter, `MaxResults` = 1000. In a program with many boundaries the first 1000 witnesses were all uncertainty, the search stopped, and the report derived from the witnesses (`caught`, `miscaught`) was built from an empty list. It printed `caught: 0`, a statement of fact that was false, with the real signal buried in a stats line (`output limit: True`).
 
-What went wrong, and the fix in [`ExceptionQuery`](../src/SharpView.Core/Queries/ExceptionQuery.cs):
+What went wrong, and the fix in [`ExceptionQuery`](../src/SharpView.Core/Exceptions/ExceptionQuery.cs):
 
 - **One budget for two kinds of thing.** Origin witnesses are the answer; uncertainty is context. Origins now have the budget and stop the search when exceeded; uncertainty has its own budget and never stops it.
 - **No de-duplication.** The same unknown site, reached by many paths, was reported once per path. It is now reported once per action and site.

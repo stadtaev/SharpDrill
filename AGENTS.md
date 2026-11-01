@@ -35,10 +35,9 @@ Pipeline: **Load → Extract facts → Index → Queries → (Rules) → CLI rep
   `Extraction/FactExtractor*.cs` registers source symbols and bodies; `BodyWalker` walks each body's operation tree and
   records call sites, throws, catches, regions and `AnalysisGap`s. All Roslyn knowledge lives here.
 - `SharpView.Core` — plain immutable records (`Model/Facts.cs`, the `ProgramSnapshot`), `ProgramIndex` (lookups, lazy
-  call/dependency graphs) and queries (`ExceptionQuery` per-path witnesses for `--caught`/`--miscaught`,
-  `ExceptionSummaryQuery` bottom-up summaries for `--uncaught`, `ExceptionTransfer` shared catch/finally transfer,
-  `ReachabilityQuery`, `CallChainQuery`). **Core has no Roslyn or Mermaid dependency**: it depends only on `SharpView.Graph`
-  and can run on a snapshot loaded from JSON.
+  call/dependency graphs), the exception engine in `Exceptions/` and other queries in `Queries/` (`ReachabilityQuery`,
+  `CallChainQuery`). **Core has no Roslyn or Mermaid dependency**: it depends only on `SharpView.Graph` and can run on a
+  snapshot loaded from JSON.
 - `SharpView.Graph` — generic immutable directed multigraph (BFS, SCC, quotient); knows nothing about C#.
 - `SharpView.Export.Mermaid` — Mermaid/Markdown formatting; the only project with the Mermaid NuGet dependency.
 - `SharpView.Cli` — argument parsing (`Arguments.cs`, strict per-command option sets), one `ICliCommand` per command
@@ -48,6 +47,18 @@ Pipeline: **Load → Extract facts → Index → Queries → (Rules) → CLI rep
   `Skill/SKILL.md`, the agent-facing guide to the CLI. Update it when commands, options or output change.
 - `SharpView.Build` — no code: the `SharpView` MSBuild package. `build/SharpView.targets` runs the packed CLI's
   `exceptions --format msbuild` after each build, so findings become SV000N warnings in dotnet build, VS and VS Code.
+
+### Where exception behaviour is decided
+
+One question per place; change the place that owns the question.
+
+| Question | Place |
+| --- | --- |
+| What does this call site lead to (source, library, dispatch candidates, unresolved)? | `CallGraph.Resolve` (`Graphs/CallGraph.cs`) |
+| What happens to an exception at one throw or call site (catch match, filter, rethrow, finally, await)? | `ExceptionTransfer` (`Exceptions/`) |
+| Which exceptions may leave each method and each call site (`--uncaught`)? | `ExceptionSummaryQuery`: Reach → Seed → Propagate (one worklist) → Summarize |
+| Which catches each throw meets on each path (`--caught`, `--miscaught`)? | `ExceptionQuery` (per-path witnesses) → `ExceptionHandlingQuery` |
+| How is it worded and grouped? | `Cli/Commands/ExceptionsCommand.cs` (no analysis there) |
 
 ## Principles that shape changes
 
