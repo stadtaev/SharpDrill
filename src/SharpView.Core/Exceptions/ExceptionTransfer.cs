@@ -25,7 +25,7 @@ internal sealed record ExceptionTransferResult(ExceptionFlow Flow, ExceptionStat
 
 internal static class ExceptionTransfer
 {
-    internal static ExceptionTransferResult Start(ProgramIndex program, ThrowSiteFact origin, CancellationToken token,
+    internal static ExceptionTransferResult Start(ProgramIndex index, ThrowSiteFact origin, CancellationToken token,
         bool collectEvidence = true)
     {
         var exact = origin.ExactExceptionType ?? (origin.IsExactType ? origin.StaticExceptionType : null);
@@ -33,50 +33,50 @@ internal static class ExceptionTransfer
             origin.IsExactType || origin.ExactExceptionType is not null, false,
             collectEvidence ? ImmutableList<SourceEvidence>.Empty.Add(origin.Evidence) : ImmutableList<SourceEvidence>.Empty,
             ImmutableList<CatchId>.Empty);
-        if (program.Callable(origin.Owner).IsAsync && !program.Callable(origin.Owner).ReturnsTask)
+        if (index.Callable(origin.Owner).IsAsync && !index.Callable(origin.Owner).ReturnsTask)
             return Unknown(flow, ExceptionReason.AsyncUnsupported, "Async void or custom awaitable propagation is outside the supported model.");
-        return ApplyRegions(program, flow, origin.ProtectedRegions, token, collectEvidence);
+        return ApplyRegions(index, flow, origin.ProtectedRegions, token, collectEvidence);
     }
 
-    internal static ExceptionTransferResult StartAtCall(ProgramIndex program, ThrowSiteId origin, CallSiteFact site, CancellationToken token)
+    internal static ExceptionTransferResult StartAtCall(ProgramIndex index, ThrowSiteId origin, CallSiteFact site, CancellationToken token)
     {
         var flow = new ExceptionFlow(origin, null, new TypeUse(null, "System.Exception", NullabilityKind.Oblivious, []), null, false, false,
             ImmutableList<SourceEvidence>.Empty, ImmutableList<CatchId>.Empty) { AnyType = true };
-        return ApplyRegions(program, flow, site.ProtectedRegions, token, collectEvidence: false);
+        return ApplyRegions(index, flow, site.ProtectedRegions, token, collectEvidence: false);
     }
 
-    internal static ExceptionTransferResult Cross(ProgramIndex program, ExceptionFlow flow, CallSiteFact site, CancellationToken token,
+    internal static ExceptionTransferResult Cross(ProgramIndex index, ExceptionFlow flow, CallSiteFact site, CancellationToken token,
         bool collectEvidence = true)
     {
         if (collectEvidence) flow = flow with { Evidence = flow.Evidence.Add(site.Evidence) };
-        var caller = program.Callable(site.Caller);
+        var caller = index.Callable(site.Caller);
         if (caller.IsAsync && !caller.ReturnsTask)
             return Unknown(flow, ExceptionReason.AsyncUnsupported, "Async void or custom awaitable propagation is outside the supported model.");
-        if (site.BoundTarget is { } target && program.ContainsCallable(target))
+        if (site.BoundTarget is { } target && index.ContainsCallable(target))
         {
-            var callee = program.Callable(target);
+            var callee = index.Callable(target);
             if ((callee.IsAsync || site.IsAwaited) && !callee.ReturnsTask)
                 return Unknown(flow, ExceptionReason.AsyncUnsupported, "Async void or custom awaitable propagation is outside the supported model.");
             if (callee.ReturnsTask && !site.IsAwaited)
                 return Unknown(flow, ExceptionReason.UnobservedTask, "Task-producing call is not directly awaited; exception observation/propagation unsupported.");
         }
-        return ApplyRegions(program, flow, site.ProtectedRegions, token, collectEvidence);
+        return ApplyRegions(index, flow, site.ProtectedRegions, token, collectEvidence);
     }
 
-    internal static ExceptionTransferResult ApplyRegions(ProgramIndex program, ExceptionFlow flow,
+    internal static ExceptionTransferResult ApplyRegions(ProgramIndex index, ExceptionFlow flow,
         ImmutableArray<ExceptionRegionId> protectedRegions, CancellationToken token, bool collectEvidence = true)
     {
         foreach (var regionId in protectedRegions)
         {
             token.ThrowIfCancellationRequested();
-            var region = program.Region(regionId);
+            var region = index.Region(regionId);
             if (region.FinallyMayThrow)
                 return Unknown(flow, ExceptionReason.FinallyUnsupported, "Finally may throw and replace the propagating exception.");
             var matched = false;
             foreach (var catchId in region.Catches)
             {
-                var handler = program.Catch(catchId);
-                var match = flow.AnyType ? true : Matches(program.Types, flow.Type, flow.Exact, handler.CaughtType, token);
+                var handler = index.Catch(catchId);
+                var match = flow.AnyType ? true : Matches(index.Types, flow.Type, flow.Exact, handler.CaughtType, token);
                 if (match == false) continue;
                 matched = true;
                 if (collectEvidence)
@@ -100,7 +100,7 @@ internal static class ExceptionTransfer
                         flow = flow with { Changed = true };
                         if (handler.SubsequentThrow is { } rethrow)
                             flow = flow with { SubsequentOrigin = rethrow,
-                                Evidence = collectEvidence ? flow.Evidence.Add(program.ThrowSite(rethrow).Evidence) : flow.Evidence };
+                                Evidence = collectEvidence ? flow.Evidence.Add(index.ThrowSite(rethrow).Evidence) : flow.Evidence };
                         break;
                     // The original exception ends here; the replacement throw is an origin of its own and propagates from the handler.
                     case HandlerOutcome.Replaces:

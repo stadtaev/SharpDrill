@@ -62,15 +62,15 @@ public static class ExceptionQuery
 
     public static ExceptionSearchResult Analyze(ProgramSnapshot snapshot, ImmutableArray<CallableId> actions,
         ExceptionOptions options, CancellationToken cancellationToken = default) => Analyze(new ProgramIndex(snapshot), actions, options, cancellationToken);
-    public static ExceptionSearchResult Analyze(ProgramIndex program, ImmutableArray<CallableId> actions,
+    public static ExceptionSearchResult Analyze(ProgramIndex index, ImmutableArray<CallableId> actions,
         ExceptionOptions options, CancellationToken cancellationToken = default)
     {
         options.Validate(); cancellationToken.ThrowIfCancellationRequested();
-        foreach (var action in actions) if (!program.ContainsCallable(action)) throw new ArgumentException($"Unknown root: {action.Value}");
+        foreach (var action in actions) if (!index.ContainsCallable(action)) throw new ArgumentException($"Unknown root: {action.Value}");
         var results = ImmutableArray.CreateBuilder<ExceptionWitness>();
-        var calls = program.GetCallGraph(cancellationToken);
+        var calls = index.GetCallGraph(cancellationToken);
         var stack = new Stack<Frame>();
-        foreach (var action in actions.Distinct().OrderByDescending(x => program.Callable(x).DisplaySignature, StringComparer.Ordinal).ThenByDescending(x => x.Value, StringComparer.Ordinal))
+        foreach (var action in actions.Distinct().OrderByDescending(x => index.Callable(x).DisplaySignature, StringComparer.Ordinal).ThenByDescending(x => x.Value, StringComparer.Ordinal))
             stack.Push(new(action, [action], [], false));
         var work = 0; var outputLimit = false; var workLimit = false; var depthLimit = false;
         var origins = 0; var uncertainties = 0; var unknownLimit = false;
@@ -103,7 +103,7 @@ public static class ExceptionQuery
         {
             cancellationToken.ThrowIfCancellationRequested();
             var current = frame.Path[^1];
-            var callable = program.Callable(current);
+            var callable = index.Callable(current);
             // Compiler-provided members hold no explicit code: nothing to report, nothing to follow.
             if (callable.Body == BodyStatus.Synthesized) continue;
             if (callable.Body != BodyStatus.Source)
@@ -111,15 +111,15 @@ public static class ExceptionQuery
                 if (!Add(Unknown(frame, frame.Path, frame.Via, ExceptionReason.MissingBody, "Missing body: explicit origins unknown.", callable.Declarations.FirstOrDefault()))) break;
                 continue;
             }
-            foreach (var origin in program.ThrowSites(current).Where(x => x.Kind == ThrowKind.Explicit))
+            foreach (var origin in index.ThrowSites(current).Where(x => x.Kind == ThrowKind.Explicit))
             {
-                if (!Add(Unwind(frame.Root, frame.Path, frame.Sites, frame.Via, origin, program, cancellationToken))) break;
+                if (!Add(Unwind(frame.Root, frame.Path, frame.Sites, frame.Via, origin, index, cancellationToken))) break;
             }
             if (outputLimit) break;
-            foreach (var gap in program.Gaps(current))
+            foreach (var gap in index.Gaps(current))
                 if (!Add(Unknown(frame, frame.Path, frame.Via, ExceptionReason.ExtractionGap, gap.Message, gap.Evidence))) break;
             if (outputLimit) break;
-            var outgoing = program.Outgoing(current);
+            var outgoing = index.Outgoing(current);
             if (frame.Sites.Length >= options.MaxDepth && outgoing.Length > 0)
             {
                 depthLimit = true;
@@ -156,7 +156,7 @@ public static class ExceptionQuery
                             else descend.Add(new(frame.Root, next, frame.Sites.Add(site), true));
                         }
                         break;
-                    case CallTargetKind.Source when !program.Callable(target.Callees[0]).HasBody:
+                    case CallTargetKind.Source when !index.Callable(target.Callees[0]).HasBody:
                         Add(Unknown(frame, path, frame.Via, ExceptionReason.MissingBody, "Missing body: explicit origins unknown.", site.Evidence));
                         break;
                     case CallTargetKind.Source when frame.Path.Contains(target.Callees[0]):
@@ -171,20 +171,20 @@ public static class ExceptionQuery
         }
         return new(results.ToImmutable(), outputLimit, workLimit, depthLimit, work)
         {
-            GlobalGaps = [.. program.Snapshot.Gaps.Where(x => x.Owner is null)],
+            GlobalGaps = [.. index.Snapshot.Gaps.Where(x => x.Owner is null)],
             UnknownLimitReached = unknownLimit,
-            LibraryCalls = [.. library.OrderBy(x => program.Callable(x).DisplaySignature, StringComparer.Ordinal).ThenBy(x => x.Value, StringComparer.Ordinal)],
+            LibraryCalls = [.. library.OrderBy(x => index.Callable(x).DisplaySignature, StringComparer.Ordinal).ThenBy(x => x.Value, StringComparer.Ordinal)],
         };
     }
 
     private static ExceptionWitness Unwind(CallableId root, ImmutableArray<CallableId> path,
-        ImmutableArray<CallSiteFact> sites, bool via, ThrowSiteFact origin, ProgramIndex program, CancellationToken token)
+        ImmutableArray<CallSiteFact> sites, bool via, ThrowSiteFact origin, ProgramIndex index, CancellationToken token)
     {
-        var current = ExceptionTransfer.Start(program, origin, token);
+        var current = ExceptionTransfer.Start(index, origin, token);
         for (var i = sites.Length - 1; current.Status is null && i >= 0; i--)
         {
             token.ThrowIfCancellationRequested();
-            current = ExceptionTransfer.Cross(program, current.Flow, sites[i], token);
+            current = ExceptionTransfer.Cross(index, current.Flow, sites[i], token);
         }
         var flow = current.Flow;
         var status = current.Status ?? (flow.Type is null ? ExceptionStatus.Unknown : ExceptionStatus.MayEscape);
