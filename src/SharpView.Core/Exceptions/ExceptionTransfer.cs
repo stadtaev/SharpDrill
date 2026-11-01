@@ -10,10 +10,10 @@ internal sealed record ExceptionFlow(ThrowSiteId Origin, ThrowSiteId? Subsequent
     public TypeUse? Type => ExactType ?? StaticType;
     // The flow crossed an implementation-candidate step of an interface/virtual call (a possibility, not a proof).
     public bool ViaCandidate { get; init; }
-    // Protected regions crossed whose catch clauses definitely do not match; collected with evidence only.
+    // Protected regions crossed whose catch clauses definitely do not match.
     public ImmutableList<MissedRegion> Missed { get; init; } = ImmutableList<MissedRegion>.Empty;
     // Handlers that may or may not take the exception (a filter, or a static type that does not decide the match); the
-    // exception is followed past them. Collected with evidence only.
+    // exception is followed past them.
     public ImmutableList<CatchId> Possible { get; init; } = ImmutableList<CatchId>.Empty;
     // An exception of any type from a third-party call: every catch clause's type takes it, because strict mode asks whether
     // the call is wrapped in a catch, not whether a particular type is caught.
@@ -79,12 +79,11 @@ internal static class ExceptionTransfer
                 var match = flow.AnyType ? true : Matches(index.Types, flow.Type, flow.Exact, handler.CaughtType, token);
                 if (match == false) continue;
                 matched = true;
-                if (collectEvidence)
-                    flow = flow with { Evidence = flow.Evidence.Add(handler.Evidence), Handlers = flow.Handlers.Add(handler.Id) };
+                flow = flow with { Evidence = collectEvidence ? flow.Evidence.Add(handler.Evidence) : flow.Evidence, Handlers = flow.Handlers.Add(handler.Id) };
                 // A filter or an undecided type match may take the exception or let it pass: follow the case where it passes.
                 if (match is null || handler.Filter is not null)
                 {
-                    if (collectEvidence) flow = flow with { Possible = flow.Possible.Add(handler.Id) };
+                    flow = flow with { Possible = flow.Possible.Add(handler.Id) };
                     continue;
                 }
                 switch (handler.Outcome)
@@ -108,10 +107,37 @@ internal static class ExceptionTransfer
                 }
                 break;
             }
-            if (!matched && !region.Catches.IsEmpty && collectEvidence)
+            if (!matched && !region.Catches.IsEmpty)
                 flow = flow with { Missed = flow.Missed.Add(new(region.Id, flow.Type?.DisplayName)) };
         }
         return new(flow);
+    }
+
+    // The full story of one origin along one path from a root (Path[0]) down to the throw: re-walked with evidence from the
+    // throw up through Sites (innermost last) until a handler or the root decides it.
+    internal static ExceptionWitness Witness(ProgramIndex index, CallableId root, ImmutableArray<CallableId> path,
+        ImmutableArray<CallSiteFact> sites, bool via, ThrowSiteFact origin, CancellationToken token)
+    {
+        var current = ExceptionTransfer.Start(index, origin, token);
+        for (var i = sites.Length - 1; current.Status is null && i >= 0; i--)
+        {
+            token.ThrowIfCancellationRequested();
+            current = ExceptionTransfer.Cross(index, current.Flow, sites[i], token);
+        }
+        var flow = current.Flow;
+        var status = current.Status ?? (flow.Type is null ? ExceptionStatus.Unknown : ExceptionStatus.MayEscape);
+        var reason = current.Status is not null ? current.Reason
+            : flow.Type is null ? ExceptionReason.UnboundExceptionType
+            : flow.Changed ? ExceptionReason.ChangedMayEscape : ExceptionReason.MayEscape;
+        var message = current.Status is not null ? current.Message
+            : flow.Type is null ? "Exception type could not be bound."
+            : flow.Changed ? "Rethrown or replaced; subsequent exception may escape the controller action under the supported model."
+            : "May escape the controller action under the supported analysis model.";
+        return new(root, flow.Origin, flow.SubsequentOrigin, flow.Type?.DisplayName, flow.Exact, path,
+            flow.Changed ? ExceptionStatus.RethrownOrReplaced : status, message,
+            flow.Evidence.ToImmutableArray(), flow.Handlers.ToImmutableArray(),
+            flow.Changed ? status : null, flow.StaticType?.DisplayName, flow.ExactType?.DisplayName, reason)
+        { MissedRegions = [.. flow.Missed], PossibleHandlers = [.. flow.Possible], Sites = [.. sites.Select(x => x.Id)], ViaCandidate = via };
     }
 
     private static ExceptionTransferResult Unknown(ExceptionFlow flow, ExceptionReason reason, string message) =>

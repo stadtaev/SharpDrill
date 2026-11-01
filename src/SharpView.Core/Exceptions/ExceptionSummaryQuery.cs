@@ -2,6 +2,8 @@ using System.Collections.Immutable;
 using FlowKey = SharpView.Core.ExceptionSummaryResult.FlowKey;
 using Link = SharpView.Core.ExceptionSummaryResult.Link;
 using Stored = SharpView.Core.ExceptionSummaryResult.Stored;
+using Step = SharpView.Core.ExceptionSummaryResult.Step;
+using FactRef = SharpView.Core.ExceptionSummaryResult.FactRef;
 
 namespace SharpView.Core;
 
@@ -33,6 +35,12 @@ public sealed class ExceptionSummaryResult
         TypeUse? StaticType, TypeUse? ExactType, bool Exact, bool Changed, bool ViaCandidate);
     internal sealed record Link(CallableId Callee, FlowKey Key, CallSiteId Site);
     internal sealed record Stored(ExceptionFlow Flow, Link? Next);
+    // A fact: one distinct effect that may leave a method.
+    internal readonly record struct FactRef(CallableId Method, FlowKey Key);
+    // One transfer of an explicit origin: leaving its own method's try regions (From and Site null), or a callee fact
+    // crossing a call site in Owner. Result.Flow lists only the handlers and missed regions of this step; To is the
+    // fact it became when it got past (null when intercepted, unknown or over budget).
+    internal sealed record Step(FactRef? From, CallSiteFact? Site, CallableId Owner, ExceptionTransferResult Result, FactRef? To);
     private readonly ImmutableDictionary<CallableId, ImmutableDictionary<FlowKey, Stored>> facts;
     // Links found after a fact's first one; witnesses search all of them for the shortest path.
     private readonly IReadOnlyDictionary<(CallableId, FlowKey), List<Link>> alternatives;
@@ -60,6 +68,16 @@ public sealed class ExceptionSummaryResult
     internal ImmutableDictionary<CallableId, ImmutableArray<CallableId>> LibraryByMethod { get; init; } = ImmutableDictionary<CallableId, ImmutableArray<CallableId>>.Empty;
     // Origins standing for third-party call sites (ThirdPartyCallOrigins); they have no throw site.
     public ImmutableDictionary<ThrowSiteId, CallSiteId> ThirdPartyCalls { get; init; } = ImmutableDictionary<ThrowSiteId, CallSiteId>.Empty;
+    // Every transfer step of an explicit origin, in processing order, and the steps leaving each fact: what
+    // ExceptionHandlingQuery reads catches, misses and their outcomes from.
+    internal ImmutableArray<Step> Steps { get; init; } = [];
+    internal ILookup<FactRef, Step> StepsFrom { get; init; } = Array.Empty<Step>().ToLookup(x => default(FactRef));
+    // Sites through which each reached method is called from reached code (direct callers, then candidate callers).
+    internal ImmutableDictionary<CallableId, ImmutableArray<(CallSiteFact Site, bool Candidate)>> Callers { get; init; } =
+        ImmutableDictionary<CallableId, ImmutableArray<(CallSiteFact Site, bool Candidate)>>.Empty;
+
+    internal ExceptionFlow Flow(FactRef fact) => facts[fact.Method][fact.Key].Flow;
+    internal IEnumerable<FlowKey> KeysAt(CallableId method) => facts.TryGetValue(method, out var known) ? known.Keys : [];
 
     /// <summary>Library methods called anywhere beneath a root (direct calls, and candidates when followed).</summary>
     public ImmutableArray<CallableId> LibraryCallsFrom(CallableId root)
@@ -106,9 +124,9 @@ public sealed class ExceptionSummaryResult
         return Shortest(root, entries);
     }
 
-    // Breadth-first over every provenance link from the root's facts down to a seed (a fact without a link: the throw's
+    // Breadth-first over every provenance link from a method's facts (a root's, or any) down to a seed (a fact without a link: the throw's
     // own method). Ties go to the earliest recorded link, so the result is deterministic.
-    private ExceptionSummaryWitness Shortest(CallableId root, IEnumerable<FlowKey> starts)
+    internal ExceptionSummaryWitness Shortest(CallableId root, IEnumerable<FlowKey> starts)
     {
         var parents = new Dictionary<(CallableId Method, FlowKey Key), ((CallableId Method, FlowKey Key) From, CallSiteId Site)?>();
         var pending = new Queue<(CallableId Method, FlowKey Key)>();
@@ -174,6 +192,7 @@ public static class ExceptionSummaryQuery
         private readonly SortedDictionary<ThrowSiteId, CallSiteId> thirdPartyCalls = new(Comparer<ThrowSiteId>.Create((a, b) => string.CompareOrdinal(a.Value, b.Value)));
         private readonly Queue<(CallableId Method, FlowKey Key)> queue = new();
         private readonly Queue<(CallableId Method, ExceptionUncertainty Value)> unknownQueue = new();
+        private readonly List<Step> steps = [];
 
         // MaxWork counts examined sites, origins, gaps and transfer crossings; MaxFacts counts retained facts and unknowns.
         private int work, count;
@@ -251,9 +270,11 @@ public static class ExceptionSummaryQuery
                     token.ThrowIfCancellationRequested();
                     if (Stopped || !Spend()) break;
                     var transfer = ExceptionTransfer.Start(index, origin, token, collectEvidence: false);
+                    FactRef? to = null;
                     if (transfer.Status == ExceptionStatus.Unknown)
                         AddUnknown(method, new(transfer.Reason, origin.Id, null, transfer.Message, origin.Evidence));
-                    else if (transfer.Status is null) AddFlow(method, transfer.Flow, null);
+                    else if (transfer.Status is null && AddFlow(method, transfer.Flow, null)) to = new(method, Key(transfer.Flow));
+                    steps.Add(new(null, null, method, transfer, to));
                 }
                 foreach (var gap in index.Gaps(method))
                 {
@@ -307,8 +328,10 @@ public static class ExceptionSummaryQuery
                     {
                         token.ThrowIfCancellationRequested();
                         if (!Spend()) break;
-                        var input = viaCandidate && !flow.ViaCandidate ? flow with { ViaCandidate = true } : flow;
+                        // Handlers and missed regions start empty, so the result lists exactly this step's.
+                        var input = flow with { ViaCandidate = flow.ViaCandidate || viaCandidate, Handlers = [], Possible = [], Missed = [] };
                         var crossed = ExceptionTransfer.Cross(index, input, site, token, collectEvidence: false);
+                        FactRef? to = null;
                         if (crossed.Status == ExceptionStatus.Intercepted)
                             crossingIntercepts[site.Id].Add(flow.Origin);
                         else if (crossed.Status == ExceptionStatus.Unknown)
@@ -322,8 +345,10 @@ public static class ExceptionSummaryQuery
                             if (crossed.Flow.Type is not null) crossingFlows[site.Id].Add(Escape(crossed.Flow));
                             else crossingUnknowns[site.Id].Add(new(ExceptionReason.UnboundExceptionType,
                                 crossed.Flow.Origin, site.Id, "Exception type could not be bound.", site.Evidence));
-                            AddFlow(site.Caller, crossed.Flow, new(item.Method, item.Key, site.Id));
+                            if (AddFlow(site.Caller, crossed.Flow, new(item.Method, item.Key, site.Id))) to = new(site.Caller, Key(crossed.Flow));
                         }
+                        // Third-party call origins answer --strict only; they are not catches or misses of a throw.
+                        if (!flow.AnyType) steps.Add(new(new(item.Method, item.Key), site, site.Caller, crossed, to));
                         if (factLimit) break;
                     }
                 }
@@ -387,6 +412,9 @@ public static class ExceptionSummaryQuery
                 Callees = callees.ToImmutableDictionary(x => x.Key, x => x.Value.ToImmutableArray()),
                 LibraryByMethod = libraryByMethod.ToImmutableDictionary(x => x.Key, x => x.Value.ToImmutableArray()),
                 ThirdPartyCalls = thirdPartyCalls.ToImmutableDictionary(),
+                Steps = [.. steps],
+                StepsFrom = steps.Where(x => x.From is not null).ToLookup(x => x.From!.Value),
+                Callers = reachable.ToImmutableDictionary(x => x, x => IncomingSites(x).ToImmutableArray()),
             };
         }
 

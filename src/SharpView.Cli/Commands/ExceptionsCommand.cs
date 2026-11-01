@@ -18,46 +18,36 @@ internal sealed class ExceptionsCommand : ReportCommand
         if (arguments.MSBuild && arguments.View == ExceptionView.Caught) throw new ArgumentException("--format msbuild reports uncaught and miscaught exceptions; caught ones are not warnings.");
         if (arguments.MSBuild && arguments.Locations) throw new ArgumentException("--format msbuild prints one line per finding; --locations does not apply.");
         if (arguments.Strict && arguments.View != ExceptionView.Uncaught && !(arguments.MSBuild && arguments.View == ExceptionView.Throws)) throw new ArgumentException("--strict requires --uncaught.");
-        if (arguments.MSBuild && arguments.View == ExceptionView.Throws) { SummaryQuery(arguments).Validate(); PathQuery(arguments).Validate(); return; }
-        switch (arguments.View)
-        {
-            case ExceptionView.Throws when arguments.Given.Overlaps(TracedOptions):
-                throw new ArgumentException("Listing all throws takes no options; --root, --budget, --locations and --declared-only require --uncaught, --caught or --miscaught.");
-            case ExceptionView.Uncaught: SummaryQuery(arguments).Validate(); break;
-            case ExceptionView.Caught or ExceptionView.Miscaught: PathQuery(arguments).Validate(); break;
-        }
+        if (arguments.View == ExceptionView.Throws && !arguments.MSBuild && arguments.Given.Overlaps(TracedOptions))
+            throw new ArgumentException("Listing all throws takes no options; --root, --budget, --locations and --declared-only require --uncaught, --caught or --miscaught.");
+        SummaryQuery(arguments).Validate();
     }
 
-    // One knob: --budget bounds the work; depth is generous (cycles are detected separately) and the number of reported
-    // witnesses scales with the budget, so no output limit is hit before the work limit.
-    private const int Depth = 100;
-    private static ExceptionOptions PathQuery(Arguments arguments) => new(Depth, Math.Max(1000, arguments.Budget / 100), arguments.Budget, !arguments.DeclaredOnly, DistinctOutcomes: true);
-
-    // The same budget bounds both transfer work and retained facts.
+    // Every view reads one propagation. The same budget bounds both transfer work and retained facts.
     private static ExceptionSummaryOptions SummaryQuery(Arguments arguments) => new(arguments.Budget, arguments.Budget, !arguments.DeclaredOnly, arguments.Strict);
 
     protected override ValueTask<bool> ExecuteAsync(ReportContext context, CancellationToken token)
     {
         var roots = context.Arguments.MSBuild || context.Arguments.View != ExceptionView.Throws ? Roots.Select(context.Index, context.Arguments, RootScope.Actions, token) : [];
         if (context.Arguments.View == ExceptionView.Throws && !context.Arguments.MSBuild) return ValueTask.FromResult(Throws(context, token));
-        ViewOutcome[] outcomes = context.Arguments.View switch
+        var summaries = ExceptionSummaryQuery.Analyze(context.Index, roots, SummaryQuery(context.Arguments), token);
+        string[] counts = context.Arguments.View switch
         {
             // Build warnings default to every finding worth one: uncaught and miscaught.
-            ExceptionView.Throws => [Uncaught(context, roots, token), Handled(context, roots, caught: false, token)],
-            ExceptionView.Uncaught => [Uncaught(context, roots, token)],
-            ExceptionView.Caught => [Handled(context, roots, caught: true, token)],
-            _ => [Handled(context, roots, caught: false, token)],
+            ExceptionView.Throws => [Uncaught(context, summaries, roots, token), Handled(context, summaries, caught: false, token)],
+            ExceptionView.Uncaught => [Uncaught(context, summaries, roots, token)],
+            ExceptionView.Caught => [Handled(context, summaries, caught: true, token)],
+            _ => [Handled(context, summaries, caught: false, token)],
         };
         // One summary for the run, however many views it printed, so a CI log has one line to read.
-        Console.Error.WriteLine($"{Display.Plural(roots.Length, "action")} analysed: {string.Join("; ", outcomes.Select(x => x.Counts))}.");
-        WriteNotFollowed(context, outcomes.SelectMany(x => x.NotFollowed));
-        if (outcomes.Any(x => x.LimitReached)) WriteLimit(context.Arguments);
+        Console.Error.WriteLine($"{Display.Plural(roots.Length, "action")} analysed: {string.Join("; ", counts)}.");
+        WriteNotFollowed(context, roots.SelectMany(x => summaries.Roots[x].Unknowns)
+            .Where(x => x.ReasonCode is not (ExceptionReason.WorkLimit or ExceptionReason.FactLimit))
+            .Select(x => (x.ReasonCode, x.Site is { } s ? context.Index.CallSite(s).Evidence : x.Evidence)));
+        if (summaries.WorkLimitReached || summaries.FactLimitReached) WriteLimit(context.Arguments);
         if (suppressed > 0) Console.Error.WriteLine($"{Display.Plural(suppressed, "warning")} suppressed in source (#pragma warning disable or [SuppressMessage]).");
-        return ValueTask.FromResult(outcomes.Any(x => x.Incomplete));
+        return ValueTask.FromResult(!summaries.IsComplete);
     }
-
-    // What a view reports on stderr: its counts, where it could not follow an exception, and whether a budget stopped it.
-    private sealed record ViewOutcome(string Counts, IEnumerable<(ExceptionReason Reason, SourceEvidence? Evidence)> NotFollowed, bool LimitReached, bool Incomplete);
 
     // One line per explicit throw; rethrows are not new exceptions.
     private static bool Throws(ReportContext context, CancellationToken token)
@@ -75,17 +65,16 @@ internal sealed class ExceptionsCommand : ReportCommand
         return false;
     }
 
-    private static ViewOutcome Handled(ReportContext context, ImmutableArray<CallableId> roots, bool caught, CancellationToken token)
+    private static string Handled(ReportContext context, ExceptionSummaryResult summaries, bool caught, CancellationToken token)
     {
         var (arguments, display) = (context.Arguments, context.Display);
-        var result = ExceptionQuery.Analyze(context.Index, roots, PathQuery(arguments), token);
         var (count, handled, report) = (0, 0, new Report(context.Output));
         // A path that reaches a fake or test class only through an assumed implementation is a guess about what DI picks.
         bool Hidden(ThrowSiteFact origin, ExceptionWitness witness) =>
             witness.ViaCandidate && (display.IsTestDouble(origin.Owner) || witness.Path.Any(display.IsTestDouble));
         if (caught)
         {
-            var items = ExceptionHandlingQuery.Caught(result).Where(x => !Hidden(context.Index.ThrowSite(x.Origin), x.Example)).ToArray();
+            var items = ExceptionHandlingQuery.Caught(context.Index, summaries, token).Where(x => !Hidden(context.Index.ThrowSite(x.Origin), x.Example)).ToArray();
             report.Overview(Display.Plural(items.Length, "caught exception"), [.. items.Select(x => Thrown(context.Index.ThrowSite(x.Origin)))]);
             foreach (var item in items)
             {
@@ -97,7 +86,7 @@ internal sealed class ExceptionsCommand : ReportCommand
         {
             var handlers = new GlobalHandlers(context.Index);
             // Stable: findings keep their order within each section.
-            var items = ExceptionHandlingQuery.Miscaught(result).Where(x => !Hidden(context.Index.ThrowSite(x.Origin), x.Example))
+            var items = ExceptionHandlingQuery.Miscaught(context.Index, summaries, token).Where(x => !Hidden(context.Index.ThrowSite(x.Origin), x.Example))
                 .Select(x => (Item: x, Handled: handlers.Covers(x.EscapesFrom, x.Outcomes.Contains(ExceptionStatus.MayEscape)))).OrderBy(x => x.Handled).ToArray();
             if (!arguments.MSBuild)
                 report.Overview(Display.Plural(items.Length, "miscaught exception") + HandledCount(items.Count(x => x.Handled)),
@@ -110,18 +99,15 @@ internal sealed class ExceptionsCommand : ReportCommand
                 count++;
             }
         }
-        return new($"{count} {(caught ? "caught" : "miscaught")}{HandledCount(handled)}",
-            result.Results.Where(x => (x.SubsequentStatus ?? x.Status) == ExceptionStatus.Unknown).Select(x => (x.ReasonCode, x.Evidence.LastOrDefault())),
-            result.WorkLimitReached || result.OutputLimitReached || result.DepthLimitReached, !result.IsComplete);
+        return $"{count} {(caught ? "caught" : "miscaught")}{HandledCount(handled)}";
     }
 
     // One block per exception that may leave an action: the throw (and the rethrow it passed through), the actions it
     // escapes from, and one example path. The same throw escaping many actions is listed once, and so are throws of one
     // type in one method (build warnings keep one per throw, since each points at its throw).
-    private static ViewOutcome Uncaught(ReportContext context, ImmutableArray<CallableId> roots, CancellationToken token)
+    private static string Uncaught(ReportContext context, ExceptionSummaryResult summaries, ImmutableArray<CallableId> roots, CancellationToken token)
     {
         var (index, display, output) = (context.Index, context.Display, context.Output);
-        var summaries = ExceptionSummaryQuery.Analyze(index, roots, SummaryQuery(context.Arguments), token);
         var handlers = new GlobalHandlers(index);
         var ordered = roots.OrderBy(x => index.Callable(x).DisplaySignature, StringComparer.Ordinal).ThenBy(x => x.Value, StringComparer.Ordinal).ToArray();
         var escapes = ordered.SelectMany(root => summaries.Roots[root].Escapes.Select(escape => (Root: root, Escape: escape)))
@@ -162,13 +148,9 @@ internal sealed class ExceptionsCommand : ReportCommand
             WritePath(context, report, witness.Path, witness.Sites, []);
         }
         if (context.Arguments.Strict) WriteUnwrapped(context, report, summaries, unwrapped, token);
-        return new(Display.Plural(escapes.Length, "uncaught exception") + HandledCount(handled)
+        return Display.Plural(escapes.Length, "uncaught exception") + HandledCount(handled)
             + (!context.Arguments.Strict ? "" : unwrapped.Length == 0 ? "; every third-party call has a catch on the way"
-                : $"; {Display.Plural(unwrapped.Length, "third-party call")} with no catch on the way"),
-            roots.SelectMany(x => summaries.Roots[x].Unknowns)
-                .Where(x => x.ReasonCode is not (ExceptionReason.WorkLimit or ExceptionReason.FactLimit))
-                .Select(x => (x.ReasonCode, x.Site is { } s ? index.CallSite(s).Evidence : x.Evidence)),
-            summaries.WorkLimitReached || summaries.FactLimitReached, !summaries.IsComplete);
+                : $"; {Display.Plural(unwrapped.Length, "third-party call")} with no catch on the way");
     }
 
     // --strict: one block per third-party call site that no catch meets on the way from an action. Global handlers do not
@@ -257,7 +239,6 @@ internal sealed class ExceptionsCommand : ReportCommand
         ExceptionReason.MissingBody => ("method without a body", "methods without a body"),
         ExceptionReason.DispatchBoundary => ("interface or virtual call without a source implementation", "interface or virtual calls without a source implementation"),
         ExceptionReason.UnresolvedTarget => ("call that does not compile", "calls that do not compile"),
-        ExceptionReason.Cycle => ("recursive call", "recursive calls"),
         ExceptionReason.UnboundExceptionType => ("exception whose type does not compile", "exceptions whose type does not compile"),
         ExceptionReason.ExtractionGap => ("construct SharpView does not analyse", "constructs SharpView does not analyse"),
         ExceptionReason.HandlerFlowUnsupported => ("catch block with unclear flow", "catch blocks with unclear flow"),

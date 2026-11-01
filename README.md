@@ -208,10 +208,10 @@ A saved file can return exit code 1 because it contains useful but partial resul
 - **Exceptions.**
   - Reports cover explicit `throw`s, throw expressions, rethrows and catches: static type vs exact constructed type, filters, protected regions and locations.
   - The default view lists every explicit throw and rethrow in source, independent of any action. The other three views trace from controller actions (or `--root`).
-  - **Uncaught** (`--uncaught`) uses the bottom-up summary below; **caught** and **miscaught** use per-path witnesses, deduplicated by origin and handler or `try` block.
+  - All three views read one bottom-up propagation (below). **Caught** and **miscaught** are deduplicated by origin and handler or `try` block, each with the shortest example path from an action.
   - **Caught** lists every catch an exception reaches with a matching type, with the handler's outcome, read from its control flow: handles it, rethrows it, handles some cases and rethrows others, or throws a different exception instead. A catch with a filter, or whose match depends on the runtime type, is marked as a possible catch and the exception is followed past it.
   - **Miscaught** means the exception passes through a `try` whose catch clauses all have non-matching types. It is reported even when a catch further up handles it later; `Then:` shows what happens next. A catch whose match cannot be decided is a possible catch, never miscaught.
-  - Each witness unwinds the origin through its own `try` blocks and every caller's protected call site. An unrelated catch can never intercept it.
+  - An origin is unwound through its own `try` blocks and every caller's protected call site. An unrelated catch can never intercept it.
   - Statuses:
     - **Intercepted** by a matching handler. This does not prove recovery.
     - **Rethrown or replaced**, followed by the subsequent status.
@@ -271,10 +271,9 @@ var index = new ProgramIndex(snapshot); // build once; queries and rules share i
 var actions = AspNetConventions.ControllerActions(index, cancellationToken).Select(x => x.Method).ToImmutableArray();
 var reach = ReachabilityQuery.Analyze(index, actions, new ReachOptions(), cancellationToken);
 var paths = CallChainQuery.Enumerate(index, actions, new ChainOptions(), cancellationToken);
-var exceptions = ExceptionQuery.Analyze(index, actions, new ExceptionOptions(), cancellationToken);
 var summaries = ExceptionSummaryQuery.Analyze(index, actions, new ExceptionSummaryOptions(), cancellationToken);
-var caught = ExceptionHandlingQuery.Caught(exceptions);       // origin, catch, certainty, example witness
-var miscaught = ExceptionHandlingQuery.Miscaught(exceptions); // origin, try block that did not match, outcomes
+var caught = ExceptionHandlingQuery.Caught(index, summaries);       // origin, catch, certainty, example witness
+var miscaught = ExceptionHandlingQuery.Miscaught(index, summaries); // origin, try block that did not match, outcomes
 var projects = ProjectMap.Build(snapshot);                     // MSBuild reference graph and build settings
 var projectMarkdown = MermaidExporter.Markdown(projects);
 if (!actions.IsEmpty)

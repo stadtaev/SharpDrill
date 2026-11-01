@@ -35,10 +35,6 @@ public sealed class ExceptionScopeTests
     {
         var snapshot = Snapshot([Method("Action"), Method("Middle"), Method("Lib", BodyStatus.MetadataOnly)],
             [Call("Action", "Middle", "am"), Call("Middle", "Lib", "ml")]);
-        var detailed = ExceptionQuery.Analyze(snapshot, [Action], new());
-        Assert.Empty(detailed.Results);
-        Assert.Equal([new CallableId("Lib")], detailed.LibraryCalls.AsEnumerable());
-        Assert.True(detailed.IsComplete);
         var summary = ExceptionSummaryQuery.Analyze(snapshot, [Action]);
         Assert.Empty(summary.Roots[Action].Unknowns);
         Assert.True(summary.IsComplete);
@@ -71,10 +67,9 @@ public sealed class ExceptionScopeTests
     }
 
     [Fact]
-    public void A_root_without_a_body_is_still_unknown_in_both_analyses()
+    public void A_root_without_a_body_is_still_unknown()
     {
         var snapshot = Snapshot([Method("Action", BodyStatus.MetadataOnly)], []);
-        Assert.Equal(ExceptionReason.MissingBody, Assert.Single(ExceptionQuery.Analyze(snapshot, [Action], new()).Results).ReasonCode);
         Assert.Equal(ExceptionReason.MissingBody, Assert.Single(ExceptionSummaryQuery.Analyze(snapshot, [Action]).Roots[Action].Unknowns).ReasonCode);
     }
 
@@ -82,9 +77,6 @@ public sealed class ExceptionScopeTests
     public void Compiler_provided_callees_hold_no_code_to_analyse()
     {
         var snapshot = Snapshot([Method("Action"), Method("Auto", BodyStatus.Synthesized)], [Call("Action", "Auto", "aa")], [Throw("Action")]);
-        var detailed = ExceptionQuery.Analyze(snapshot, [Action], new());
-        Assert.Equal(ExceptionStatus.MayEscape, Assert.Single(detailed.Results).Status);
-        Assert.Empty(detailed.LibraryCalls);
         var summary = ExceptionSummaryQuery.Analyze(snapshot, [Action]);
         Assert.Empty(summary.Roots[Action].Unknowns);
         Assert.Single(summary.Roots[Action].Escapes);
@@ -95,9 +87,6 @@ public sealed class ExceptionScopeTests
     public void A_dispatch_call_to_a_library_member_nothing_overrides_is_a_library_call()
     {
         var snapshot = Snapshot([Method("Action"), Method("ILib", BodyStatus.MetadataOnly)], [Call("Action", "ILib", "ai", DispatchKind.Interface)]);
-        var detailed = ExceptionQuery.Analyze(snapshot, [Action], new());
-        Assert.Empty(detailed.Results);
-        Assert.Equal([new CallableId("ILib")], detailed.LibraryCalls.AsEnumerable());
         var summary = ExceptionSummaryQuery.Analyze(snapshot, [Action]);
         Assert.Empty(summary.Roots[Action].Unknowns);
         Assert.Equal([new CallableId("ILib")], summary.LibraryCallsFrom(Action).AsEnumerable());
@@ -109,8 +98,6 @@ public sealed class ExceptionScopeTests
     [Fact]
     public void An_interface_call_with_a_source_implementation_stops_unless_candidates_are_followed()
     {
-        var detailed = ExceptionQuery.Analyze(Injected(), [Action], new());
-        Assert.Equal(ExceptionReason.DispatchBoundary, Assert.Single(detailed.Results).ReasonCode);
         var summary = ExceptionSummaryQuery.Analyze(Injected(), [Action]);
         Assert.Empty(summary.Roots[Action].Escapes);
         Assert.Equal(ExceptionReason.DispatchBoundary, Assert.Single(summary.Roots[Action].Unknowns).ReasonCode);
@@ -119,13 +106,6 @@ public sealed class ExceptionScopeTests
     [Fact]
     public void Followed_candidates_reach_the_implementation_and_are_marked_as_possibilities()
     {
-        var detailed = ExceptionQuery.Analyze(Injected(), [Action], new(FollowCandidates: true));
-        var witness = Assert.Single(detailed.Results);
-        Assert.Equal(ExceptionStatus.MayEscape, witness.Status);
-        Assert.True(witness.ViaCandidate);
-        Assert.Equal([Action, new("Impl")], witness.Path.AsEnumerable());
-        Assert.Equal([new CallSiteId("ai")], witness.Sites.AsEnumerable());
-
         var summary = ExceptionSummaryQuery.Analyze(Injected(), [Action], new(FollowCandidates: true));
         var escape = Assert.Single(summary.Roots[Action].Escapes);
         Assert.True(escape.ViaCandidate);
@@ -139,8 +119,6 @@ public sealed class ExceptionScopeTests
     public void Following_candidates_without_any_source_implementation_stays_unknown_and_says_why()
     {
         var snapshot = Snapshot([Method("Action"), Method("I", BodyStatus.NoBody)], [Call("Action", "I", "ai", DispatchKind.Interface)]);
-        var detailed = ExceptionQuery.Analyze(snapshot, [Action], new(FollowCandidates: true));
-        Assert.Contains("no source implementation found", Assert.Single(detailed.Results).Reason);
         var summary = ExceptionSummaryQuery.Analyze(snapshot, [Action], new(FollowCandidates: true));
         Assert.Contains("no source implementation found", Assert.Single(summary.Roots[Action].Unknowns).Message);
     }
@@ -150,13 +128,13 @@ public sealed class ExceptionScopeTests
     {
         var snapshot = Guarded(Snapshot([Method("Action"), Method("I", BodyStatus.NoBody), Method("Impl")],
             [Call("Action", "I", "ai", DispatchKind.Interface, region: "r")], [Throw("Impl")], [Implements("I", "Impl")]));
-        var witness = Assert.Single(ExceptionQuery.Analyze(snapshot, [Action], new(FollowCandidates: true)).Results);
-        Assert.Equal(ExceptionStatus.Intercepted, witness.Status);
-        Assert.True(witness.ViaCandidate);
-        Assert.Equal([new CatchId("c")], witness.HandlerIds.AsEnumerable());
-        var caught = Assert.Single(ExceptionHandlingQuery.Caught(ExceptionQuery.Analyze(snapshot, [Action], new(FollowCandidates: true))));
+        var index = new ProgramIndex(snapshot);
+        var summary = ExceptionSummaryQuery.Analyze(index, [Action], new(FollowCandidates: true));
+        var caught = Assert.Single(ExceptionHandlingQuery.Caught(index, summary));
         Assert.True(caught.ViaCandidate);
-        var summary = ExceptionSummaryQuery.Analyze(snapshot, [Action], new(FollowCandidates: true));
+        Assert.Equal(ExceptionStatus.Intercepted, caught.Example.Status);
+        Assert.Equal([Action, new("Impl")], caught.Example.Path.AsEnumerable());
+        Assert.Equal([new CatchId("c")], caught.Example.HandlerIds.AsEnumerable());
         Assert.Empty(summary.Roots[Action].Escapes);
         Assert.Equal([new ThrowSiteId("origin")], summary.Crossings[new("ai")].InterceptedOrigins.AsEnumerable());
     }
@@ -166,7 +144,8 @@ public sealed class ExceptionScopeTests
     {
         var snapshot = Guarded(Snapshot([Method("Action"), Method("I", BodyStatus.NoBody), Method("Impl")],
             [Call("Action", "I", "ai", DispatchKind.Interface, region: "r"), Call("Action", "Impl", "ad", region: "r")], [Throw("Impl")], [Implements("I", "Impl")]));
-        var caught = Assert.Single(ExceptionHandlingQuery.Caught(ExceptionQuery.Analyze(snapshot, [Action], new(FollowCandidates: true))));
+        var index = new ProgramIndex(snapshot);
+        var caught = Assert.Single(ExceptionHandlingQuery.Caught(index, ExceptionSummaryQuery.Analyze(index, [Action], new(FollowCandidates: true))));
         Assert.False(caught.ViaCandidate);
         var open = Snapshot([Method("Action"), Method("I", BodyStatus.NoBody), Method("Impl")],
             [Call("Action", "I", "ai", DispatchKind.Interface), Call("Action", "Impl", "ad")], [Throw("Impl")], [Implements("I", "Impl")]);
@@ -175,25 +154,10 @@ public sealed class ExceptionScopeTests
     }
 
     [Fact]
-    public void Uncertainty_witnesses_never_crowd_out_origin_witnesses()
-    {
-        var targets = Enumerable.Range(1, 5).Select(x => $"I{x}").ToArray();
-        var snapshot = Snapshot([Method("Action"), Method("Leaf"), .. targets.Select(x => Method(x, BodyStatus.NoBody))],
-            [.. targets.Select(x => Call("Action", x, "a" + x, DispatchKind.Interface)), Call("Action", "Leaf", "al")], [Throw("Leaf")]);
-        var result = ExceptionQuery.Analyze(snapshot, [Action], new(MaxResults: 2));
-        Assert.Single(result.Results, x => x.Origin is not null);
-        Assert.Equal(2, result.Results.Count(x => x.Origin is null));
-        Assert.True(result.UnknownLimitReached);
-        Assert.False(result.OutputLimitReached);
-        Assert.False(result.IsComplete);
-    }
-
-    [Fact]
     public void The_same_uncertainty_reached_by_several_paths_is_reported_once_per_action()
     {
         var snapshot = Snapshot([Method("Action"), Method("Left"), Method("Right"), Method("Shared", BodyStatus.NoBody)],
             [Call("Action", "Left", "al"), Call("Action", "Right", "ar"), Call("Left", "Shared", "ls"), Call("Right", "Shared", "rs")]);
-        var result = ExceptionQuery.Analyze(snapshot, [Action], new());
-        Assert.Equal(ExceptionReason.MissingBody, Assert.Single(result.Results).ReasonCode);
+        Assert.Equal(ExceptionReason.MissingBody, Assert.Single(ExceptionSummaryQuery.Analyze(snapshot, [Action]).Roots[Action].Unknowns).ReasonCode);
     }
 }

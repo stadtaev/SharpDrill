@@ -208,7 +208,7 @@ static IEnumerable<Finding> NoDirectInfrastructure(ProgramIndex index, LayerMap 
 
 Even with candidates enabled, this rule uses `DirectDistance == 1` and `DirectWitness` for its violation and evidence. A candidate shortcut cannot turn a longer direct route into a direct-call violation. Candidate possibilities can be evaluated separately as Unknown; this example enforces direct calls only.
 
-Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `SharpView.Graph` algorithms, `ProjectMap` (MSBuild references and settings), `LayerMap`/`LayerGraph` (your own layer mapping, library only), `ReachabilityQuery`, `CallChainQuery`, `ExceptionQuery` (with `ExceptionReason` codes), `ExceptionHandlingQuery` (caught/miscaught), `AspNetConventions`. Keep `Verdict.Unknown` separate from `Pass` — it is how a rule stays honest.
+Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `SharpView.Graph` algorithms, `ProjectMap` (MSBuild references and settings), `LayerMap`/`LayerGraph` (your own layer mapping, library only), `ReachabilityQuery`, `CallChainQuery`, `ExceptionSummaryQuery` (with `ExceptionReason` codes), `ExceptionHandlingQuery` (caught/miscaught, where one throw ends), `AspNetConventions`. Keep `Verdict.Unknown` separate from `Pass` — it is how a rule stays honest.
 
 ## Glossary
 
@@ -235,7 +235,7 @@ Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `Shar
 `ExceptionSummaryQuery` keeps possible escape effects beside the immutable call graph. It seeds each explicit throw
 in its own method and pushes finite, origin-preserving effects up through caller sites with one worklist until nothing
 changes (recursion needs no special scheduling). Catch/rethrow/replacement, awaited calls and unsupported
-flow use the same transfer code as detailed exception witnesses. Per-call-site crossing summaries prevent a catch at one
+flow use the same transfer code as the example witnesses; caught and miscaught findings are read from the recorded transfer steps. Per-call-site crossing summaries prevent a catch at one
 site from hiding effects at another. Budgets bound retained facts and transfer work; uncertainty remains explicit. Ownerless gaps stay in result-level `GlobalGaps`, separate from action effects; overall `IsComplete` accounts for them. Complexity
 depends on the number of distinct effects, call sites and fixed-point transfers, rather than just the node/edge count.
 
