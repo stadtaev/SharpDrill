@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using SharpView.Graph;
 
 namespace SharpView.Core;
 
@@ -135,7 +134,6 @@ public sealed class ExceptionSummaryResult
 
 public static class ExceptionSummaryQuery
 {
-    private sealed record DirectEdge(CallableId Source, CallableId Target) : IEdge<CallableId>;
     public static ExceptionSummaryResult Analyze(ProgramSnapshot snapshot, ImmutableArray<CallableId> roots,
         ExceptionSummaryOptions? options = null, CancellationToken token = default) =>
         Analyze(new ProgramIndex(snapshot), roots, options, token);
@@ -183,23 +181,9 @@ public static class ExceptionSummaryQuery
                 foreach (var callee in followed) { AddTo(callees, method, callee); if (reachable.Add(callee)) pending.Push(callee); }
             }
         }
-        // Graph/SCC preparation is O(V+E) baseline work and cancellable; MaxWork counts
-        // examined source facts/sites and transfer crossings after this preparation.
-        // Tarjan returns callee components before their callers. Iterate each component's
-        // worklist to a fixed point, then propagate its final facts to later components.
-        var graphBuilder = DiGraph<CallableId, DirectEdge>.CreateBuilder();
-        foreach (var method in reachable) graphBuilder.AddNode(method);
-        foreach (var method in reachable)
-            foreach (var site in index.Outgoing(method))
-            {
-                token.ThrowIfCancellationRequested();
-                foreach (var target in Followed(calls.Resolve(site.Id)))
-                    if (reachable.Contains(target)) graphBuilder.AddEdge(new(method, target));
-            }
-        var components = graphBuilder.Build().StronglyConnectedComponents(token);
-        var componentOf = new Dictionary<CallableId, int>();
-        for (var i = 0; i < components.Length; i++)
-            foreach (var method in components[i]) componentOf.Add(method, i);
+        // One worklist to a fixed point: facts only grow and are finite (origins x types x flags per method), so the
+        // order of processing changes nothing but the order links are recorded in. MaxWork counts examined
+        // facts/sites and transfer crossings.
         var thirdParty = options.ThirdPartyCallOrigins ? index.Snapshot.ThirdPartyAssemblies.ToHashSet() : [];
         var thirdPartyCalls = new SortedDictionary<ThrowSiteId, CallSiteId>(Comparer<ThrowSiteId>.Create((a, b) => string.CompareOrdinal(a.Value, b.Value)));
         var facts = reachable.ToDictionary(x => x, _ => new Dictionary<ExceptionSummaryResult.FlowKey, ExceptionSummaryResult.Stored>());
@@ -214,10 +198,8 @@ public static class ExceptionSummaryQuery
                 token.ThrowIfCancellationRequested();
                 crossingFlows.TryAdd(site.Id, []); crossingUnknowns.TryAdd(site.Id, []); crossingIntercepts.TryAdd(site.Id, []);
             }
-        var queues = Enumerable.Range(0, components.Length)
-            .Select(_ => new Queue<(CallableId Method, ExceptionSummaryResult.FlowKey Key)>()).ToArray();
-        var unknownQueues = Enumerable.Range(0, components.Length)
-            .Select(_ => new Queue<(CallableId Method, ExceptionUncertainty Value)>()).ToArray();
+        var queue = new Queue<(CallableId Method, ExceptionSummaryResult.FlowKey Key)>();
+        var unknownQueue = new Queue<(CallableId Method, ExceptionUncertainty Value)>();
         static ExceptionSummaryResult.FlowKey Key(ExceptionFlow flow) => new(flow.Origin, flow.SubsequentOrigin,
             flow.StaticType, flow.ExactType, flow.Exact, flow.Changed, flow.ViaCandidate);
         static ExceptionEscapeFact Escape(ExceptionFlow flow) => new(flow.Origin, flow.SubsequentOrigin,
@@ -239,13 +221,13 @@ public static class ExceptionSummaryQuery
                 return true;
             }
             if (count >= options.MaxFacts) { factLimit = true; return false; }
-            facts[method].Add(key, new(flow, link)); count++; queues[componentOf[method]].Enqueue((method, key)); return true;
+            facts[method].Add(key, new(flow, link)); count++; queue.Enqueue((method, key)); return true;
         }
         bool AddUnknown(CallableId method, ExceptionUncertainty value)
         {
             if (unknowns[method].Contains(value)) return true;
             if (count >= options.MaxFacts) { factLimit = true; return false; }
-            unknowns[method].Add(value); count++; unknownQueues[componentOf[method]].Enqueue((method, value)); return true;
+            unknowns[method].Add(value); count++; unknownQueue.Enqueue((method, value)); return true;
         }
         foreach (var method in reachable.OrderBy(x => x.Value, StringComparer.Ordinal))
         {
@@ -312,50 +294,46 @@ public static class ExceptionSummaryQuery
                 }
             }
         }
-        for (var component = 0; component < components.Length && !factLimit && !workLimit; component++)
+        while (!factLimit && !workLimit && (queue.Count > 0 || unknownQueue.Count > 0))
         {
-            var queue = queues[component]; var unknownQueue = unknownQueues[component];
-            while (!factLimit && !workLimit && (queue.Count > 0 || unknownQueue.Count > 0))
+            token.ThrowIfCancellationRequested();
+            if (queue.TryDequeue(out var item))
             {
-                token.ThrowIfCancellationRequested();
-                if (queue.TryDequeue(out var item))
+                var flow = facts[item.Method][item.Key].Flow;
+                foreach (var (site, viaCandidate) in IncomingSites(item.Method))
                 {
-                    var flow = facts[item.Method][item.Key].Flow;
-                    foreach (var (site, viaCandidate) in IncomingSites(item.Method))
+                    token.ThrowIfCancellationRequested();
+                    if (!Spend()) break;
+                    var input = viaCandidate && !flow.ViaCandidate ? flow with { ViaCandidate = true } : flow;
+                    var crossed = ExceptionTransfer.Cross(index, input, site, token, collectEvidence: false);
+                    if (crossed.Status == ExceptionStatus.Intercepted)
+                        crossingIntercepts[site.Id].Add(flow.Origin);
+                    else if (crossed.Status == ExceptionStatus.Unknown)
                     {
-                        token.ThrowIfCancellationRequested();
-                        if (!Spend()) break;
-                        var input = viaCandidate && !flow.ViaCandidate ? flow with { ViaCandidate = true } : flow;
-                        var crossed = ExceptionTransfer.Cross(index, input, site, token, collectEvidence: false);
-                        if (crossed.Status == ExceptionStatus.Intercepted)
-                            crossingIntercepts[site.Id].Add(flow.Origin);
-                        else if (crossed.Status == ExceptionStatus.Unknown)
-                        {
-                            var uncertainty = new ExceptionUncertainty(crossed.Reason, flow.Origin, site.Id,
-                                crossed.Message, site.Evidence);
-                            crossingUnknowns[site.Id].Add(uncertainty);
-                            AddUnknown(site.Caller, uncertainty);
-                        }
-                        else
-                        {
-                            if (crossed.Flow.Type is not null) crossingFlows[site.Id].Add(Escape(crossed.Flow));
-                            else crossingUnknowns[site.Id].Add(new(ExceptionReason.UnboundExceptionType,
-                                crossed.Flow.Origin, site.Id, "Exception type could not be bound.", site.Evidence));
-                            AddFlow(site.Caller, crossed.Flow, new(item.Method, item.Key, site.Id));
-                        }
-                        if (factLimit) break;
+                        var uncertainty = new ExceptionUncertainty(crossed.Reason, flow.Origin, site.Id,
+                            crossed.Message, site.Evidence);
+                        crossingUnknowns[site.Id].Add(uncertainty);
+                        AddUnknown(site.Caller, uncertainty);
                     }
+                    else
+                    {
+                        if (crossed.Flow.Type is not null) crossingFlows[site.Id].Add(Escape(crossed.Flow));
+                        else crossingUnknowns[site.Id].Add(new(ExceptionReason.UnboundExceptionType,
+                            crossed.Flow.Origin, site.Id, "Exception type could not be bound.", site.Evidence));
+                        AddFlow(site.Caller, crossed.Flow, new(item.Method, item.Key, site.Id));
+                    }
+                    if (factLimit) break;
                 }
-                else if (unknownQueue.TryDequeue(out var unknownItem))
+            }
+            else if (unknownQueue.TryDequeue(out var unknownItem))
+            {
+                foreach (var (site, _) in IncomingSites(unknownItem.Method))
                 {
-                    foreach (var (site, _) in IncomingSites(unknownItem.Method))
-                    {
-                        token.ThrowIfCancellationRequested();
-                        if (!Spend()) break;
-                        crossingUnknowns[site.Id].Add(unknownItem.Value);
-                        AddUnknown(site.Caller, unknownItem.Value);
-                        if (factLimit) break;
-                    }
+                    token.ThrowIfCancellationRequested();
+                    if (!Spend()) break;
+                    crossingUnknowns[site.Id].Add(unknownItem.Value);
+                    AddUnknown(site.Caller, unknownItem.Value);
+                    if (factLimit) break;
                 }
             }
         }

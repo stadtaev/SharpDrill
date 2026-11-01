@@ -233,8 +233,9 @@ Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `Shar
 
 ## Summary analysis and diagram projections
 
-`ExceptionSummaryQuery` keeps possible escape effects beside the immutable call graph. It processes direct-call SCCs
-bottom-up and joins finite, origin-preserving effects until stable. Catch/rethrow/replacement, awaited calls and unsupported
+`ExceptionSummaryQuery` keeps possible escape effects beside the immutable call graph. It seeds each explicit throw
+in its own method and pushes finite, origin-preserving effects up through caller sites with one worklist until nothing
+changes (recursion needs no special scheduling). Catch/rethrow/replacement, awaited calls and unsupported
 flow use the same transfer code as detailed exception witnesses. Per-call-site crossing summaries prevent a catch at one
 site from hiding effects at another. Budgets bound retained facts and transfer work; uncertainty remains explicit. Ownerless gaps stay in result-level `GlobalGaps`, separate from action effects; overall `IsComplete` accounts for them. Complexity
 depends on the number of distinct effects, call sites and fixed-point transfers, rather than just the node/edge count.

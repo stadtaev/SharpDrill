@@ -93,7 +93,7 @@ Tests combine independently built Core snapshots, in-memory Roslyn compilations,
   relaxation, quotient groups with original memberships (including isolated nodes), and iterative SCC discovery.
 - Reach: shared immutable parent links, lazy witness arrays, separate direct-only distance/witness and candidate-inclusive routes, per-root work
   truncation, and explicit dispatch/unresolved/body/depth boundaries. A work stop can leave a valid nonoptimal path.
-- Exception summaries: bottom-up direct-call SCC fixed points over explicit origins, per-site transfers, finite fact identities,
+- Exception summaries: one monotone worklist fixed point from explicit origins up through their callers, per-site transfers, finite fact identities,
   shortest example witnesses (breadth-first over every recorded provenance link), separate uncertainty and work/fact limits. Detailed witness enumeration is still available. Ownerless gaps (top-level statements, minimal APIs) belong to no root and do not make a result incomplete; owned gaps remain associated with reached methods.
   Unknown propagation is conservative; summaries do not remove arbitrary unknown effects merely because a catch-all exists.
 - Mermaid: one controller action selected interactively or by exact signature/ID, project groups, branches/shared nodes/cycles,
