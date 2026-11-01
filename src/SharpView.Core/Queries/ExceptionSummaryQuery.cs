@@ -152,11 +152,14 @@ public static class ExceptionSummaryQuery
             work++; return true;
         }
         var calls = index.GetCallGraph(token);
-        // What each call site leads to: followed callees (direct source callees, and implementation candidates when
-        // requested) or a library call. Library methods have no source body, so their exceptions are not modelled:
-        // they are recorded, never part of the summary graph, and never make a summary Unknown.
-        var siteTargets = new Dictionary<CallSiteId, ImmutableArray<CallableId>>();
-        var librarySites = new Dictionary<CallSiteId, CallableId>();
+        // Followed callees: direct source callees, and implementation candidates when requested. Library calls are
+        // recorded (their exceptions are not modelled), never part of the summary graph and never Unknown.
+        ImmutableArray<CallableId> Followed(CallTarget target) => target.Kind switch
+        {
+            CallTargetKind.Source => target.Callees,
+            CallTargetKind.Dispatch when options.FollowCandidates => target.Callees,
+            _ => [],
+        };
         var libraryByMethod = new Dictionary<CallableId, HashSet<CallableId>>();
         var callees = new Dictionary<CallableId, HashSet<CallableId>>();
         var candidateIncoming = new Dictionary<CallableId, List<CallSiteFact>>();
@@ -171,30 +174,13 @@ public static class ExceptionSummaryQuery
             {
                 token.ThrowIfCancellationRequested();
                 if (!Spend()) break;
-                var targets = ImmutableArray<CallableId>.Empty;
-                if (site.Dispatch == DispatchKind.Direct)
-                {
-                    if (site.BoundTarget is { } target && index.ContainsCallable(target))
-                    {
-                        if (index.Callable(target).Body == BodyStatus.MetadataOnly) { librarySites.Add(site.Id, target); AddTo(libraryByMethod, method, target); }
-                        else targets = [target];
-                    }
-                }
-                else
-                {
-                    var candidates = calls.CandidatesOf(site.Id);
-                    if (site.BoundTarget is { } declared && index.ContainsCallable(declared)
-                        && index.Callable(declared).Body == BodyStatus.MetadataOnly && candidates.IsEmpty)
-                    { librarySites.Add(site.Id, declared); AddTo(libraryByMethod, method, declared); }
-                    else if (options.FollowCandidates)
-                    {
-                        targets = candidates;
-                        foreach (var candidate in candidates)
-                            (candidateIncoming.TryGetValue(candidate, out var list) ? list : candidateIncoming[candidate] = []).Add(site);
-                    }
-                }
-                siteTargets[site.Id] = targets;
-                foreach (var target in targets) { AddTo(callees, method, target); if (reachable.Add(target)) pending.Push(target); }
+                var target = calls.Resolve(site.Id);
+                if (target.Kind == CallTargetKind.Library) AddTo(libraryByMethod, method, target.Callees[0]);
+                var followed = Followed(target);
+                if (target.Kind == CallTargetKind.Dispatch)
+                    foreach (var candidate in followed)
+                        (candidateIncoming.TryGetValue(candidate, out var list) ? list : candidateIncoming[candidate] = []).Add(site);
+                foreach (var callee in followed) { AddTo(callees, method, callee); if (reachable.Add(callee)) pending.Push(callee); }
             }
         }
         // Graph/SCC preparation is O(V+E) baseline work and cancellable; MaxWork counts
@@ -207,7 +193,7 @@ public static class ExceptionSummaryQuery
             foreach (var site in index.Outgoing(method))
             {
                 token.ThrowIfCancellationRequested();
-                foreach (var target in siteTargets.GetValueOrDefault(site.Id, []))
+                foreach (var target in Followed(calls.Resolve(site.Id)))
                     if (reachable.Contains(target)) graphBuilder.AddEdge(new(method, target));
             }
         var components = graphBuilder.Build().StronglyConnectedComponents(token);
@@ -297,31 +283,31 @@ public static class ExceptionSummaryQuery
                     token.ThrowIfCancellationRequested();
                     if (factLimit || workLimit) break;
                     if (!Spend()) break;
-                    if (librarySites.TryGetValue(site.Id, out var library))
+                    var target = calls.Resolve(site.Id);
+                    switch (target.Kind)
                     {
-                        if (thirdParty.Contains(index.Callable(library).Compilation))
-                        {
+                        case CallTargetKind.Library when thirdParty.Contains(index.Callable(target.Callees[0]).Compilation):
                             var origin = new ThrowSiteId("call|" + site.Id.Value); thirdPartyCalls[origin] = site.Id;
                             var transfer = ExceptionTransfer.StartAtCall(index, origin, site, token);
                             if (transfer.Status == ExceptionStatus.Unknown) AddUnknown(method, new(transfer.Reason, origin, site.Id, transfer.Message, site.Evidence));
                             else if (transfer.Status is null) AddFlow(method, transfer.Flow, null);
-                        }
-                        continue;
-                    }
-                    if (site.Dispatch != DispatchKind.Direct)
-                    {
+                            break;
                         // Followed candidates carry their own effects in; only a call with nowhere to go is uncertain.
-                        if (options.FollowCandidates && !siteTargets.GetValueOrDefault(site.Id, []).IsEmpty) continue;
-                        var value = new ExceptionUncertainty(ExceptionReason.DispatchBoundary, null, site.Id,
-                            options.FollowCandidates ? $"{site.Dispatch} dispatch: no source implementation found; runtime origins unknown."
-                                                     : $"{site.Dispatch} dispatch: runtime origins unknown.", site.Evidence);
-                        crossingUnknowns[site.Id].Add(value); AddUnknown(method, value);
-                    }
-                    else if (site.BoundTarget is not { } target || !index.ContainsCallable(target))
-                    {
-                        var value = new ExceptionUncertainty(ExceptionReason.UnresolvedTarget, null, site.Id,
-                            "Unresolved call target.", site.Evidence);
-                        crossingUnknowns[site.Id].Add(value); AddUnknown(method, value);
+                        case CallTargetKind.Dispatch when Followed(target).IsEmpty:
+                        {
+                            var value = new ExceptionUncertainty(ExceptionReason.DispatchBoundary, null, site.Id,
+                                options.FollowCandidates ? $"{site.Dispatch} dispatch: no source implementation found; runtime origins unknown."
+                                                         : $"{site.Dispatch} dispatch: runtime origins unknown.", site.Evidence);
+                            crossingUnknowns[site.Id].Add(value); AddUnknown(method, value);
+                            break;
+                        }
+                        case CallTargetKind.Unresolved:
+                        {
+                            var value = new ExceptionUncertainty(ExceptionReason.UnresolvedTarget, null, site.Id,
+                                "Unresolved call target.", site.Evidence);
+                            crossingUnknowns[site.Id].Add(value); AddUnknown(method, value);
+                            break;
+                        }
                     }
                 }
             }

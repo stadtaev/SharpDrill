@@ -87,6 +87,26 @@ public sealed class ArchitectureTests
     }
 
     [Fact]
+    public void Call_sites_resolve_to_one_target_kind_shared_by_all_traversals()
+    {
+        var program = Program();
+        var index = new ProgramIndex(program.Snapshot with
+        {
+            Callables = [.. program.Snapshot.Callables, Method("Dispose", "Console", Metadata)],
+            CallSites = [.. program.Snapshot.CallSites, Call("c7", "Load", "Dispose", At("s.cs", 3), DispatchKind.Interface),
+                Call("c8", "Load", null, At("s.cs", 4), DispatchKind.Delegate)]
+        });
+        string Resolve(string site) => index.CallGraph.Resolve(new(site)) is var t ? $"{t.Kind} {string.Join(",", t.Callees.Select(x => x.Value))}" : "";
+        Assert.Equal("Source Load", Resolve("c1"));
+        Assert.Equal("Dispatch IRepo.Read,Repo.Read", Resolve("c3"));
+        Assert.Equal("Library WriteLine", Resolve("c4"));
+        Assert.Equal("Unresolved ", Resolve("c5"));
+        // A library interface no source type implements is a library call; a delegate with no target is a boundary.
+        Assert.Equal("Library Dispose", Resolve("c7"));
+        Assert.Equal("Dispatch ", Resolve("c8"));
+    }
+
+    [Fact]
     public async Task Graph_caches_honor_cancellation_and_publish_one_complete_instance()
     {
         var index = Program();
