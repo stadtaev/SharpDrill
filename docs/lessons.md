@@ -106,7 +106,7 @@ After the changes the command has one limit, `--budget`, which scales the others
 - **The fixture was built to exercise the model.** It contains a catch filter, a rethrow, an unobserved task and an interface with no implementation, deliberately. "18 unknown witnesses" looked like coverage of the model. It was mostly `StorageException..ctor()`, a compiler-provided constructor. Our tests asserted the noise (`witnesses: 26; unknown: 18`), so they defended the bug.
 - **The fixture has no realistic app.** No records, no DI with a real implementation, no base controller calling `Ok(...)`, no `foreach`, no `using`. The first real project had all of them in every action.
 - **What worked.** Before touching anything we built a small repro with exactly the patterns in the failing log and reproduced every symptom in minutes. Each fix was then checked against the repro and the fixture, and the fixture's outputs were compared byte for byte before and after unrelated refactors.
-- **Two engines, one policy.** The detailed path search and the bottom-up summary make the same decisions (is this a library call? a dispatch boundary? a missing body?) in two places. Both needed every change here. A shared "what does this call site lead to" helper would remove the duplication and the risk of drift.
+- **Two engines, one policy.** The detailed path search and the bottom-up summary make the same decisions (is this a library call? a dispatch boundary? a missing body?) in two places. Both needed every change here. Resolved: `CallGraph.Resolve` now answers "what does this call site lead to" once for both.
 
 **Rules:** keep a realistic sample app next to the contrived fixture, and run every new analysis on it before shipping. Judge output by the *ratio* of signal to caveat, not by whether each caveat is individually justified. Ask of every line: what would an agent do with this?
 
@@ -126,4 +126,3 @@ After the changes the command has one limit, `--budget`, which scales the others
 
 Resolved since the first run: global caveats no longer set exit 1 (only gaps that affect a result do); initializers are attributed to the constructors that run them; `await foreach`/`await using` and awaited locals are modelled; handler outcomes come from control flow, filters are possible catches and a `finally` matters only when it can throw.
 - **A realistic fixture.** A second sample solution with DI, records, a `Result<T>`, a base controller and disposables, so the real-code shape is under test.
-- **One call-site resolution helper** shared by the detailed and summary engines.

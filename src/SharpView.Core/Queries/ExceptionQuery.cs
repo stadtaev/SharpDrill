@@ -132,41 +132,39 @@ public static class ExceptionQuery
                 cancellationToken.ThrowIfCancellationRequested();
                 if (work >= options.MaxExpansions) { workLimit = true; break; }
                 work++;
-                CallableId? target = site.BoundTarget is { } bound && program.ContainsCallable(bound) ? bound : null;
                 var path = site.BoundTarget is { } declared ? frame.Path.Add(declared) : frame.Path;
-                if (site.Dispatch != DispatchKind.Direct)
+                var target = calls.Resolve(site.Id);
+                // Add returns false only at the output limit, which the check after the switch turns into a stop.
+                switch (target.Kind)
                 {
-                    var candidates = calls.CandidatesOf(site.Id);
-                    // A virtual/interface call to a library member that no source type overrides: a library call.
-                    if (target is { } libraryTarget && program.Callable(libraryTarget).Body == BodyStatus.MetadataOnly && candidates.IsEmpty)
-                    { library.Add(libraryTarget); continue; }
-                    if (!options.FollowCandidates)
-                    {
-                        if (!Add(Unknown(frame, path, frame.Via, ExceptionReason.DispatchBoundary, $"{site.Dispatch} dispatch: declared binding only; runtime origins unknown.", site.Evidence, site.Dispatch))) break;
-                    }
-                    else if (candidates.IsEmpty)
-                    {
-                        if (!Add(Unknown(frame, path, frame.Via, ExceptionReason.DispatchBoundary, $"{site.Dispatch} dispatch: no source implementation found; runtime origins unknown.", site.Evidence, site.Dispatch))) break;
-                    }
-                    else
-                        foreach (var candidate in candidates)
+                    case CallTargetKind.Library: library.Add(target.Callees[0]); break;
+                    case CallTargetKind.Unresolved:
+                        Add(Unknown(frame, path, frame.Via, ExceptionReason.UnresolvedTarget, "Unresolved call target.", site.Evidence));
+                        break;
+                    case CallTargetKind.Dispatch when !options.FollowCandidates:
+                        Add(Unknown(frame, path, frame.Via, ExceptionReason.DispatchBoundary, $"{site.Dispatch} dispatch: declared binding only; runtime origins unknown.", site.Evidence, site.Dispatch));
+                        break;
+                    case CallTargetKind.Dispatch when target.Callees.IsEmpty:
+                        Add(Unknown(frame, path, frame.Via, ExceptionReason.DispatchBoundary, $"{site.Dispatch} dispatch: no source implementation found; runtime origins unknown.", site.Evidence, site.Dispatch));
+                        break;
+                    case CallTargetKind.Dispatch:
+                        foreach (var candidate in target.Callees)
                         {
                             var next = frame.Path.Add(candidate);
                             if (frame.Path.Contains(candidate))
                             { if (!Add(Unknown(frame, next, true, ExceptionReason.Cycle, "Cycle: recursive propagation unknown.", site.Evidence))) break; }
                             else descend.Add(new(frame.Root, next, frame.Sites.Add(site), true));
                         }
-                    if (outputLimit) break;
-                    continue;
+                        break;
+                    case CallTargetKind.Source when !program.Callable(target.Callees[0]).HasBody:
+                        Add(Unknown(frame, path, frame.Via, ExceptionReason.MissingBody, "Missing body: explicit origins unknown.", site.Evidence));
+                        break;
+                    case CallTargetKind.Source when frame.Path.Contains(target.Callees[0]):
+                        Add(Unknown(frame, path, frame.Via, ExceptionReason.Cycle, "Cycle: recursive propagation unknown.", site.Evidence));
+                        break;
+                    case CallTargetKind.Source: descend.Add(new(frame.Root, path, frame.Sites.Add(site), frame.Via)); break;
                 }
-                if (target is not { } callee)
-                { if (!Add(Unknown(frame, path, frame.Via, ExceptionReason.UnresolvedTarget, "Unresolved call target.", site.Evidence))) break; }
-                else if (program.Callable(callee).Body == BodyStatus.MetadataOnly) library.Add(callee);
-                else if (!program.Callable(callee).HasBody)
-                { if (!Add(Unknown(frame, path, frame.Via, ExceptionReason.MissingBody, "Missing body: explicit origins unknown.", site.Evidence))) break; }
-                else if (frame.Path.Contains(callee))
-                { if (!Add(Unknown(frame, path, frame.Via, ExceptionReason.Cycle, "Cycle: recursive propagation unknown.", site.Evidence))) break; }
-                else descend.Add(new(frame.Root, path, frame.Sites.Add(site), frame.Via));
+                if (outputLimit) break;
             }
             if (workLimit || outputLimit) break;
             for (var i = descend.Count - 1; i >= 0; i--) stack.Push(descend[i]);

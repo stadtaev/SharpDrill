@@ -339,8 +339,8 @@ internal sealed class ExceptionsCommand : ReportCommand
     private static void WritePath(ReportContext context, Report report, ImmutableArray<CallableId> path, ImmutableArray<CallSiteId> sites, ImmutableArray<SourceEvidence> evidence)
     {
         var (index, display) = (context.Index, context.Display);
-        string Choice(int i) => i > 0 && i - 1 < sites.Length && index.CallSite(sites[i - 1]).Dispatch != DispatchKind.Direct
-            && index.CallGraph.CandidatesOf(sites[i - 1]).Length is var n and > 1 ? $" (1 of {n} implementations)" : "";
+        string Choice(int i) => i > 0 && i - 1 < sites.Length && index.CallGraph.Resolve(sites[i - 1]) is { Kind: CallTargetKind.Dispatch, Callees.Length: var n and > 1 }
+            ? $" (1 of {n} implementations)" : "";
         var steps = path.Select((x, i) => (Arrow: i == 0 ? "" : i - 1 < sites.Length && index.CallSite(sites[i - 1]).Dispatch != DispatchKind.Direct ? "~> " : "-> ", Name: display.Short(x) + Choice(i))).ToArray();
         if (steps.Length > 1)
         {

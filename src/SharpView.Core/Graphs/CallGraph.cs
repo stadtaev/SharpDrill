@@ -19,28 +19,37 @@ public sealed record CallEdge(CallableId Source, CallableId Target, CallSiteFact
     public bool IsDeclaredTargetCandidate => Kind == CallEdgeKind.Candidate && Site.BoundTarget == Target;
 }
 
+// What a call site leads to, decided once so every traversal draws the same boundaries.
+// Source: a direct call to a callable of the program (its body status is the callee's own business).
+// Library: a call into a referenced assembly, directly or through an interface/virtual member that no source type
+// implements; its exceptions are not modelled, so it is counted, never followed and never Unknown.
+// Dispatch: an interface/virtual/delegate/dynamic call; Callees are its source implementation candidates (possibly
+// none, which is a boundary). Following them is the query's choice.
+// Unresolved: no bound target in the program.
+public enum CallTargetKind { Source, Library, Dispatch, Unresolved }
+
+public readonly record struct CallTarget(CallTargetKind Kind, ImmutableArray<CallableId> Callees);
+
 // Whole-program call graph over every callable. Out-edges follow ProgramIndex.Outgoing order (target display, then
 // site ID); a non-direct site's Declared edge is followed by its Candidate edges in ID order. Sites without a known
 // target are not edges: they are listed per caller so traversals can report them as boundaries.
 public sealed class CallGraph
 {
     private readonly Dictionary<CallableId, ImmutableArray<CallSiteFact>> unresolved;
-    private readonly Dictionary<CallSiteId, ImmutableArray<CallableId>> siteCandidates;
+    private readonly Dictionary<CallSiteId, CallTarget> targets;
 
     public DiGraph<CallableId, CallEdge> Graph { get; }
     public ImmutableArray<CallSiteFact> UnresolvedSites { get; }
 
-    private CallGraph(DiGraph<CallableId, CallEdge> graph, ImmutableArray<CallSiteFact> unresolvedSites)
+    private CallGraph(DiGraph<CallableId, CallEdge> graph, ImmutableArray<CallSiteFact> unresolvedSites, Dictionary<CallSiteId, CallTarget> targets)
     {
-        Graph = graph; UnresolvedSites = unresolvedSites;
+        Graph = graph; UnresolvedSites = unresolvedSites; this.targets = targets;
         unresolved = unresolvedSites.GroupBy(x => x.Caller).ToDictionary(x => x.Key, x => x.ToImmutableArray());
-        siteCandidates = graph.Edges.Where(x => x.Kind == CallEdgeKind.Candidate).GroupBy(x => x.Site.Id)
-            .ToDictionary(x => x.Key, x => x.Select(e => e.Target).ToImmutableArray());
     }
 
-    // Source implementation candidates of a non-direct call site, in ID order; empty when none exist in source
-    // (for example a call to a library interface). Candidates are possibilities, never inferred runtime targets.
-    public ImmutableArray<CallableId> CandidatesOf(CallSiteId site) => siteCandidates.GetValueOrDefault(site, []);
+    // What the site leads to. A Dispatch target's Callees are its source implementation candidates in ID order:
+    // possibilities, never inferred runtime targets. Every site of the snapshot resolves; an unknown ID is a caller bug.
+    public CallTarget Resolve(CallSiteId site) => targets.TryGetValue(site, out var target) ? target : throw new KeyNotFoundException($"Unknown call site: {site.Value}");
 
     // Unresolved sites of a caller, in Outgoing order.
     public ImmutableArray<CallSiteFact> Unresolved(CallableId caller) => unresolved.GetValueOrDefault(caller, []);
@@ -51,13 +60,26 @@ public sealed class CallGraph
         var builder = DiGraph<CallableId, CallEdge>.CreateBuilder();
         var candidates = new Dictionary<CallableId, ImmutableArray<CallableId>>();
         var unresolved = ImmutableArray.CreateBuilder<CallSiteFact>();
+        var targets = new Dictionary<CallSiteId, CallTarget>();
+        bool IsLibrary(CallableId id) => index.Callable(id).Body == BodyStatus.MetadataOnly;
         foreach (var callable in index.Snapshot.Callables) { cancellationToken.ThrowIfCancellationRequested(); builder.AddNode(callable.Id); }
         foreach (var callable in index.Snapshot.Callables)
             foreach (var site in index.Outgoing(callable.Id))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (site.BoundTarget is not { } target || !index.ContainsCallable(target)) { unresolved.Add(site); continue; }
-                if (site.Dispatch == DispatchKind.Direct) { builder.AddEdge(new(callable.Id, target, site, CallEdgeKind.Direct)); continue; }
+                if (site.BoundTarget is not { } target || !index.ContainsCallable(target))
+                {
+                    unresolved.Add(site);
+                    // A dispatch with no declared member in the program still has nowhere to go: a boundary, not "unresolved".
+                    targets[site.Id] = new(site.Dispatch == DispatchKind.Direct ? CallTargetKind.Unresolved : CallTargetKind.Dispatch, []);
+                    continue;
+                }
+                if (site.Dispatch == DispatchKind.Direct)
+                {
+                    builder.AddEdge(new(callable.Id, target, site, CallEdgeKind.Direct));
+                    targets[site.Id] = new(IsLibrary(target) ? CallTargetKind.Library : CallTargetKind.Source, [target]);
+                    continue;
+                }
                 builder.AddEdge(new(callable.Id, target, site, CallEdgeKind.Declared));
                 if (!candidates.TryGetValue(target, out var closure))
                     candidates[target] = closure = Candidates(index, target, cancellationToken);
@@ -66,8 +88,9 @@ public sealed class CallGraph
                     cancellationToken.ThrowIfCancellationRequested();
                     builder.AddEdge(new(callable.Id, candidate, site, CallEdgeKind.Candidate));
                 }
+                targets[site.Id] = IsLibrary(target) && closure.IsEmpty ? new(CallTargetKind.Library, [target]) : new(CallTargetKind.Dispatch, closure);
             }
-        return new(builder.Build(), unresolved.ToImmutable());
+        return new(builder.Build(), unresolved.ToImmutable(), targets);
     }
 
     // Transitive implementation candidates of a declared target in ID order. A declared target with its own source
