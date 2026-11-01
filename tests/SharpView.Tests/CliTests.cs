@@ -51,13 +51,13 @@ public sealed class CliTests
         Assert.True(doc.RootElement.GetProperty("snapshot").GetProperty("exceptionRegions").GetArrayLength() > 0);
     }
     [Fact]
-    public async Task Exceptions_list_escapes_reaching_a_global_handler_under_its_registration()
+    public async Task Exceptions_name_the_global_handler_that_receives_an_escape()
     {
         var result = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Get()");
         Assert.Equal(0, result.Exit);
-        // The registered middleware is named once, as the section header, not repeated per finding.
-        Assert.Equal("Handled by a global exception handler:\n  - UseExceptionHandler  Research.Api/Program.cs:5\n\n1. Research.Infrastructure.StorageException\n   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6\n   Path:       OrdersController.Get -> Service.Load -> Repository.Read\n", result.Out.ReplaceLineEndings("\n"));
-        Assert.Single(System.Text.RegularExpressions.Regex.Matches(result.Out, "UseExceptionHandler"));
+        // Each finding names its registration, so a block copied out of a CI log reads on its own.
+        Assert.Equal("1. Research.Infrastructure.StorageException\n   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6\n"
+            + "   Handled:    by the global exception handler UseExceptionHandler  Research.Api/Program.cs:5\n   Path:       OrdersController.Get -> Service.Load -> Repository.Read\n", result.Out.ReplaceLineEndings("\n"));
         Assert.Equal("1 action analysed: 1 uncaught exception (1 handled by a global exception handler).\n", result.Error.ReplaceLineEndings("\n"));
     }
     [Fact]

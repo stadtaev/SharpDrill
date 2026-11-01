@@ -161,24 +161,23 @@ Overview: 7 caught exceptions
 `--miscaught`, a `try` that did not catch it:
 
 ```text
-Handled by a global exception handler:
-  - UseExceptionHandler  Research.Api/Program.cs:5
-
 1. Research.Infrastructure.StorageException
    Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
    Missed by:  Service.Incompatible  Research.Application/Service.cs:8
                try { ... } catch (System.ArgumentException)
-   Then:       may escape the controller action
+   Then:       may escape OrdersController.Incompatible
+   Handled:    by the global exception handler UseExceptionHandler  Research.Api/Program.cs:5
    Path:       OrdersController.Incompatible -> Service.Incompatible -> Repository.Read
 ```
 
-`--uncaught`, one entry per exception type escaping from one method (its throw lines listed together), with an example path from an action; `Escapes:` lists the actions when
-there is more than the one the path starts at:
+`--uncaught`, one entry per exception type escaping from one method (its throw lines listed together), with an example path from an action; `Escapes:` lists every action when
+there is more than the one the path starts at (one per line when they do not fit):
 
 ```text
 2. Research.Infrastructure.StorageException
    Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
-   Escapes:    OrdersController.Filter, OrdersController.Get, OrdersController.Incompatible and 1 more
+   Escapes:    OrdersController.Filter, OrdersController.Get, OrdersController.Incompatible, OrdersController.Unrelated
+   Handled:    by the global exception handler UseExceptionHandler  Research.Api/Program.cs:5
    Path:       OrdersController.Filter -> Service.Filter -> Repository.Read
 ```
 
@@ -188,7 +187,7 @@ an implementation found in source behind an interface or virtual call; when sour
 earlier finding's path reads `same as 2` or `as in 2 up to <method>, then -> ...` (not under `--locations`). A throw in the action itself has no path line; its `Thrown:` line ends with
 `(in the action)`. `--locations` adds a `Locations:` list.
 
-"May escape" means no catch on the way from the action. Findings whose actions are covered by registered exception middleware or a global exception filter are listed last, under a `Handled by a global exception handler:` header that lists the registrations. A catch is *miscaught* only when every clause definitely does not match; filters and runtime-dependent matches are possible catches instead.
+"May escape" means no catch on the way from the action. Findings whose actions are covered by registered exception middleware or a global exception filter are listed last, each with a `Handled:` line naming the registration, so every block reads on its own (in a CI log too). A catch is *miscaught* only when every clause definitely does not match; filters and runtime-dependent matches are possible catches instead.
 
 ## Writing your own rule
 
