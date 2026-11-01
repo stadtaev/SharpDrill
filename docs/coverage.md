@@ -48,7 +48,8 @@ Implementation candidates come from source types' interface maps and overrides; 
   - a `finally` that may throw;
   - custom awaitables, async void, and tasks that are never awaited (`var t = CallAsync(); ... await t;` and `await Task.WhenAll(t, u)` count as awaited);
   - dispatch through an interface or virtual member that source implements or overrides, when `--declared-only` is given (the default follows it);
-  - iterator bodies and recursion in the per-path views.
+  - iterator bodies.
+- **Recursion is not uncertainty.** All views share one fixed-point propagation, so a recursive call is followed like any other.
 - **Library calls are not uncertainty.** A call to a method with no source body (framework or NuGet code) ends the trace there: its exceptions are not modelled, so it never makes a result Unknown. Exception views report how many library methods were called, and `--uncaught` lists a few per action. This applies to direct calls and to interface/virtual calls to library members that no source type overrides.
 - **Compiler-provided members are known.** Implicit and record constructors, auto-property accessors and record members of source types have no explicit code, so they cannot throw explicitly and are never "missing".
 - **`foreach` and `using`** record their implicit `GetEnumerator`/`MoveNext`/`Dispose` calls, bound through the receiver type like an explicit call. A `Dispose` written in source is analysed; library enumerators are library calls. `await foreach` and `await using` record the same calls (`MoveNextAsync`, `DisposeAsync`) as awaited.
@@ -94,7 +95,7 @@ Tests combine independently built Core snapshots, in-memory Roslyn compilations,
 - Reach: shared immutable parent links, lazy witness arrays, separate direct-only distance/witness and candidate-inclusive routes, per-root work
   truncation, and explicit dispatch/unresolved/body/depth boundaries. A work stop can leave a valid nonoptimal path.
 - Exception summaries: one monotone worklist fixed point from explicit origins up through their callers, per-site transfers, finite fact identities,
-  shortest example witnesses (breadth-first over every recorded provenance link), separate uncertainty and work/fact limits. Detailed witness enumeration is still available. Ownerless gaps (top-level statements, minimal APIs) belong to no root and do not make a result incomplete; owned gaps remain associated with reached methods.
+  shortest example witnesses (breadth-first over every recorded provenance link), separate uncertainty and work/fact limits. Caught and miscaught are read from the same propagation: each transfer step records the catches it matched and the `try` blocks it passed, and a miss's outcomes are the fates of what got past it. Ownerless gaps (top-level statements, minimal APIs) belong to no root and do not make a result incomplete; owned gaps remain associated with reached methods.
   Unknown propagation is conservative; summaries do not remove arbitrary unknown effects merely because a catch-all exists.
 - Mermaid: one controller action selected interactively or by exact signature/ID, project groups, branches/shared nodes/cycles,
   parallel sites, escaped labels, evidence, uncertainty boundaries and visible truncation. Default limits apply after loading

@@ -56,8 +56,8 @@ One question per place; change the place that owns the question.
 | --- | --- |
 | What does this call site lead to (source, library, dispatch candidates, unresolved)? | `CallGraph.Resolve` (`Graphs/CallGraph.cs`) |
 | What happens to an exception at one throw or call site (catch match, filter, rethrow, finally, await)? | `ExceptionTransfer` (`Exceptions/`) |
-| Which exceptions may leave each method and each call site (`--uncaught`)? | `ExceptionSummaryQuery`: Reach → Seed → Propagate (one worklist) → Summarize |
-| Which catches each throw meets on each path (`--caught`, `--miscaught`)? | `ExceptionQuery` (per-path witnesses) → `ExceptionHandlingQuery` |
+| Which exceptions may leave each method and call site, through which steps? | `ExceptionSummaryQuery`: Reach → Seed → Propagate (one worklist) → Summarize; every view reads this one result |
+| Which catches a throw meets or misses, and where it ends (`--caught`, `--miscaught`)? | `ExceptionHandlingQuery`, from the recorded transfer steps |
 | How is it worded and grouped? | `Cli/Commands/ExceptionsCommand.cs` (no analysis there) |
 
 ## Principles that shape changes
