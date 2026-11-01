@@ -40,17 +40,24 @@ internal sealed class ExceptionsCommand : ReportCommand
     {
         var roots = context.Arguments.MSBuild || context.Arguments.View != ExceptionView.Throws ? Roots.Select(context.Index, context.Arguments, RootScope.Actions, token) : [];
         if (context.Arguments.View == ExceptionView.Throws && !context.Arguments.MSBuild) return ValueTask.FromResult(Throws(context, token));
-        var incomplete = context.Arguments.View switch
+        ViewOutcome[] outcomes = context.Arguments.View switch
         {
             // Build warnings default to every finding worth one: uncaught and miscaught.
-            ExceptionView.Throws => Uncaught(context, roots, token) | Handled(context, roots, caught: false, token),
-            ExceptionView.Uncaught => Uncaught(context, roots, token),
-            ExceptionView.Caught => Handled(context, roots, caught: true, token),
-            _ => Handled(context, roots, caught: false, token),
+            ExceptionView.Throws => [Uncaught(context, roots, token), Handled(context, roots, caught: false, token)],
+            ExceptionView.Uncaught => [Uncaught(context, roots, token)],
+            ExceptionView.Caught => [Handled(context, roots, caught: true, token)],
+            _ => [Handled(context, roots, caught: false, token)],
         };
+        // One summary for the run, however many views it printed, so a CI log has one line to read.
+        Console.Error.WriteLine($"{Display.Plural(roots.Length, "action")} analysed: {string.Join("; ", outcomes.Select(x => x.Counts))}.");
+        WriteNotFollowed(context, outcomes.SelectMany(x => x.NotFollowed));
+        if (outcomes.Any(x => x.LimitReached)) WriteLimit(context.Arguments);
         if (suppressed > 0) Console.Error.WriteLine($"{Display.Plural(suppressed, "warning")} suppressed in source (#pragma warning disable or [SuppressMessage]).");
-        return ValueTask.FromResult(incomplete);
+        return ValueTask.FromResult(outcomes.Any(x => x.Incomplete));
     }
+
+    // What a view reports on stderr: its counts, where it could not follow an exception, and whether a budget stopped it.
+    private sealed record ViewOutcome(string Counts, IEnumerable<(ExceptionReason Reason, SourceEvidence? Evidence)> NotFollowed, bool LimitReached, bool Incomplete);
 
     // One line per explicit throw; rethrows are not new exceptions.
     private static bool Throws(ReportContext context, CancellationToken token)
@@ -68,7 +75,7 @@ internal sealed class ExceptionsCommand : ReportCommand
         return false;
     }
 
-    private static bool Handled(ReportContext context, ImmutableArray<CallableId> roots, bool caught, CancellationToken token)
+    private static ViewOutcome Handled(ReportContext context, ImmutableArray<CallableId> roots, bool caught, CancellationToken token)
     {
         var (arguments, display) = (context.Arguments, context.Display);
         var result = ExceptionQuery.Analyze(context.Index, roots, PathQuery(arguments), token);
@@ -98,22 +105,20 @@ internal sealed class ExceptionsCommand : ReportCommand
             foreach (var (item, covered) in items)
             {
                 token.ThrowIfCancellationRequested();
-                if (covered && handled++ == 0 && !arguments.MSBuild) handlers.WriteHeader(context, report);
-                if (arguments.MSBuild) WarnMiscaught(context, item); else WriteMiscaught(context, report, item);
+                if (covered) handled++;
+                if (arguments.MSBuild) WarnMiscaught(context, item, handlers, covered); else WriteMiscaught(context, report, item, handlers, covered);
                 count++;
             }
         }
-        Console.Error.WriteLine($"{Display.Plural(roots.Length, "action")} analysed: {count} {(caught ? "caught" : "miscaught")}{HandledCount(handled)}.");
-        WriteNotFollowed(context, result.Results.Where(x => (x.SubsequentStatus ?? x.Status) == ExceptionStatus.Unknown)
-            .Select(x => (x.ReasonCode, x.Evidence.LastOrDefault())));
-        if (result.WorkLimitReached || result.OutputLimitReached || result.DepthLimitReached) WriteLimit(arguments);
-        return !result.IsComplete;
+        return new($"{count} {(caught ? "caught" : "miscaught")}{HandledCount(handled)}",
+            result.Results.Where(x => (x.SubsequentStatus ?? x.Status) == ExceptionStatus.Unknown).Select(x => (x.ReasonCode, x.Evidence.LastOrDefault())),
+            result.WorkLimitReached || result.OutputLimitReached || result.DepthLimitReached, !result.IsComplete);
     }
 
     // One block per exception that may leave an action: the throw (and the rethrow it passed through), the actions it
     // escapes from, and one example path. The same throw escaping many actions is listed once, and so are throws of one
     // type in one method (build warnings keep one per throw, since each points at its throw).
-    private static bool Uncaught(ReportContext context, ImmutableArray<CallableId> roots, CancellationToken token)
+    private static ViewOutcome Uncaught(ReportContext context, ImmutableArray<CallableId> roots, CancellationToken token)
     {
         var (index, display, output) = (context.Index, context.Display, context.Output);
         var summaries = ExceptionSummaryQuery.Analyze(index, roots, SummaryQuery(context.Arguments), token);
@@ -135,7 +140,7 @@ internal sealed class ExceptionsCommand : ReportCommand
         foreach (var group in escapes)
         {
             token.ThrowIfCancellationRequested();
-            if (group.Key.Handled && handled++ == 0 && !context.Arguments.MSBuild) handlers.WriteHeader(context, report);
+            if (group.Key.Handled) handled++;
             var actions = group.Items.Select(x => x.Root).Distinct().ToArray();
             // A proven path makes the better example than one through an assumed implementation; then the shortest.
             var example = group.Items.OrderBy(x => x.Escape.ViaCandidate).ThenBy(x => summaries.GetWitness(x.Root, x.Escape).Path.Length).First();
@@ -152,17 +157,18 @@ internal sealed class ExceptionsCommand : ReportCommand
             WriteOrigin(context, report, "Thrown", group.Origins, witness.Path);
             if (group.Key.SubsequentOrigin is { } rethrow && index.TryGetThrowSite(rethrow, out var site)) WriteOrigin(context, report, "Rethrown", [site], []);
             // The path starts at the action, so a single action is already named there.
-            if (actions is not [var only] || witness.Path.FirstOrDefault() != only) report.Line("Escapes", Actions(display, actions));
+            if (actions is not [var only] || witness.Path.FirstOrDefault() != only) report.List("Escapes", actions.Select(display.Short));
+            if (group.Key.Handled) report.Line("Handled", handlers.Describe(context, actions));
             WritePath(context, report, witness.Path, witness.Sites, []);
         }
         if (context.Arguments.Strict) WriteUnwrapped(context, report, summaries, unwrapped, token);
-        Console.Error.WriteLine($"{Display.Plural(roots.Length, "action")} analysed: {Display.Plural(escapes.Length, "uncaught exception")}{HandledCount(handled)}"
-            + (context.Arguments.Strict ? $"; {Display.Plural(unwrapped.Length, "third-party call")} with no catch on the way." : "."));
-        WriteNotFollowed(context, roots.SelectMany(x => summaries.Roots[x].Unknowns)
-            .Where(x => x.ReasonCode is not (ExceptionReason.WorkLimit or ExceptionReason.FactLimit))
-            .Select(x => (x.ReasonCode, x.Site is { } s ? index.CallSite(s).Evidence : x.Evidence)));
-        if (summaries.WorkLimitReached || summaries.FactLimitReached) WriteLimit(context.Arguments);
-        return !summaries.IsComplete;
+        return new(Display.Plural(escapes.Length, "uncaught exception") + HandledCount(handled)
+            + (!context.Arguments.Strict ? "" : unwrapped.Length == 0 ? "; every third-party call has a catch on the way"
+                : $"; {Display.Plural(unwrapped.Length, "third-party call")} with no catch on the way"),
+            roots.SelectMany(x => summaries.Roots[x].Unknowns)
+                .Where(x => x.ReasonCode is not (ExceptionReason.WorkLimit or ExceptionReason.FactLimit))
+                .Select(x => (x.ReasonCode, x.Site is { } s ? index.CallSite(s).Evidence : x.Evidence)),
+            summaries.WorkLimitReached || summaries.FactLimitReached, !summaries.IsComplete);
     }
 
     // --strict: one block per third-party call site that no catch meets on the way from an action. Global handlers do not
@@ -193,39 +199,37 @@ internal sealed class ExceptionsCommand : ReportCommand
             }
             report.Begin(target);
             report.Line("Called", $"{display.Short(site.Caller)}  {display.Where(site.Evidence)}{(witness.Path is [_] ? "  (in the action)" : "")}");
-            if (actions is not [var only] || witness.Path.FirstOrDefault() != only) report.Line("Escapes", Actions(display, actions));
+            if (actions is not [var only] || witness.Path.FirstOrDefault() != only) report.List("Escapes", actions.Select(display.Short));
             WritePath(context, report, witness.Path, witness.Sites, []);
         }
     }
 
-    private static string Actions(Display display, CallableId[] actions) =>
-        string.Join(", ", actions.Take(3).Select(display.Short)) + (actions.Length > 3 ? $" and {actions.Length - 3} more" : "");
+    // Build warnings are one line each, so they name three actions and count the rest; text reports list them all.
+    private static string Actions(Display display, IReadOnlyCollection<CallableId> actions) =>
+        string.Join(", ", actions.Take(3).Select(display.Short)) + (actions.Count > 3 ? $" and {actions.Count - 3} more" : "");
 
     private static string HandledCount(int handled) => handled == 0 ? "" : $" ({handled} handled by a global exception handler)";
 
     // Exceptions that escape the action still reach exception middleware or a global exception filter registered by the
-    // host; those findings are listed last, under one line naming the registrations.
+    // host. Those findings are listed last, each saying which registration receives it, so every block reads on its own.
     private sealed class GlobalHandlers(ProgramIndex index)
     {
         private readonly Dictionary<CallableId, ImmutableArray<BoundaryHandlingFact>> byRoot = [];
-        private readonly SortedSet<BoundaryHandlingFact> used = new(Comparer<BoundaryHandlingFact>.Create((a, b) =>
-            string.CompareOrdinal(a.Evidence.Path, b.Evidence.Path) is var c and not 0 ? c : a.Evidence.SpanStart.CompareTo(b.Evidence.SpanStart)));
 
         private ImmutableArray<BoundaryHandlingFact> Of(CallableId root) =>
             byRoot.TryGetValue(root, out var found) ? found : byRoot[root] = AspNetConventions.GlobalHandlers(index, root);
 
         // True when the exception may escape and every action it escapes from has a global handler.
-        public bool Covers(IReadOnlyCollection<CallableId> roots, bool escapes)
-        {
-            if (!escapes || roots.Count == 0 || roots.Any(x => Of(x).IsEmpty)) return false;
-            foreach (var root in roots) used.UnionWith(Of(root));
-            return true;
-        }
+        public bool Covers(IReadOnlyCollection<CallableId> roots, bool escapes) =>
+            escapes && roots.Count > 0 && roots.All(x => !Of(x).IsEmpty);
 
-        public string Names(IEnumerable<CallableId> roots) => string.Join(", ", roots.SelectMany(x => Of(x)).Select(x => x.Registration).Distinct().Order(StringComparer.Ordinal));
+        private IEnumerable<BoundaryHandlingFact> All(IEnumerable<CallableId> roots) => roots.SelectMany(x => Of(x)).Distinct()
+            .OrderBy(x => x.Evidence.Path, StringComparer.Ordinal).ThenBy(x => x.Evidence.SpanStart);
 
-        public void WriteHeader(ReportContext context, Report report) =>
-            report.Section("Handled by a global exception handler:", used.Select(x => $"{x.Registration}  {context.Display.Where(x.Evidence)}"));
+        public string Names(IEnumerable<CallableId> roots) => string.Join(", ", All(roots).Select(x => x.Registration).Distinct());
+
+        public string Describe(ReportContext context, IEnumerable<CallableId> roots) =>
+            "by the global exception handler " + string.Join("; ", All(roots).Select(x => $"{x.Registration}  {context.Display.Where(x.Evidence)}"));
     }
 
     // Where the analysis could not follow an exception, grouped by cause, one line in all.
@@ -278,14 +282,14 @@ internal sealed class ExceptionsCommand : ReportCommand
     private static string FileLine(SourceEvidence at) => $"{Path.GetFileName(at.Path)}:{at.StartLine}";
 
     // The try is where the fix goes, so the warning points at it.
-    private static void WarnMiscaught(ReportContext context, MiscaughtException miscaught)
+    private static void WarnMiscaught(ReportContext context, MiscaughtException miscaught, GlobalHandlers handlers, bool handled)
     {
         var (index, display) = (context.Index, context.Display);
         var origin = index.ThrowSite(miscaught.Origin);
         var region = index.Region(miscaught.Missed.Region);
         var clauses = region.Catches.Select(x => index.Catch(x).CaughtType?.DisplayName ?? "all exceptions");
         Warn(context, "SV0003", region.ProtectedBlock, $"{miscaught.Missed.ExceptionType ?? Thrown(origin)} thrown in {display.Short(origin.Owner)} ({FileLine(origin.Evidence)}) "
-            + $"passes through this try, which catches only {string.Join(", ", clauses)}; then {string.Join("; ", miscaught.Outcomes.Select(x => Fate(context, x, miscaught.Undetermined)))}; "
+            + $"passes through this try, which catches only {string.Join(", ", clauses)}; then {string.Join("; ", miscaught.Outcomes.Select(x => Fate(context, miscaught, x, msbuild: true, handled ? handlers.Names(miscaught.EscapesFrom) : null)))}; "
             + Chain(context, miscaught.Example.Path, miscaught.ViaCandidate));
     }
 
@@ -305,7 +309,7 @@ internal sealed class ExceptionsCommand : ReportCommand
         WriteExample(context, report, caught.Example);
     }
 
-    private static void WriteMiscaught(ReportContext context, Report report, MiscaughtException miscaught)
+    private static void WriteMiscaught(ReportContext context, Report report, MiscaughtException miscaught, GlobalHandlers handlers, bool handled)
     {
         var (index, display) = (context.Index, context.Display);
         var origin = index.ThrowSite(miscaught.Origin);
@@ -314,7 +318,8 @@ internal sealed class ExceptionsCommand : ReportCommand
         WriteOrigin(context, report, "Thrown", [origin], miscaught.Example.Path);
         report.Line("Missed by", $"{display.Short(region.Owner)}  {display.Where(region.ProtectedBlock)}");
         report.More($"try {{ ... }} {string.Join(" ", region.Catches.Select(x => Clause(index.Catch(x))))}");
-        report.Line("Then", string.Join("; ", miscaught.Outcomes.Select(x => Fate(context, x, miscaught.Undetermined))));
+        report.Line("Then", string.Join("; ", miscaught.Outcomes.Select(x => Fate(context, miscaught, x, msbuild: false, null))));
+        if (handled) report.Line("Handled", handlers.Describe(context, miscaught.EscapesFrom));
         WriteExample(context, report, miscaught.Example);
     }
 
@@ -405,6 +410,13 @@ internal sealed class ExceptionsCommand : ReportCommand
         }
 
         public void Begin(string title) { Separate(); output.WriteLine($"{++number}. {title}"); }
+        // Comma-separated on the label's line when it fits, else one item per line.
+        public void List(string label, IEnumerable<string> items)
+        {
+            var all = items.ToArray();
+            if (Fits(string.Join(", ", all))) { Line(label, string.Join(", ", all)); return; }
+            for (var i = 0; i < all.Length; i++) if (i == 0) Line(label, all[i]); else More(all[i]);
+        }
         public void Line(string label, string text) => output.WriteLine($"   {label + ":",-11} {text}");
         public void More(string text) => output.WriteLine(new string(' ', Column) + text);
         public void Step(string arrow, string text) => output.WriteLine(new string(' ', Column - arrow.Length) + arrow + text);
@@ -425,12 +437,13 @@ internal sealed class ExceptionsCommand : ReportCommand
     };
 
     // What happens to a miscaught exception after the try it slipped through.
-    private static string Fate(ReportContext context, ExceptionStatus status, ExceptionWitness? undetermined) => status switch
+    private static string Fate(ReportContext context, MiscaughtException miscaught, ExceptionStatus status, bool msbuild, string? handler) => status switch
     {
         ExceptionStatus.Intercepted => "caught further up",
         ExceptionStatus.RethrownOrReplaced => "rethrown further up",
-        ExceptionStatus.MayEscape => "may escape the controller action",
-        _ => "not determined" + (undetermined is not null && Cause(undetermined.ReasonCode) is { } cause
+        ExceptionStatus.MayEscape => "may escape " + (msbuild ? Actions(context.Display, miscaught.EscapesFrom) : string.Join(", ", miscaught.EscapesFrom.Select(context.Display.Short)))
+            + (handler is null ? "" : $" to the global exception handler {handler}"),
+        _ => "not determined" + (miscaught.Undetermined is { } undetermined && Cause(undetermined.ReasonCode) is { } cause
             ? $": {cause.One}" + (undetermined.Evidence.LastOrDefault() is { } at ? $" at {context.Display.Where(at)}" : "") : ""),
     };
 }
