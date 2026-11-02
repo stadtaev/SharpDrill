@@ -40,7 +40,7 @@ dotnet sharpview exceptions --uncaught
 `sharpview exceptions --format msbuild` prints the uncaught and miscaught findings as one warning per line, in the `file(line,col): warning CODE: message` format that build logs, VS Code and Visual Studio understand:
 
 ```text
-/src/Research.Application/Service.cs(8,45): warning SV0003: Research.Infrastructure.StorageException thrown in Repository.Read (Repository.cs:6) passes through this try, which catches only ArgumentException; then may escape the controller action; path: OrdersController.Incompatible -> Service.Incompatible -> Repository.Read
+/src/Research.Application/Service.cs(8,45): warning SV0003: Research.Infrastructure.StorageException thrown in Repository.Read (Repository.cs:6) passes through this try, which catches only ArgumentException; then may escape OrdersController.Incompatible; path: OrdersController.Incompatible -> Service.Incompatible -> Repository.Read
 ```
 
 | Code | Finding |
@@ -208,10 +208,10 @@ A saved file can return exit code 1 because it contains useful but partial resul
 - **Exceptions.**
   - Reports cover explicit `throw`s, throw expressions, rethrows and catches: static type vs exact constructed type, filters, protected regions and locations.
   - The default view lists every explicit throw and rethrow in source, independent of any action. The other three views trace from controller actions (or `--root`).
-  - **Uncaught** (`--uncaught`) uses the bottom-up summary below; **caught** and **miscaught** use per-path witnesses, deduplicated by origin and handler or `try` block.
+  - All three views read one bottom-up propagation (below). **Caught** and **miscaught** are deduplicated by origin and handler or `try` block, each with the shortest example path from an action.
   - **Caught** lists every catch an exception reaches with a matching type, with the handler's outcome, read from its control flow: handles it, rethrows it, handles some cases and rethrows others, or throws a different exception instead. A catch with a filter, or whose match depends on the runtime type, is marked as a possible catch and the exception is followed past it.
   - **Miscaught** means the exception passes through a `try` whose catch clauses all have non-matching types. It is reported even when a catch further up handles it later; `Then:` shows what happens next. A catch whose match cannot be decided is a possible catch, never miscaught.
-  - Each witness unwinds the origin through its own `try` blocks and every caller's protected call site. An unrelated catch can never intercept it.
+  - An origin is unwound through its own `try` blocks and every caller's protected call site. An unrelated catch can never intercept it.
   - Statuses:
     - **Intercepted** by a matching handler. This does not prove recovery.
     - **Rethrown or replaced**, followed by the subsequent status.
@@ -225,7 +225,7 @@ A saved file can return exit code 1 because it contains useful but partial resul
   - A summary witness is the shortest example path for an escaping effect, reconstructed on demand.
   - Implicit exceptions and branch feasibility are not modelled.
   - **Strict mode** (`--uncaught --strict`) also treats every call into a third-party assembly as an origin and lists, in a section of its own, the calls that no catch meets on the way from the action. Third-party means a referenced assembly that no .NET framework reference pack supplies (NuGet packages and directly referenced DLLs; `Microsoft.*.App.Ref`, `NETStandard.Library` and the shared runtime are .NET itself). Any catch clause around the call or around a caller's call site wraps it, whatever its type; a catch that only rethrows, or whose filter may decline, does not. Global handlers do not count: the rule asks for a catch around the call.
-  - Exceptions that escape an action whose host registers `UseExceptionHandler`, `UseDeveloperExceptionPage` or a global MVC exception filter (`Filters.Add`/`AddService` of an `IExceptionFilter`/`IAsyncExceptionFilter`) are listed last, under a `Handled by a global exception handler:` line naming the registrations. The host is the action's project or a project that references it. `AddExceptionHandler` alone handles nothing. This is registration evidence: it does not prove middleware order, environment conditions (for example a developer page registered only in Development) or what the handler returns. Exception filters applied as attributes on a controller or action are not modelled. See Microsoft's [exception-handling documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling?view=aspnetcore-10.0).
+  - Exceptions that escape an action whose host registers `UseExceptionHandler`, `UseDeveloperExceptionPage` or a global MVC exception filter (`Filters.Add`/`AddService` of an `IExceptionFilter`/`IAsyncExceptionFilter`) are listed last, each with a `Handled:` line naming the registration. The host is the action's project or a project that references it. `AddExceptionHandler` alone handles nothing. This is registration evidence: it does not prove middleware order, environment conditions (for example a developer page registered only in Development) or what the handler returns. Exception filters applied as attributes on a controller or action are not modelled. See Microsoft's [exception-handling documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling?view=aspnetcore-10.0).
 
 ## Releasing
 
@@ -271,10 +271,9 @@ var index = new ProgramIndex(snapshot); // build once; queries and rules share i
 var actions = AspNetConventions.ControllerActions(index, cancellationToken).Select(x => x.Method).ToImmutableArray();
 var reach = ReachabilityQuery.Analyze(index, actions, new ReachOptions(), cancellationToken);
 var paths = CallChainQuery.Enumerate(index, actions, new ChainOptions(), cancellationToken);
-var exceptions = ExceptionQuery.Analyze(index, actions, new ExceptionOptions(), cancellationToken);
 var summaries = ExceptionSummaryQuery.Analyze(index, actions, new ExceptionSummaryOptions(), cancellationToken);
-var caught = ExceptionHandlingQuery.Caught(exceptions);       // origin, catch, certainty, example witness
-var miscaught = ExceptionHandlingQuery.Miscaught(exceptions); // origin, try block that did not match, outcomes
+var caught = ExceptionHandlingQuery.Caught(index, summaries);       // origin, catch, certainty, example witness
+var miscaught = ExceptionHandlingQuery.Miscaught(index, summaries); // origin, try block that did not match, outcomes
 var projects = ProjectMap.Build(snapshot);                     // MSBuild reference graph and build settings
 var projectMarkdown = MermaidExporter.Markdown(projects);
 if (!actions.IsEmpty)

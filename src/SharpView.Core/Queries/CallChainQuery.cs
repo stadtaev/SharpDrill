@@ -21,19 +21,19 @@ public static class CallChainQuery
     // Frames carry independent path state. The explicit stack avoids recursion at user-supplied depths.
     public static ChainSearchResult Enumerate(ProgramSnapshot snapshot, ImmutableArray<CallableId> roots,
         ChainOptions options, CancellationToken cancellationToken = default) => Enumerate(new ProgramIndex(snapshot), roots, options, cancellationToken);
-    public static ChainSearchResult Enumerate(ProgramIndex program, ImmutableArray<CallableId> roots,
+    public static ChainSearchResult Enumerate(ProgramIndex index, ImmutableArray<CallableId> roots,
         ChainOptions options, CancellationToken cancellationToken = default)
     {
         options.Validate(); cancellationToken.ThrowIfCancellationRequested();
-        var calls = program.GetCallGraph(cancellationToken);
+        var calls = index.GetCallGraph(cancellationToken);
         var steps = new Dictionary<CallableId, ImmutableArray<ChainStep>>();
         ImmutableArray<ChainStep> Steps(CallableId caller) =>
             steps.TryGetValue(caller, out var cached) ? cached : steps[caller] = Group(calls, caller);
-        foreach (var root in roots) if (!program.ContainsCallable(root)) throw new ArgumentException($"Unknown root ID: {root.Value}");
+        foreach (var root in roots) if (!index.ContainsCallable(root)) throw new ArgumentException($"Unknown root ID: {root.Value}");
         var output = ImmutableArray.CreateBuilder<CallChain>();
         var work = 0; var outputLimited = false; var workLimited = false;
         var stack = new Stack<(CallableId Root, CallableId Current, ImmutableArray<ChainStep> Path, ImmutableHashSet<CallableId> Seen, ChainEnd? End)>();
-        foreach (var root in roots.Distinct().OrderByDescending(x => program.Callable(x).DisplaySignature, StringComparer.Ordinal).ThenByDescending(x => x.Value, StringComparer.Ordinal))
+        foreach (var root in roots.Distinct().OrderByDescending(x => index.Callable(x).DisplaySignature, StringComparer.Ordinal).ThenByDescending(x => x.Value, StringComparer.Ordinal))
             stack.Push((root, root, [], ImmutableHashSet.Create(root), null));
         while (stack.TryPop(out var frame))
         {
@@ -41,8 +41,8 @@ public static class CallChainQuery
             var end = frame.End;
             // Terminal frames (e.g. an unresolved target) may name a callable outside the graph; never expand them.
             var edges = end is null ? Steps(frame.Current) : [];
-            if (end is null && !program.Callable(frame.Current).HasBody)
-                end = program.Callable(frame.Current).Body == BodyStatus.MetadataOnly ? ChainEnd.Metadata : ChainEnd.NoBody;
+            if (end is null && !index.Callable(frame.Current).HasBody)
+                end = index.Callable(frame.Current).Body == BodyStatus.MetadataOnly ? ChainEnd.Metadata : ChainEnd.NoBody;
             if (end is null && edges.IsEmpty) end = ChainEnd.Leaf;
             if (end is null && frame.Path.Length >= options.MaxDepth) end = ChainEnd.DepthLimit;
             if (end is not null)
@@ -57,7 +57,7 @@ public static class CallChainQuery
                 cancellationToken.ThrowIfCancellationRequested();
                 if (edge.EvidenceSites.Length > options.MaxExpansions - work) { workLimited = true; break; }
                 work += edge.EvidenceSites.Length;
-                ChainEnd? terminal = edge.Target is null || !program.ContainsCallable(edge.Target.Value) ? ChainEnd.UnknownTarget
+                ChainEnd? terminal = edge.Target is null || !index.ContainsCallable(edge.Target.Value) ? ChainEnd.UnknownTarget
                     : edge.Dispatch != DispatchKind.Direct ? ChainEnd.DispatchBoundary
                     : frame.Seen.Contains(edge.Target.Value) ? ChainEnd.Cycle : null;
                 pending.Add((edge, terminal));

@@ -33,36 +33,41 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
         Assert.DoesNotContain(Actions, x => x.Method == Method("Research.Api.OrdersController.Helper()").Id);
     }
     [Theory]
-    [InlineData("Get", ExceptionStatus.MayEscape)]
-    [InlineData("Caught", ExceptionStatus.Intercepted)]
-    [InlineData("Unrelated", ExceptionStatus.MayEscape)]
-    [InlineData("Incompatible", ExceptionStatus.MayEscape)]
-    [InlineData("Rethrow", ExceptionStatus.RethrownOrReplaced)]
-    [InlineData("Replace", ExceptionStatus.Intercepted)]
-    [InlineData("Filter(bool)", ExceptionStatus.MayEscape)]
-    [InlineData("AwaitCaught", ExceptionStatus.Intercepted)]
-    [InlineData("Unobserved", ExceptionStatus.Unknown)]
-    [InlineData("Nested", ExceptionStatus.RethrownOrReplaced)]
-    public void Exception_witness_uses_protected_call_site(string action, ExceptionStatus expected)
+    [InlineData("Get", "escapes")]
+    [InlineData("Caught", "caught")]
+    [InlineData("Unrelated", "escapes")]
+    [InlineData("Incompatible", "escapes")]
+    [InlineData("Rethrow", "rethrown, escapes")]
+    [InlineData("Replace", "caught")]
+    [InlineData("Filter(bool)", "escapes")]
+    [InlineData("AwaitCaught", "caught")]
+    [InlineData("Unobserved", "unknown")]
+    [InlineData("Nested", "caught")]
+    public void The_catch_around_each_call_site_decides_the_fate_of_the_repository_throw(string action, string expected)
     {
-        var signature = "Research.Api.OrdersController." + (action.Contains('(') ? action : action + "()");
-        var result = ExceptionQuery.Analyze(S, [Method(signature).Id], new());
-        var witness = Assert.Single(result.Results, x => x.Origin is not null && S.ThrowSites.Single(t => t.Id == x.Origin).Owner == Method("Research.Infrastructure.Repository." + (action == "AwaitCaught" || action == "Unobserved" ? "ReadAsync()" : "Read()")).Id);
-        Assert.Equal(expected, witness.Status);
-        Assert.Equal(3, witness.Path.Length);
-        Assert.NotEmpty(witness.Evidence);
-        if (action == "Replace") Assert.Contains(result.Results, x => x.Origin is { } o && S.ThrowSites.Single(t => t.Id == o).Owner == Method("Research.Application.Service.Replace()").Id && x.ExceptionType == "System.InvalidOperationException" && x.Status == ExceptionStatus.MayEscape);
-        if (action == "Nested") Assert.Equal(ExceptionStatus.Intercepted, witness.SubsequentStatus);
+        var index = new ProgramIndex(S);
+        var root = Method("Research.Api.OrdersController." + (action.Contains('(') ? action : action + "()")).Id;
+        var origin = Assert.Single(S.ThrowSites, x => x.Owner == Method("Research.Infrastructure.Repository." + (action is "AwaitCaught" or "Unobserved" ? "ReadAsync()" : "Read()")).Id).Id;
+        var summary = ExceptionSummaryQuery.Analyze(index, [root]);
+        var caught = ExceptionHandlingQuery.Caught(index, summary).Where(x => x.Origin == origin).ToArray();
+        var fate = summary.Roots[root].Escapes.FirstOrDefault(x => x.Origin == origin) is { } escape
+            ? escape.ReasonCode == ExceptionReason.ChangedMayEscape ? "rethrown, escapes" : "escapes"
+            : summary.Roots[root].Unknowns.Any(x => x.Origin == origin) ? "unknown" : caught.Length > 0 ? "caught" : "none";
+        Assert.Equal(expected, fate);
+        Assert.All(caught, x => Assert.Equal(3, x.Example.Path.Length));
+        // The replacement is an origin of its own and escapes.
+        if (action == "Replace") Assert.Contains(summary.Roots[root].Escapes, x => x.ExceptionType == "System.InvalidOperationException");
+        // The inner catch rethrows, the outer one takes it.
+        if (action == "Nested") Assert.Equal([HandlerOutcome.Rethrows, HandlerOutcome.Intercepts], caught.Select(x => index.Catch(x.Catch).Outcome));
     }
-    [Theory]
-    [InlineData("Interface(Research.Infrastructure.IRepository)", "Interface", ExceptionReason.DispatchBoundary)]
-    [InlineData("Recursive()", "Cycle", ExceptionReason.Cycle)]
-    public void Uncertain_boundaries_are_visible(string action, string reason, ExceptionReason code)
+    [Fact]
+    public void Interface_without_implementation_is_uncertain_and_recursion_alone_is_not()
     {
-        var report = ExceptionQuery.Analyze(S, [Method("Research.Api.OrdersController." + action).Id], new());
-        Assert.Contains(report.Results, x => x.Status == ExceptionStatus.Unknown && x.Reason.Contains(reason, StringComparison.OrdinalIgnoreCase) && x.ReasonCode == code);
-        if (code == ExceptionReason.DispatchBoundary)
-            Assert.Contains(report.Results, x => x.ReasonCode == code && x.Dispatch == DispatchKind.Interface);
+        var index = new ProgramIndex(S);
+        CallableId Root(string action) => Method("Research.Api.OrdersController." + action).Id;
+        var summary = ExceptionSummaryQuery.Analyze(index, [Root("Interface(Research.Infrastructure.IRepository)"), Root("Recursive()")], new(FollowCandidates: true));
+        Assert.Contains(summary.Roots[Root("Interface(Research.Infrastructure.IRepository)")].Unknowns, x => x.ReasonCode == ExceptionReason.DispatchBoundary);
+        Assert.True(summary.Roots[Root("Recursive()")].IsComplete);
     }
     // Same code as the "Writing your own rule" example in docs/overview.md; keeps the documentation honest.
     private static IEnumerable<Finding> NoDirectInfrastructure(ProgramIndex index, LayerMap layers)
@@ -119,24 +124,27 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
     }
 
     [Fact]
-    public void Detailed_fixture_exception_counts_exclude_global_gap_duplication()
+    public void Fixture_uncertainty_is_only_what_the_analysis_cannot_decide()
     {
-        var report = ExceptionQuery.Analyze(S, [.. Actions.Select(x => x.Method)], new());
-        // Library calls and compiler-provided members are not uncertainty; what remains is genuine (filters, dispatch, cycles...).
-        Assert.Equal(13, report.Results.Length);
-        Assert.Equal(3, report.Results.Count(x => x.Status == ExceptionStatus.Unknown || x.SubsequentStatus == ExceptionStatus.Unknown));
-        Assert.Single(report.GlobalGaps);
-        Assert.False(report.IsComplete);
-        Assert.DoesNotContain(report.Results, x => x.ReasonCode == ExceptionReason.ExtractionGap);
+        var summary = ExceptionSummaryQuery.Analyze(S, [.. Actions.Select(x => x.Method)], new(FollowCandidates: true));
+        // Library calls, compiler-provided members and recursion are not uncertainty; ownerless gaps stay global.
+        Assert.Equal([ExceptionReason.DispatchBoundary, ExceptionReason.UnobservedTask],
+            summary.Roots.Values.SelectMany(x => x.Unknowns).Select(x => x.ReasonCode).Distinct().Order());
+        Assert.Single(summary.GlobalGaps);
+        Assert.False(summary.IsComplete);
     }
 
     [Fact]
-    public void Every_fixture_witness_has_a_reason_code_consistent_with_its_final_status()
+    public void Every_fixture_example_has_a_reason_code_consistent_with_its_final_status()
     {
-        var report = ExceptionQuery.Analyze(S, [.. Actions.Select(x => x.Method)], new());
-        Assert.NotEmpty(report.Results);
+        var index = new ProgramIndex(S);
+        var summary = ExceptionSummaryQuery.Analyze(index, [.. Actions.Select(x => x.Method)], new(FollowCandidates: true));
+        var miscaught = ExceptionHandlingQuery.Miscaught(index, summary);
+        ExceptionWitness[] witnesses = [.. ExceptionHandlingQuery.Caught(index, summary).Select(x => x.Example), .. miscaught.Select(x => x.Example),
+            .. miscaught.Select(x => x.Undetermined).OfType<ExceptionWitness>()];
+        Assert.NotEmpty(witnesses);
         ExceptionReason[] outcomes = [ExceptionReason.InterceptedByHandler, ExceptionReason.MayEscape, ExceptionReason.ChangedMayEscape];
-        foreach (var witness in report.Results)
+        foreach (var witness in witnesses)
         {
             var final = witness.SubsequentStatus ?? witness.Status;
             Assert.NotEqual(ExceptionReason.Unspecified, witness.ReasonCode);
@@ -144,7 +152,6 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
             else if (final == ExceptionStatus.MayEscape)
                 Assert.Equal(witness.Status == ExceptionStatus.RethrownOrReplaced ? ExceptionReason.ChangedMayEscape : ExceptionReason.MayEscape, witness.ReasonCode);
             else Assert.DoesNotContain(witness.ReasonCode, outcomes);
-            Assert.Equal(witness.ReasonCode == ExceptionReason.DispatchBoundary, witness.Dispatch is not null);
         }
     }
     [Fact]
