@@ -40,12 +40,12 @@ Useful options: `--root "<exact signature or ID>"` limits a run to one action (`
 - An exception entry shows where it is `Thrown` (and `Rethrown`) and an example `Path` from the action down to the throw. `Escapes` lists the actions when there is more than the one the path starts at. `(in the action)` after `Thrown` means the throw is in the action itself, so there is no path line.
 - In a path, `->` is a direct call and `~>` an interface or virtual call into an implementation found in source. SharpView does not read DI registrations, so it cannot know which implementation runs. `(1 of N implementations)` after a `~>` step means source has several: check which one is registered before acting on the finding.
 - A path that repeats most of an earlier finding's path refers to it by number: `same as 2`, or `as in 2 up to <method>, then -> ...` followed by the rest. A finding with several throws of one type in one method lists their lines together (`File.cs:10, 11`).
-- `Handled by a global exception handler:` with the registrations below it heads the findings that exception middleware or a global MVC exception filter still receives. They are lower priority, but the client still gets whatever that handler returns, often a 500.
+- `Handled` names the exception middleware or global MVC exception filter that still receives the exception; those findings come last. They are lower priority, but the client still gets whatever that handler returns, often a 500.
 - The `--strict` section lists third-party calls (NuGet packages and referenced DLLs, not .NET itself) that no catch meets anywhere on the way from the action. Any catch type around the call or a caller counts as wrapping it. A catch that only rethrows does not.
-- `--miscaught` entries say which `try` missed (`Missed by`, with its catch clauses on the next line) and what happens next (`Then`). `--caught` entries name the method with the catch (`Caught by`) and what it does (`Handler`).
+- `--miscaught` entries say which `try` missed (`Missed by`, with its catch clauses on the next line) and what happens next (`Then`, naming the actions it may escape). `--caught` entries name the method with the catch (`Caught by`) and what it does (`Handler`).
 - Library and framework code is a boundary: the exceptions it throws are not modelled, and neither are implicit exceptions such as a null dereference. No finding does not prove that nothing is thrown.
 
-Exit codes: 0 complete, 1 usable but with gaps, Unknown results or limits (normal on real code), 2 invalid request or fatal, 130 cancelled.
+Exit codes: 0 complete, 1 usable but with gaps, Unknown results or limits (normal on real code), 2 invalid request or fatal, 130 cancelled. Findings never set the exit code, so in CI gate on the findings (stdout, or the warnings of `--format msbuild`) and treat 1 as success.
 
 ## Build warnings (the SharpView package)
 

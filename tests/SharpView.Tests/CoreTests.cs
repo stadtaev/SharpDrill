@@ -35,8 +35,12 @@ public sealed class CoreTests
     private static CatchFact Handler(string id, string owner, HandlerOutcome outcome, string? subsequent = null,
         TypeUse? caught = null, string? filter = null) => new(new(id), new(owner), caught, filter, Evidence, Evidence, outcome, subsequent is null ? null : new ThrowSiteId(subsequent));
     private static ExceptionRegionFact Region(string id, string owner, params string[] catches) => new(new(id), new(owner), Evidence, [.. catches.Select(x => new CatchId(x))], false);
-    private static ExceptionWitness AnalyzeOrigin(ProgramSnapshot snapshot) => Assert.Single(
-        ExceptionQuery.Analyze(snapshot, [new("Action")], new()).Results, x => x.Origin == new ThrowSiteId("origin"));
+    // Where the throw "origin" ends when analysed from "Action": exactly one ending in these snapshots.
+    private static ExceptionWitness AnalyzeOrigin(ProgramSnapshot snapshot)
+    {
+        var index = new ProgramIndex(snapshot);
+        return Assert.Single(ExceptionHandlingQuery.Fates(index, ExceptionSummaryQuery.Analyze(index, [new("Action")]), new("origin")));
+    }
 
     [Fact]
     public void Exception_summary_closed_recursion_has_no_escape_or_cycle_unknown()
@@ -47,6 +51,37 @@ public sealed class CoreTests
         Assert.Empty(result.Roots[new CallableId("Action")].Escapes);
         Assert.Empty(result.Roots[new CallableId("Action")].Unknowns);
         Assert.True(result.Roots[new CallableId("Action")].IsComplete);
+    }
+
+    [Fact]
+    public void A_miss_reports_every_fate_of_what_got_past_it_across_actions()
+    {
+        // Middle's catch misses; one action lets the exception escape, the other catches it further up.
+        var snapshot = Snapshot([Method("Action"), Method("Other"), Method("Middle"), Method("Leaf")],
+            [Call("Action", "Middle", "am"), Call("Other", "Middle", "om", regions: ["outer"]), Call("Middle", "Leaf", "ml", regions: ["inner"])],
+            [Throw("Leaf")], [Handler("narrow", "Middle", HandlerOutcome.Intercepts, caught: Type("OtherException")), Handler("all", "Other", HandlerOutcome.Intercepts)],
+            [Region("inner", "Middle", "narrow"), Region("outer", "Other", "all")]);
+        var index = new ProgramIndex(snapshot);
+        var summary = ExceptionSummaryQuery.Analyze(index, [new("Action"), new("Other")]);
+        var miscaught = Assert.Single(ExceptionHandlingQuery.Miscaught(index, summary));
+        Assert.Equal(new ExceptionRegionId("inner"), miscaught.Missed.Region);
+        Assert.Equal([ExceptionStatus.Intercepted, ExceptionStatus.MayEscape], miscaught.Outcomes.AsEnumerable());
+        Assert.Equal([new CallableId("Action")], miscaught.EscapesFrom.AsEnumerable());
+        Assert.Equal(["Action", "Middle", "Leaf"], miscaught.Example.Path.Select(x => x.Value));
+        Assert.Equal(new CatchId("all"), Assert.Single(ExceptionHandlingQuery.Caught(index, summary)).Catch);
+    }
+
+    [Fact]
+    public void A_catch_above_recursion_is_found_with_an_acyclic_example()
+    {
+        var snapshot = Snapshot([Method("Action"), Method("Loop"), Method("Leaf")],
+            [Call("Action", "Loop", "al", regions: ["try"]), Call("Loop", "Loop", "again"), Call("Loop", "Leaf", "ll")],
+            [Throw("Leaf")], [Handler("catch", "Action", HandlerOutcome.Intercepts)], [Region("try", "Action", "catch")]);
+        var index = new ProgramIndex(snapshot);
+        var summary = ExceptionSummaryQuery.Analyze(index, [new("Action")]);
+        var caught = Assert.Single(ExceptionHandlingQuery.Caught(index, summary));
+        Assert.Equal(["Action", "Loop", "Leaf"], caught.Example.Path.Select(x => x.Value));
+        Assert.True(summary.IsComplete);
     }
 
     [Fact]
@@ -157,31 +192,14 @@ public sealed class CoreTests
     }
 
     [Fact]
-    public void Detailed_exception_query_reports_ownerless_gaps_once_outside_action_witnesses()
-    {
-        var gap = new AnalysisGap(GapKind.Compilation, Project, null, "Compilation incomplete", Evidence);
-        var snapshot = Snapshot([Method("Action"), Method("Other")], [], [Throw("Action"), Throw("Other", "other")]) with { Gaps = [gap] };
-        var result = ExceptionQuery.Analyze(snapshot, [new("Action"), new("Other")], new());
-        Assert.Equal(gap, Assert.Single(result.GlobalGaps));
-        Assert.True(result.IsComplete);
-        Assert.Equal(2, result.Results.Length);
-        Assert.All(result.Results, x => Assert.NotEqual(ExceptionReason.ExtractionGap, x.ReasonCode));
-        var limited = ExceptionQuery.Analyze(snapshot, [new("Action"), new("Other")], new(MaxResults: 1));
-        Assert.NotNull(Assert.Single(limited.Results).Origin);
-        Assert.Single(limited.GlobalGaps); Assert.True(limited.OutputLimitReached);
-    }
-
-    [Fact]
     public void Owned_exception_gap_stays_attached_to_its_reached_callable()
     {
         var snapshot = Snapshot([Method("Action"), Method("Leaf")], [Call("Action", "Leaf", "call")]) with
         { Gaps = [new AnalysisGap(GapKind.Unsupported, Project, new CallableId("Leaf"), "Unsupported source body", Evidence)] };
-        var result = ExceptionQuery.Analyze(snapshot, [new("Action")], new());
+        var result = ExceptionSummaryQuery.Analyze(snapshot, [new("Action")]);
         Assert.Empty(result.GlobalGaps);
         Assert.False(result.IsComplete);
-        var witness = Assert.Single(result.Results);
-        Assert.Equal(ExceptionReason.ExtractionGap, witness.ReasonCode);
-        Assert.Equal(["Action", "Leaf"], witness.Path.Select(x => x.Value));
+        Assert.Equal(ExceptionReason.ExtractionGap, Assert.Single(result.Roots[new CallableId("Action")].Unknowns).ReasonCode);
     }
 
     [Fact]
@@ -385,9 +403,6 @@ public sealed class CoreTests
         var chains = CallChainQuery.Enumerate(snapshot, [new("Action")], new());
         Assert.Equal(new[] { "Left,Shared", "Right,Shared" }, chains.Chains.Select(x => string.Join(',', x.Steps.Select(s => s.Target!.Value.Value))));
         Assert.All(chains.Chains, x => Assert.Equal(ChainEnd.Leaf, x.End));
-        var exceptions = ExceptionQuery.Analyze(snapshot, [new("Action")], new());
-        Assert.Equal(new[] { "Action,Left,Shared", "Action,Right,Shared" }, exceptions.Results.Select(x => string.Join(',', x.Path.Select(p => p.Value))));
-        Assert.All(exceptions.Results, x => Assert.Equal(ExceptionStatus.MayEscape, x.Status));
     }
 
     [Fact]
@@ -399,8 +414,6 @@ public sealed class CoreTests
         Assert.Equal(2, result.Chains.Length);
         Assert.Contains(result.Chains, x => x.End == ChainEnd.Cycle && x.Steps.Length == 2);
         Assert.Contains(result.Chains, x => x.End == ChainEnd.Leaf && x.Steps.Length == 1);
-        Assert.Contains(ExceptionQuery.Analyze(snapshot, [new("Action")], new()).Results,
-            x => x.Status == ExceptionStatus.Unknown && x.Reason.Contains("Cycle") && x.ReasonCode == ExceptionReason.Cycle);
     }
 
     [Fact]
@@ -423,23 +436,6 @@ public sealed class CoreTests
         Assert.Single(chains.Chains);
         Assert.False(chains.OutputLimitReached);
         Assert.False(chains.WorkLimitReached);
-        var exceptions = ExceptionQuery.Analyze(snapshot, [new("Action")], new(MaxResults: 1, MaxExpansions: 1));
-        Assert.Single(exceptions.Results);
-        Assert.False(exceptions.OutputLimitReached);
-        Assert.False(exceptions.WorkLimitReached);
-    }
-
-    [Fact]
-    public void Depth_and_work_stops_report_unknown_instead_of_claiming_no_exceptions()
-    {
-        var snapshot = Snapshot([Method("Action"), Method("Middle"), Method("Leaf")],
-            [Call("Action", "Middle", "am"), Call("Middle", "Leaf", "ml")], [Throw("Leaf")]);
-        var depth = ExceptionQuery.Analyze(snapshot, [new("Action")], new(MaxDepth: 1));
-        Assert.True(depth.DepthLimitReached);
-        Assert.Equal(ExceptionStatus.Unknown, Assert.Single(depth.Results).Status);
-        var work = ExceptionQuery.Analyze(snapshot, [new("Action")], new(MaxExpansions: 1));
-        Assert.True(work.WorkLimitReached);
-        Assert.Equal(1, work.ExpandedSites);
     }
 
     [Theory]
@@ -516,7 +512,7 @@ public sealed class CoreTests
     public void Missing_root_body_and_absent_target_are_visible()
     {
         var missingBody = Snapshot([Method("Action") with { Body = BodyStatus.MetadataOnly }], []);
-        Assert.Equal(ExceptionStatus.Unknown, Assert.Single(ExceptionQuery.Analyze(missingBody, [new("Action")], new()).Results).Status);
+        Assert.Equal(ExceptionReason.MissingBody, Assert.Single(ExceptionSummaryQuery.Analyze(missingBody, [new("Action")]).Roots[new CallableId("Action")].Unknowns).ReasonCode);
         var missingTarget = Snapshot([Method("Action")], [Call("Action", "Absent", "missing")]);
         Assert.Equal(ChainEnd.UnknownTarget, Assert.Single(CallChainQuery.Enumerate(missingTarget, [new("Action")], new()).Chains).End);
     }
@@ -623,10 +619,10 @@ public sealed class CoreTests
     public void Query_options_and_cancellation_are_validated()
     {
         var snapshot = Snapshot([Method("Action")], []);
-        Assert.Throws<ArgumentException>(() => ExceptionQuery.Analyze(snapshot, [new("Action")], new(MaxExpansions: 0)));
+        Assert.Throws<ArgumentException>(() => ExceptionSummaryQuery.Analyze(snapshot, [new("Action")], new(MaxWork: 0)));
         Assert.Throws<ArgumentException>(() => CallChainQuery.Enumerate(snapshot, [new("Action")], new(MaxChains: 0)));
         Assert.Throws<ArgumentException>(() => CallChainQuery.Enumerate(snapshot, [new("Action")], new(MaxDepth: -1)));
-        Assert.Throws<OperationCanceledException>(() => ExceptionQuery.Analyze(snapshot, [new("Action")], new(), new CancellationToken(true)));
+        Assert.Throws<OperationCanceledException>(() => ExceptionSummaryQuery.Analyze(snapshot, [new("Action")], new(), new CancellationToken(true)));
         Assert.Throws<OperationCanceledException>(() => CallChainQuery.Enumerate(snapshot, [new("Action")], new(), new CancellationToken(true)));
     }
 }

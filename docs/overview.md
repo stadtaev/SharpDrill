@@ -161,24 +161,23 @@ Overview: 7 caught exceptions
 `--miscaught`, a `try` that did not catch it:
 
 ```text
-Handled by a global exception handler:
-  - UseExceptionHandler  Research.Api/Program.cs:5
-
 1. Research.Infrastructure.StorageException
    Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
    Missed by:  Service.Incompatible  Research.Application/Service.cs:8
                try { ... } catch (System.ArgumentException)
-   Then:       may escape the controller action
+   Then:       may escape OrdersController.Incompatible
+   Handled:    by the global exception handler UseExceptionHandler  Research.Api/Program.cs:5
    Path:       OrdersController.Incompatible -> Service.Incompatible -> Repository.Read
 ```
 
-`--uncaught`, one entry per exception type escaping from one method (its throw lines listed together), with an example path from an action; `Escapes:` lists the actions when
-there is more than the one the path starts at:
+`--uncaught`, one entry per exception type escaping from one method (its throw lines listed together), with an example path from an action; `Escapes:` lists every action when
+there is more than the one the path starts at (one per line when they do not fit):
 
 ```text
 2. Research.Infrastructure.StorageException
    Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
-   Escapes:    OrdersController.Filter, OrdersController.Get, OrdersController.Incompatible and 1 more
+   Escapes:    OrdersController.Filter, OrdersController.Get, OrdersController.Incompatible, OrdersController.Unrelated
+   Handled:    by the global exception handler UseExceptionHandler  Research.Api/Program.cs:5
    Path:       OrdersController.Filter -> Service.Filter -> Repository.Read
 ```
 
@@ -188,7 +187,7 @@ an implementation found in source behind an interface or virtual call; when sour
 earlier finding's path reads `same as 2` or `as in 2 up to <method>, then -> ...` (not under `--locations`). A throw in the action itself has no path line; its `Thrown:` line ends with
 `(in the action)`. `--locations` adds a `Locations:` list.
 
-"May escape" means no catch on the way from the action. Findings whose actions are covered by registered exception middleware or a global exception filter are listed last, under a `Handled by a global exception handler:` header that lists the registrations. A catch is *miscaught* only when every clause definitely does not match; filters and runtime-dependent matches are possible catches instead.
+"May escape" means no catch on the way from the action. Findings whose actions are covered by registered exception middleware or a global exception filter are listed last, each with a `Handled:` line naming the registration, so every block reads on its own (in a CI log too). A catch is *miscaught* only when every clause definitely does not match; filters and runtime-dependent matches are possible catches instead.
 
 ## Writing your own rule
 
@@ -209,7 +208,7 @@ static IEnumerable<Finding> NoDirectInfrastructure(ProgramIndex index, LayerMap 
 
 Even with candidates enabled, this rule uses `DirectDistance == 1` and `DirectWitness` for its violation and evidence. A candidate shortcut cannot turn a longer direct route into a direct-call violation. Candidate possibilities can be evaluated separately as Unknown; this example enforces direct calls only.
 
-Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `SharpView.Graph` algorithms, `ProjectMap` (MSBuild references and settings), `LayerMap`/`LayerGraph` (your own layer mapping, library only), `ReachabilityQuery`, `CallChainQuery`, `ExceptionQuery` (with `ExceptionReason` codes), `ExceptionHandlingQuery` (caught/miscaught), `AspNetConventions`. Keep `Verdict.Unknown` separate from `Pass` — it is how a rule stays honest.
+Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `SharpView.Graph` algorithms, `ProjectMap` (MSBuild references and settings), `LayerMap`/`LayerGraph` (your own layer mapping, library only), `ReachabilityQuery`, `CallChainQuery`, `ExceptionSummaryQuery` (with `ExceptionReason` codes), `ExceptionHandlingQuery` (caught/miscaught, where one throw ends), `AspNetConventions`. Keep `Verdict.Unknown` separate from `Pass` — it is how a rule stays honest.
 
 ## Glossary
 
@@ -233,9 +232,10 @@ Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `Shar
 
 ## Summary analysis and diagram projections
 
-`ExceptionSummaryQuery` keeps possible escape effects beside the immutable call graph. It processes direct-call SCCs
-bottom-up and joins finite, origin-preserving effects until stable. Catch/rethrow/replacement, awaited calls and unsupported
-flow use the same transfer code as detailed exception witnesses. Per-call-site crossing summaries prevent a catch at one
+`ExceptionSummaryQuery` keeps possible escape effects beside the immutable call graph. It seeds each explicit throw
+in its own method and pushes finite, origin-preserving effects up through caller sites with one worklist until nothing
+changes (recursion needs no special scheduling). Catch/rethrow/replacement, awaited calls and unsupported
+flow use the same transfer code as the example witnesses; caught and miscaught findings are read from the recorded transfer steps. Per-call-site crossing summaries prevent a catch at one
 site from hiding effects at another. Budgets bound retained facts and transfer work; uncertainty remains explicit. Ownerless gaps stay in result-level `GlobalGaps`, separate from action effects; overall `IsComplete` accounts for them. Complexity
 depends on the number of distinct effects, call sites and fixed-point transfers, rather than just the node/edge count.
 

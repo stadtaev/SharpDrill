@@ -26,7 +26,7 @@ shared by detailed and summary analysis. Computed summaries are scoped to a snap
 - Directed multigraph with stable semantic call-edge IDs, adjacency in both directions, SCCs and quotient membership.
 - Correct distance improvement across phased seeds and late sources. Work truncation preserves coherent admitted paths.
 - Lazy direct-only and candidate-inclusive reach witnesses/distances, per-root truncation and explicit uncertainties.
-- Finite origin-preserving exception effects, SCC scheduling, monotone fixed points, per-site transfer and bounded work/facts.
+- Finite origin-preserving exception effects, one-worklist monotone fixed points, per-site transfer and bounded work/facts.
   Recursion alone is not unknown. Known effects coexist with uncertainty; the shortest example witness is reconstructed on request.
 - `diagram` numbered action selection or `--root`/`--root-id`, bounded graph projection, project groups and Mermaid Markdown.
   The command prints the absolute saved path. Raw full-program rendering is deliberately not the default.
@@ -48,8 +48,8 @@ shared by detailed and summary analysis. Computed summaries are scoped to a snap
 
 ## Other open items
 
-- Move detailed `CallChainQuery` / `ExceptionQuery` traversal onto shared graph operations if it reduces duplication while
-  retaining call-site/path-sensitive reporting. Their bounded enumeration is still useful for detailed explanations.
+- Move `CallChainQuery` traversal onto shared graph operations if it reduces duplication while retaining
+  call-site/path-sensitive reporting.
 - Event types are not dependency sources yet (documented in coverage).
 - Validate against an external Web API with a working restore configuration. The earlier API archive's configured package
   feed returned HTTP 404; repository fixtures and SharpView remain the available validation inputs.

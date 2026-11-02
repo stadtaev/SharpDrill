@@ -284,9 +284,9 @@ public sealed class CliContractTests
         var text = result.Out.Replace("\r\n", "\n");
         Assert.Contains("1. Research.Infrastructure.StorageException", text);
         Assert.Contains("   Missed by:  Service.Incompatible  Research.Application/Service.cs:8\n               try { ... } catch (System.ArgumentException)\n", text);
-        Assert.Contains("   Then:       may escape the controller action", text);
+        Assert.Contains("   Then:       may escape OrdersController.Incompatible\n   Handled:    by the global exception handler UseExceptionHandler  Research.Api/Program.cs:5\n", text);
         Assert.Contains("OrdersController.Incompatible -> Service.Incompatible -> Repository.Read\n", text);
-        Assert.StartsWith("Handled by a global exception handler:\n  - UseExceptionHandler  Research.Api/Program.cs:5\n\n1. ", text);
+        Assert.StartsWith("1. ", text);
         Assert.Contains("12 actions analysed: 1 miscaught (1 handled by a global exception handler).", result.Error);
     }
     [Fact]
@@ -299,10 +299,13 @@ public sealed class CliContractTests
         Assert.Equal(["SV0002", "SV0002", "SV0002", "SV0003"], lines.Select(x => x.Split(": warning ")[1][..6]));
         var service = Path.Combine(Path.GetDirectoryName(ResearchFixture.Input)!, "Research.Application", "Service.cs");
         Assert.Equal($"{service}(8,45): warning SV0003: Research.Infrastructure.StorageException thrown in Repository.Read (Repository.cs:6) passes through this try, "
-            + "which catches only System.ArgumentException; then may escape the controller action; path: OrdersController.Incompatible -> Service.Incompatible -> Repository.Read", lines[3]);
+            + "which catches only System.ArgumentException; then may escape OrdersController.Incompatible to the global exception handler UseExceptionHandler; path: OrdersController.Incompatible -> Service.Incompatible -> Repository.Read", lines[3]);
         Assert.Contains(lines, x => x.EndsWith("warning SV0002: Research.Infrastructure.StorageException may escape OrdersController.Rethrow to the global exception handler UseExceptionHandler, "
             + "rethrown in Service.Rethrow (Service.cs:9); path: OrdersController.Rethrow -> Service.Rethrow -> Repository.Read", StringComparison.Ordinal));
-        Assert.Contains("12 actions analysed: 1 miscaught (1 handled by a global exception handler).", result.Error);
+        // Both views print one summary line between them.
+        Assert.Single(result.Error.Split('\n'), x => x.StartsWith("12 actions analysed: ", StringComparison.Ordinal));
+        Assert.Contains("12 actions analysed: 3 uncaught exceptions (3 handled by a global exception handler); every third-party call has a catch on the way; "
+            + "1 miscaught (1 handled by a global exception handler).", result.Error);
         // A view narrows the warnings to that view.
         Assert.Equal([lines[3]], (await Run("exceptions", ResearchFixture.Input, "--miscaught", "--format", "msbuild")).Out.Replace("\r\n", "\n").TrimEnd('\n').Split('\n'));
     }
@@ -336,7 +339,7 @@ public sealed class CliContractTests
         Assert.Equal(plain.Out, strict.Out);
         // The skill tip is for a person at a terminal; redirected stderr (agents, CI) never gets it.
         Assert.DoesNotContain("Tip:", strict.Error);
-        Assert.Contains("12 actions analysed: 3 uncaught exceptions (3 handled by a global exception handler); 0 third-party calls with no catch on the way.", strict.Error);
+        Assert.Contains("12 actions analysed: 3 uncaught exceptions (3 handled by a global exception handler); every third-party call has a catch on the way.", strict.Error);
     }
     [Theory]
     [InlineData(false)]

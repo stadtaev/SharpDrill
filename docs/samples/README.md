@@ -24,9 +24,9 @@ $CLI diagram $F --root "$R" --output diagram.md    # diagram.md
 - `exceptions-miscaught.txt` shows the fixture's `Service.Incompatible()`, whose `catch (ArgumentException)` does not match the `StorageException` passing through it.
 - `reach.txt` lists each callable reachable from the action once, with distance, project and one shortest witness path. `paths.txt` records the principal path, projects, transitions and source evidence.
 
-Their `.stderr.txt` companions contain the one-line summary and, when the analysis stopped somewhere, a `Not followed:` line. The caught and miscaught views exit **1** on the fixture because it deliberately contains an interface without implementation, recursion and a task that is never awaited; the other samples exit 0.
+Their `.stderr.txt` companions contain the one-line summary and, when the analysis stopped somewhere, a `Not followed:` line. The caught and miscaught views exit **1** on the fixture because it deliberately contains an interface without implementation and a task that is never awaited (its recursion is followed, not a gap); the other samples exit 0.
 
-The fixture exercises caught, unrelated and incompatible catches, rethrow/replacement, filters, recursion, interface dispatch, awaited/caught operations, unobserved tasks and ASP.NET exception middleware registration (its findings are listed under `Handled by a global exception handler:`). Additional edge cases are tested through independent Core snapshots and in-memory semantic extraction.
+The fixture exercises caught, unrelated and incompatible catches, rethrow/replacement, filters, recursion, interface dispatch, awaited/caught operations, unobserved tasks and ASP.NET exception middleware registration (its findings carry a `Handled:` line). Additional edge cases are tested through independent Core snapshots and in-memory semantic extraction.
 
 The host's own `sharpview.slnx` was also inspected as a loader smoke check. An external Web API experiment remains pending; these samples establish fixture behavior only.
 
