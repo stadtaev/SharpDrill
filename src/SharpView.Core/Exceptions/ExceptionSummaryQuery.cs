@@ -184,7 +184,7 @@ public static class ExceptionSummaryQuery
                         if (!Spend()) break;
                         // Handlers and missed regions start empty, so the result lists exactly this step's.
                         var input = flow with { ViaCandidate = flow.ViaCandidate || viaCandidate, Handlers = [], Possible = [], Missed = [] };
-                        var crossed = ExceptionTransfer.Cross(index, input, site, token, collectEvidence: false);
+                        var crossed = ExceptionTransfer.Cross(index, input, site, item.Method, token, collectEvidence: false);
                         FactRef? to = null;
                         if (crossed.Status == ExceptionStatus.Intercepted)
                             crossingIntercepts[site.Id].Add(flow.Origin);
@@ -194,6 +194,8 @@ public static class ExceptionSummaryQuery
                             crossingUnknowns[site.Id].Add(uncertainty);
                             AddUnknown(site.Caller, uncertainty);
                         }
+                        // Ends in the async void method: the step records it; nothing reaches the caller.
+                        else if (crossed.Status == ExceptionStatus.EscapesAsyncVoid) { }
                         else
                         {
                             if (crossed.Flow.Type is not null) crossingFlows[site.Id].Add(Escape(crossed.Flow));

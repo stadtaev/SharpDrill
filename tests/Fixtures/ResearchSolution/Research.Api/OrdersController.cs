@@ -17,5 +17,6 @@ public class OrdersController : ControllerBase
     [HttpGet("await")] public async Task AwaitCaught() => await Service.AwaitCaught();
     [HttpGet("unobserved")] public void Unobserved() => Service.Unobserved();
     [HttpGet("nested")] public void Nested() => Service.Nested();
+    [HttpGet("fire")] public void Fire() { try { Service.Fire(); Service.Guarded(); } catch (StorageException) { } }
     [NonAction] public void Helper() => Service.Load();
 }

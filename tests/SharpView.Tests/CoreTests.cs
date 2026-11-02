@@ -384,11 +384,47 @@ public sealed class CoreTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void Async_void_and_custom_awaitable_propagation_are_unknown(bool awaited)
+    public void Async_iterator_and_custom_awaitable_propagation_are_unknown(bool awaited)
     {
         var snapshot = Snapshot([Method("Action"), Method("Operation") with { IsAsync = !awaited }],
             [Call("Action", "Operation", "operation", awaited: awaited)], [Throw("Operation")]);
         Assert.Equal(ExceptionStatus.Unknown, AnalyzeOrigin(snapshot).Status);
+    }
+
+    [Fact]
+    public void Async_void_applies_its_own_catches_and_what_leaves_it_ends_there_past_the_callers_catch()
+    {
+        // Fire misses its own catch; the action's catch around the call would match, but cannot see it.
+        var fire = Method("Fire") with { IsAsync = true, ReturnsVoid = true };
+        var snapshot = Snapshot([Method("Action"), fire, Method("Leaf")],
+            [Call("Action", "Fire", "af", regions: ["outer"]), Call("Fire", "Leaf", "fl", regions: ["inner"])],
+            [Throw("Leaf")], [Handler("miss", "Fire", HandlerOutcome.Intercepts, caught: Type("OtherException")), Handler("catch", "Action", HandlerOutcome.Intercepts)],
+            [Region("inner", "Fire", "miss"), Region("outer", "Action", "catch")]);
+        var index = new ProgramIndex(snapshot);
+        var result = ExceptionSummaryQuery.Analyze(index, [new("Action")]);
+        Assert.Empty(result.Roots[new CallableId("Action")].Escapes);
+        Assert.True(result.Roots[new CallableId("Action")].IsComplete);
+        var witness = AnalyzeOrigin(snapshot);
+        Assert.Equal(ExceptionStatus.EscapesAsyncVoid, witness.Status);
+        Assert.Empty(witness.HandlerIds);
+        var crash = Assert.Single(ExceptionHandlingQuery.Crashing(index, result));
+        Assert.Equal(new CallableId("Fire"), crash.Method);
+        Assert.Equal([new("Action")], crash.Roots.AsEnumerable());
+        Assert.Equal([new("Action"), new("Fire"), new("Leaf")], crash.Example.Path.AsEnumerable());
+        Assert.Equal([ExceptionStatus.EscapesAsyncVoid], Assert.Single(ExceptionHandlingQuery.Miscaught(index, result)).Outcomes.AsEnumerable());
+    }
+
+    [Fact]
+    public void Async_void_that_catches_everything_is_complete_and_crashes_nothing()
+    {
+        var snapshot = Snapshot([Method("Action"), Method("Guarded") with { IsAsync = true, ReturnsVoid = true }, Method("Leaf")],
+            [Call("Action", "Guarded", "ag"), Call("Guarded", "Leaf", "gl", regions: ["try"])],
+            [Throw("Leaf")], [Handler("catch", "Guarded", HandlerOutcome.Intercepts)], [Region("try", "Guarded", "catch")]);
+        var index = new ProgramIndex(snapshot);
+        var result = ExceptionSummaryQuery.Analyze(index, [new("Action")]);
+        Assert.True(result.IsComplete);
+        Assert.Empty(ExceptionHandlingQuery.Crashing(index, result));
+        Assert.Equal(ExceptionStatus.Intercepted, AnalyzeOrigin(snapshot).Status);
     }
 
     [Fact]

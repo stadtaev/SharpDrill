@@ -176,6 +176,24 @@ public sealed class ExtractionTests
     }
 
     [Fact]
+    public async Task Async_void_is_told_apart_from_async_task_and_async_iterators()
+    {
+        var snapshot = await Extract("""
+            using System.Collections.Generic; using System.Threading.Tasks;
+            public static class Work
+            {
+                public static async void Fire() { await Task.Yield(); }
+                public static async Task Run() { await Task.Yield(); }
+                public static async IAsyncEnumerable<int> Stream() { await Task.Yield(); yield return 1; }
+            }
+            """);
+        CallableFact Of(string name) => snapshot.Callables.Single(x => x.DisplaySignature == $"Work.{name}()");
+        Assert.True(Of("Fire").IsAsyncVoid);
+        Assert.False(Of("Run").IsAsyncVoid);
+        Assert.True(Of("Run").ReturnsTask);
+        Assert.False(Of("Stream").IsAsyncVoid || Of("Stream").ReturnsTask);
+    }
+    [Fact]
     public async Task Awaiting_a_task_directly_or_through_a_local_observes_it()
     {
         var snapshot = await Extract("""

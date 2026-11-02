@@ -1,4 +1,14 @@
+Overview: 2 miscaught exceptions (1 handled by a global exception handler)
+  2  Research.Infrastructure.StorageException
+
 1. Research.Infrastructure.StorageException
+   Thrown:     Repository.ReadAsync  Research.Infrastructure/Repository.cs:8
+   Missed by:  Service.Fire  Research.Application/Service.cs:19
+               try { ... } catch (System.ArgumentException)
+   Then:       leaves an async void method, where no caller can catch it; the process ends
+   Path:       OrdersController.Fire -> Service.Fire -> Repository.ReadAsync
+
+2. Research.Infrastructure.StorageException
    Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
    Missed by:  Service.Incompatible  Research.Application/Service.cs:8
                try { ... } catch (System.ArgumentException)
