@@ -1,6 +1,6 @@
-# SharpView
+# SharpDrill
 
-SharpView is a C# research tool for understanding ASP.NET Core Web APIs from source:
+SharpDrill is a C# research tool for understanding ASP.NET Core Web APIs from source:
 
 - **Project map:** the real `<ProjectReference>` tree, with each project's framework, nullable settings and compiler warnings.
 - **Exceptions:** every explicit throw, and which ones go uncaught, get caught, or pass through a `try` whose catches don't match them.
@@ -8,20 +8,20 @@ SharpView is a C# research tool for understanding ASP.NET Core Web APIs from sou
 
 Results carry source evidence (file:line:column), and anything the analysis cannot decide is reported as *Unknown* instead of being hidden. It uses the .NET SDK and Roslyn; Visual Studio is not required.
 
-**New here? Read [How SharpView works](docs/overview.md)** — pipeline, principles, what each command answers, and how to write your own rule.
+**New here? Read [How SharpDrill works](docs/overview.md)** — pipeline, principles, what each command answers, and how to write your own rule.
 
 ## Install
 
-SharpView is a .NET tool: it analyses a whole solution at once, from each controller action through every project it calls into. It needs a .NET 10 (or newer) SDK; restore the analysed solution first, or pass `--restore` (otherwise SharpView never restores or builds it).
+SharpDrill is a .NET tool: it analyses a whole solution at once, from each controller action through every project it calls into. It needs a .NET 10 (or newer) SDK; restore the analysed solution first, or pass `--restore` (otherwise SharpDrill never restores or builds it).
 
 ```sh
-dotnet tool install -g SharpView.Cli   # once per machine
-cd MyApi && sharpview projects         # the .sln/.slnx (or single .csproj) in the current directory; or pass a path
+dotnet tool install -g SharpDrill   # once per machine
+cd MyApi && sharpdrill projects         # the .sln/.slnx (or single .csproj) in the current directory; or pass a path
 ```
 
-Update with `dotnet tool update -g SharpView.Cli`. Upgrading from the old `SharpView` tool package: `dotnet tool uninstall -g SharpView` first. The command is still `sharpview`; the `SharpView` ID is now the optional [build package](#optional-warnings-in-every-build).
+Update with `dotnet tool update -g SharpDrill`.
 
-The examples further down run from source with `dotnet run --project src/SharpView.Cli --`; with the tool installed, use `sharpview` instead.
+The examples further down run from source with `dotnet run --project src/SharpDrill.Cli --`; with the tool installed, use `sharpdrill` instead.
 
 ### In a repository and CI
 
@@ -29,67 +29,67 @@ For a team, install it as a local tool: the version is pinned in the repository 
 
 ```sh
 dotnet new tool-manifest                 # once: creates dotnet-tools.json; commit it
-dotnet tool install SharpView.Cli
+dotnet tool install SharpDrill
 dotnet tool restore                      # on another machine or in CI
-dotnet sharpview exceptions --uncaught
+dotnet sharpdrill exceptions --uncaught
 ```
 
 ### Exception findings as warnings
 
-`sharpview exceptions --format msbuild` prints the uncaught and miscaught findings as one warning per line, in the `file(line,col): warning CODE: message` format that build logs, VS Code and Visual Studio understand:
+`sharpdrill exceptions --format msbuild` prints the uncaught and miscaught findings as one warning per line, in the `file(line,col): warning CODE: message` format that build logs, VS Code and Visual Studio understand:
 
 ```text
-/src/Research.Application/Service.cs(8,45): warning SV0003: Research.Infrastructure.StorageException thrown in Repository.Read (Repository.cs:6) passes through this try, which catches only ArgumentException; then may escape OrdersController.Incompatible; path: OrdersController.Incompatible -> Service.Incompatible -> Repository.Read
+/src/Research.Application/Service.cs(8,45): warning SD0003: Research.Infrastructure.StorageException thrown in Repository.Read (Repository.cs:6) passes through this try, which catches only ArgumentException; then may escape OrdersController.Incompatible; path: OrdersController.Incompatible -> Service.Incompatible -> Repository.Read
 ```
 
 | Code | Finding |
 | --- | --- |
-| `SV0001` | An exception may escape a controller action: no catch on the way. |
-| `SV0002` | The same, but a global exception handler (exception middleware or filter) receives it. |
-| `SV0003` | A throw passes through a `try` whose catch clauses do not match its type. |
-| `SV0004` | A third-party call with no catch on the way (only with `--strict`). |
-| `SV0005` | An exception leaves an `async void` method reached from an action: no caller can catch it, so the process ends. |
+| `SD0001` | An exception may escape a controller action: no catch on the way. |
+| `SD0002` | The same, but a global exception handler (exception middleware or filter) receives it. |
+| `SD0003` | A throw passes through a `try` whose catch clauses do not match its type. |
+| `SD0004` | A third-party call with no catch on the way (only with `--strict`). |
+| `SD0005` | An exception leaves an `async void` method reached from an action: no caller can catch it, so the process ends. |
 
 To accept one finding, suppress it where the warning points (the throw, the `try` or the call), as for a compiler warning. The count of suppressed findings goes to stderr.
 
 ```csharp
-#pragma warning disable SV0003 // ArgumentException is the only one we can recover from here
+#pragma warning disable SD0003 // ArgumentException is the only one we can recover from here
 try { Load(); } catch (ArgumentException) { }
-#pragma warning restore SV0003
+#pragma warning restore SD0003
 
-[SuppressMessage("SharpView", "SV0002:Mapped to 404 by middleware")]
+[SuppressMessage("SharpDrill", "SD0002:Mapped to 404 by middleware")]
 public Order Find(int id) => orders.Get(id) ?? throw new NotFoundException(id);
 ```
 
-**GitLab CI.** A job that keeps the warnings as an artifact and fails when an exception may escape an action with nothing to catch it (SV0001). Drop the last line to only report:
+**GitLab CI.** A job that keeps the warnings as an artifact and fails when an exception may escape an action with nothing to catch it (SD0001). Drop the last line to only report:
 
 ```yaml
-sharpview:
+sharpdrill:
   stage: test
   image: mcr.microsoft.com/dotnet/sdk:10.0
   script:
     - dotnet restore MyApi.slnx
     - dotnet tool restore
     # Exit 1 only means some calls could not be followed; 2 means the analysis could not run.
-    - code=0; dotnet sharpview exceptions MyApi.slnx --format msbuild > sharpview.txt || code=$?
-    - cat sharpview.txt
+    - code=0; dotnet sharpdrill exceptions MyApi.slnx --format msbuild > sharpdrill.txt || code=$?
+    - cat sharpdrill.txt
     - test "$code" -le 1
-    - if grep -q "warning SV0001" sharpview.txt; then echo "Uncaught exceptions found (SV0001)"; exit 1; fi
+    - if grep -q "warning SD0001" sharpdrill.txt; then echo "Uncaught exceptions found (SD0001)"; exit 1; fi
   artifacts:
     when: always
-    paths: [sharpview.txt]
+    paths: [sharpdrill.txt]
 ```
 
-**VS Code.** A task that fills the Problems panel (Terminal → Run Task → sharpview), in `.vscode/tasks.json`:
+**VS Code.** A task that fills the Problems panel (Terminal → Run Task → sharpdrill), in `.vscode/tasks.json`:
 
 ```json
 {
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "sharpview",
+      "label": "sharpdrill",
       "type": "shell",
-      "command": "dotnet sharpview exceptions --format msbuild",
+      "command": "dotnet sharpdrill exceptions --format msbuild",
       "problemMatcher": "$msCompile"
     }
   ]
@@ -98,26 +98,26 @@ sharpview:
 
 ### For coding agents
 
-`sharpview skill` writes an agent skill to `sharpview/SKILL.md` under `.github/skills` (GitHub Copilot: VS Code, Visual Studio, Copilot CLI, cloud agent) and `.claude/skills` (Claude Code, CLI and VS Code) at the repository root; each agent reads its own folder. Commit both so the whole team gets it. `sharpview skill --user` installs it for every repository instead (`~/.copilot/skills` and `~/.claude/skills`). The skill ships inside the tool and carries its version: rerun the command after `dotnet tool update` to refresh it. It never overwrites a `SKILL.md` it did not write. `dotnet tool install` cannot run code, so nothing is installed automatically: in a terminal, other commands end with a one-line tip when no agent can find the skill or the one installed is from another version (never for agents, CI or `--format msbuild`).
+`sharpdrill skill` writes an agent skill to `sharpdrill/SKILL.md` under `.github/skills` (GitHub Copilot: VS Code, Visual Studio, Copilot CLI, cloud agent) and `.claude/skills` (Claude Code, CLI and VS Code) at the repository root; each agent reads its own folder. Commit both so the whole team gets it. `sharpdrill skill --user` installs it for every repository instead (`~/.copilot/skills` and `~/.claude/skills`). The skill ships inside the tool and carries its version: rerun the command after `dotnet tool update` to refresh it. It never overwrites a `SKILL.md` it did not write. `dotnet tool install` cannot run code, so nothing is installed automatically: in a terminal, other commands end with a one-line tip when no agent can find the skill or the one installed is from another version (never for agents, CI or `--format msbuild`).
 
 ### Optional: warnings in every build
 
-For Visual Studio's Error List after an ordinary build, with nobody running the tool, reference the `SharpView` package from the Web API project (the one with the controllers). It is a development dependency, so it does not flow to projects that reference this one:
+For Visual Studio's Error List after an ordinary build, with nobody running the tool, reference the `SharpDrill.MSBuild` package from the Web API project (the one with the controllers). It is a development dependency, so it does not flow to projects that reference this one:
 
 ```sh
-dotnet add MyApi/MyApi.csproj package SharpView
+dotnet add MyApi/MyApi.csproj package SharpDrill.MSBuild
 ```
 
-Every build of that project (`dotnet build`, Visual Studio, VS Code, CI) then runs `exceptions --format msbuild` on the project and the projects it references, and the findings become build warnings, with `SV0000` when the analysis itself fails. A package attaches to one project because .NET builds solutions project by project; set `SharpViewInput` to the `.sln`/`.slnx` to analyse the whole solution, for example when it has several API hosts. It adds a few seconds to every build (it does not run in the IDE's background design-time builds), which is why the tool is the default route. `NoWarn` and `WarningsAsErrors` apply to SV codes as to compiler warnings, and `SharpViewEnabled=false` skips the analysis. Settings: [src/SharpView.Build/PACKAGE.md](src/SharpView.Build/PACKAGE.md).
+Every build of that project (`dotnet build`, Visual Studio, VS Code, CI) then runs `exceptions --format msbuild` on the project and the projects it references, and the findings become build warnings, with `SD0000` when the analysis itself fails. A package attaches to one project because .NET builds solutions project by project; set `SharpDrillInput` to the `.sln`/`.slnx` to analyse the whole solution, for example when it has several API hosts. It adds a few seconds to every build (it does not run in the IDE's background design-time builds), which is why the tool is the default route. `NoWarn` and `WarningsAsErrors` apply to SD codes as to compiler warnings, and `SharpDrillEnabled=false` skips the analysis. Settings: [src/SharpDrill.Build/PACKAGE.md](src/SharpDrill.Build/PACKAGE.md).
 
 ## Quick start (from source)
 
 Requires a .NET 10 SDK compatible with `global.json`.
 
 ```sh
-dotnet restore sharpview.slnx
+dotnet restore SharpDrill.slnx
 dotnet build tests/Fixtures/ResearchSolution/ResearchSolution.slnx   # sample Web API used below
-dotnet test sharpview.slnx
+dotnet test SharpDrill.slnx
 ```
 
 Try it on the sample (`F` is the input):
@@ -125,13 +125,13 @@ Try it on the sample (`F` is the input):
 ```sh
 F=tests/Fixtures/ResearchSolution/ResearchSolution.slnx
 
-dotnet run --project src/SharpView.Cli -- projects $F
-dotnet run --project src/SharpView.Cli -- exceptions $F
-dotnet run --project src/SharpView.Cli -- exceptions $F --miscaught
-dotnet run --project src/SharpView.Cli -- diagram $F
+dotnet run --project src/SharpDrill.Cli -- projects $F
+dotnet run --project src/SharpDrill.Cli -- exceptions $F
+dotnet run --project src/SharpDrill.Cli -- exceptions $F --miscaught
+dotnet run --project src/SharpDrill.Cli -- diagram $F
 ```
 
-Analysing your own solution: restore it first or pass `--restore` (otherwise SharpView never restores, builds or edits analysed code). Loading evaluates MSBuild projects and may run project tooling and source generators, so it is not a sandbox.
+Analysing your own solution: restore it first or pass `--restore` (otherwise SharpDrill never restores, builds or edits analysed code). Loading evaluates MSBuild projects and may run project tooling and source generators, so it is not a sandbox.
 
 ## Commands
 
@@ -162,10 +162,10 @@ For practical use cases of each command, such as CI gating or reviewing an endpo
 
 ```sh
 # Lists numbered controller actions; enter a number, or q to cancel.
-dotnet run --project src/SharpView.Cli -- diagram tests/Fixtures/ResearchSolution/ResearchSolution.slnx
+dotnet run --project src/SharpDrill.Cli -- diagram tests/Fixtures/ResearchSolution/ResearchSolution.slnx
 
 # Select directly for scripts. --root takes the exact signature (as printed by exceptions) or a method ID.
-dotnet run --project src/SharpView.Cli -- diagram tests/Fixtures/ResearchSolution/ResearchSolution.slnx \
+dotnet run --project src/SharpDrill.Cli -- diagram tests/Fixtures/ResearchSolution/ResearchSolution.slnx \
   --root 'Research.Api.OrdersController.Get()' --output /tmp/orders-get.md
 ```
 
@@ -227,28 +227,28 @@ A saved file can return exit code 1 because it contains useful but partial resul
 
 Every push to `main` that changes code runs [release.yml](.github/workflows/release.yml): restore, build the fixture, test, then publish all six packages (see [Packages](#packages)) with the same version to nuget.org, tag `v<version>` and create a GitHub release with the packages attached. Pull requests and other branches run [ci.yml](.github/workflows/ci.yml) (test and pack only). Changes limited to `docs/` or `README.md` do not publish; they ship with the next code change.
 
-The version is computed by [github-tag-action](https://github.com/mathieudutour/github-tag-action) (pinned to a commit) from [Conventional Commit](https://www.conventionalcommits.org/) subjects since the last `v*` tag. The tag is created only after nuget.org accepts the package:
+The workflow's `Next version` step computes the version from [Conventional Commit](https://www.conventionalcommits.org/) messages since the last `v*` tag. The tag is created only after nuget.org accepts the packages:
 
-| Commit message | Bump | Example |
-| --- | --- | --- |
-| anything (`fix:`, `chore:`, `docs:`, untyped) | patch | `fix: handle unloaded project references` → 0.1.0 → 0.1.1 |
-| `feat:` or `feat(scope):` | minor | `feat(exceptions): add --miscaught` → 0.1.1 → 0.2.0 |
-| `!` after the type, or a `BREAKING CHANGE:` footer | major | `feat!: remove layers command` → 0.2.0 → 1.0.0 |
+| Commit message | Bump on 0.x | Bump from 1.0.0 | Example on 0.x |
+| --- | --- | --- | --- |
+| anything (`fix:`, `chore:`, `docs:`, untyped) | patch | patch | `fix: handle unloaded project references` → 0.1.0 → 0.1.1 |
+| `feat:` or `feat(scope):` | minor | minor | `feat(exceptions): add --miscaught` → 0.1.1 → 0.2.0 |
+| `!` after the type, or a `BREAKING CHANGE:` footer | minor | major | `feat!: remove layers command` → 0.2.0 → 0.3.0 |
 
-The highest bump among the new commits wins. Before the first tag the baseline is 0.0.0, so a `feat:` commit makes the first release 0.1.0. The subject must start with the type: `feat: ...` counts, while "feat" only in the description does not. Add `[skip-release]` to a commit message to leave it out of the version calculation. Local builds report `0.0.0-dev`.
+The highest bump among the new commits wins. Without any `v*` tag the first release is 0.1.0. A bump never leaves 0.x: to publish 1.0.0 (or any exact version), run the workflow manually (Actions → Release → Run workflow) with that version. The subject must start with the type: `feat: ...` counts, while "feat" only in the description does not. Add `[skip-release]` to a commit message to leave it out of the version calculation. Local builds report `0.0.0-dev`.
 
-Publishing uses nuget.org [trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing), so no API key is stored: the workflow exchanges its GitHub OIDC token for a short-lived key. One-time setup on nuget.org (Trusted Publishing page): a policy for repository owner `stadtaev`, repository `sharpview`, workflow file `release.yml`, glob pattern `SharpView*` (covers all six package IDs). The workflow's `NuGet login` step names the nuget.org account (`user: stadtaev`). Optionally reserve the `SharpView.` ID prefix so nobody else can publish packages under it.
+Publishing uses nuget.org [trusted publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing), so no API key is stored: the workflow exchanges its GitHub OIDC token for a short-lived key. One-time setup on nuget.org (Trusted Publishing page): a policy for repository owner `stadtaev`, repository `SharpDrill`, workflow file `release.yml`, glob pattern `SharpDrill*` (covers all six package IDs). The workflow's `NuGet login` step names the nuget.org account (`user: stadtaev`). Optionally reserve the `SharpDrill` ID prefix so nobody else can publish packages under it.
 
 ## Packages
 
 | Package | Purpose |
 | --- | --- |
-| `SharpView.Cli` | The `sharpview` .NET tool (`dotnet tool install -g SharpView.Cli`). |
-| `SharpView` | Optional MSBuild package: exception findings as warnings in every build (see [Optional: warnings in every build](#optional-warnings-in-every-build)). Carries its own copy of the CLI. |
-| `SharpView.Core` | Fact model, `ProgramIndex` and the queries: exceptions, call diagrams, project map, layer rules. No Roslyn dependency. |
-| `SharpView.Roslyn` | Loads solutions and projects with MSBuild and Roslyn into a fact snapshot. |
-| `SharpView.Graph` | Generic immutable directed multigraph with quotient and SCC algorithms. |
-| `SharpView.Export.Mermaid` | Mermaid/Markdown formatting for project maps and call diagrams. |
+| `SharpDrill` | The `sharpdrill` .NET tool (`dotnet tool install -g SharpDrill`). |
+| `SharpDrill.MSBuild` | Optional MSBuild package: exception findings as warnings in every build (see [Optional: warnings in every build](#optional-warnings-in-every-build)). Carries its own copy of the CLI. |
+| `SharpDrill.Core` | Fact model, `ProgramIndex` and the queries: exceptions, call diagrams, project map, layer rules. No Roslyn dependency. |
+| `SharpDrill.Roslyn` | Loads solutions and projects with MSBuild and Roslyn into a fact snapshot. |
+| `SharpDrill.Graph` | Generic immutable directed multigraph with quotient and SCC algorithms. |
+| `SharpDrill.Export.Mermaid` | Mermaid/Markdown formatting for project maps and call diagrams. |
 
 Every package gets the same version. The libraries are pre-1.0 and their API may still change between minor versions.
 
@@ -256,9 +256,9 @@ Every package gets the same version. The libraries are pre-1.0 and their API may
 
 ```csharp
 using System.Collections.Immutable;
-using SharpView.Core;
-using SharpView.Export.Mermaid;
-using SharpView.Roslyn;
+using SharpDrill.Core;
+using SharpDrill.Export.Mermaid;
+using SharpDrill.Roslyn;
 
 MSBuildBootstrap.RegisterSdk(); // call at process startup; LoadAsync also registers if needed
 var snapshot = await RoslynProgramLoader.LoadAsync(new AnalysisRequest("Example.slnx"), cancellationToken);
@@ -284,8 +284,8 @@ var graph = LayerGraph.Build(index, new LayerMap(index, model), cancellationToke
 var findings = LayerRules.AllowedDependencies(graph, model); // Finding(RuleId, Verdict, Subject, Message, Evidence)
 ```
 
-- Mermaid/Markdown exports live in `SharpView.Export.Mermaid`; reference it and import `SharpView.Export.Mermaid` when calling `MermaidExporter`. Core retains the diagram model/query and depends only on `SharpView.Graph`.
-- `index.GetCallGraph(cancellationToken)` and `index.GetDependencyGraph(cancellationToken)` lazily publish complete cached graphs; the tokenless properties remain available. They expose the whole program as graphs (`SharpView.Graph`: out/in edges, subgraphs, quotient by group, strongly connected components).
+- Mermaid/Markdown exports live in `SharpDrill.Export.Mermaid`; reference it and import `SharpDrill.Export.Mermaid` when calling `MermaidExporter`. Core retains the diagram model/query and depends only on `SharpDrill.Graph`.
+- `index.GetCallGraph(cancellationToken)` and `index.GetDependencyGraph(cancellationToken)` lazily publish complete cached graphs; the tokenless properties remain available. They expose the whole program as graphs (`SharpDrill.Graph`: out/in edges, subgraphs, quotient by group, strongly connected components).
 - `CallEdge.Id` identifies a specific site/kind/target relationship. Quotients retain every group, original node membership and supporting edge, including isolated groups. Quotients are presentation/aggregation models; collapsing groups can invent apparent paths, so method exception analysis uses the original graph.
 - `Where` and `Subgraph` materialize new graphs; they share payload objects. Generic graph consumers must keep node equality/hash codes and edge endpoints stable.
 - Snapshots contain no Roslyn symbols and stay usable after the workspace is disposed.
@@ -297,7 +297,7 @@ var findings = LayerRules.AllowedDependencies(graph, model); // Finding(RuleId, 
 
 | Document | Read it for |
 | --- | --- |
-| [How SharpView works](docs/overview.md) | The approach: pipeline, principles, commands, custom rules, glossary. |
+| [How SharpDrill works](docs/overview.md) | The approach: pipeline, principles, commands, custom rules, glossary. |
 | [Coverage and limits](docs/coverage.md) | What is and is not modelled. |
 | [Model reference](docs/model.md) | Facts, identities, keys and query semantics in detail. |
 | [Validation](docs/validation.md) | Which tests prove which behaviour; regression comparison. |

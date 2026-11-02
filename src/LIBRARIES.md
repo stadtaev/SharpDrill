@@ -1,13 +1,13 @@
-# SharpView libraries
+# SharpDrill libraries
 
-Building blocks of [SharpView](https://github.com/stadtaev/sharpview), source-backed analysis of ASP.NET Core Web APIs. Install the `SharpView.Cli` .NET tool (`dotnet tool install -g SharpView.Cli`) to use it from the command line, or reference the `SharpView` package to get its exception findings as build warnings; reference these packages to build your own analyses and rules.
+Building blocks of [SharpDrill](https://github.com/stadtaev/SharpDrill), source-backed analysis of ASP.NET Core Web APIs. Install the `SharpDrill` .NET tool (`dotnet tool install -g SharpDrill`) to use it from the command line, or reference the `SharpDrill.MSBuild` package to get its exception findings as build warnings; reference these packages to build your own analyses and rules.
 
 | Package | Contents |
 | --- | --- |
-| `SharpView.Graph` | A small generic, immutable directed multigraph with subgraphs, quotients and strongly connected components. Knows nothing about C#. |
-| `SharpView.Core` | The fact model (types, callables, call sites, throws, catches), `ProgramIndex`, and the queries over it: exception propagation and handling, call diagrams, the MSBuild project map, and layer rules. No Roslyn dependency. |
-| `SharpView.Roslyn` | Loads a `.csproj`, `.sln` or `.slnx` with MSBuild and Roslyn and extracts the fact snapshot. Never restores, builds or edits the analysed code. |
-| `SharpView.Export.Mermaid` | Formats project maps and call diagrams as Mermaid flowcharts in Markdown. |
+| `SharpDrill.Graph` | A small generic, immutable directed multigraph with subgraphs, quotients and strongly connected components. Knows nothing about C#. |
+| `SharpDrill.Core` | The fact model (types, callables, call sites, throws, catches), `ProgramIndex`, and the queries over it: exception propagation and handling, call diagrams, the MSBuild project map, and layer rules. No Roslyn dependency. |
+| `SharpDrill.Roslyn` | Loads a `.csproj`, `.sln` or `.slnx` with MSBuild and Roslyn and extracts the fact snapshot. Never restores, builds or edits the analysed code. |
+| `SharpDrill.Export.Mermaid` | Formats project maps and call diagrams as Mermaid flowcharts in Markdown. |
 
 ```csharp
 MSBuildBootstrap.RegisterSdk();

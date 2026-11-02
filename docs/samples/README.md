@@ -5,7 +5,7 @@ These reports were produced from the repository-owned three-project Web API fixt
 Reproduce with the built CLI (`F=tests/Fixtures/ResearchSolution/ResearchSolution.slnx`, `R='Research.Api.OrdersController.Get()'`):
 
 ```sh
-CLI="dotnet src/SharpView.Cli/bin/Debug/net10.0/SharpView.Cli.dll"
+CLI="dotnet src/SharpDrill.Cli/bin/Debug/net10.0/SharpDrill.Cli.dll"
 $CLI projects $F                                   # projects.txt
 $CLI projects $F --mermaid --output projects.md    # projects.md
 $CLI exceptions $F                                 # exceptions.txt
@@ -25,6 +25,6 @@ Their `.stderr.txt` companions contain the one-line summary and, when the analys
 
 The fixture exercises caught, unrelated and incompatible catches, rethrow/replacement, filters, recursion, interface dispatch, awaited/caught operations, unobserved tasks, async void methods and ASP.NET exception middleware registration (its findings carry a `Handled:` line). Additional edge cases are tested through independent Core snapshots and in-memory semantic extraction.
 
-The host's own `sharpview.slnx` was also loaded as a smoke check. An external Web API experiment remains pending; these samples establish fixture behavior only.
+The host's own `SharpDrill.slnx` was also loaded as a smoke check. An external Web API experiment remains pending; these samples establish fixture behavior only.
 
 The diagram file includes project groups, per-edge source evidence, missing-body boundaries and extraction gaps.

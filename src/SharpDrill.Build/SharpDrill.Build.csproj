@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- MSBuild package: <PackageReference Include="SharpDrill.MSBuild" /> runs the exceptions analysis after each build and reports
+       its findings as build warnings. It carries no library: only build/SharpDrill.MSBuild.targets and a copy of the CLI. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PackageId>SharpDrill.MSBuild</PackageId>
+    <!-- Makes NuGet add the reference with PrivateAssets="all", so the package never flows to dependent projects. -->
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <HasOwnReadme>true</HasOwnReadme>
+    <!-- NU5100: the CLI's assemblies live under tools/, not lib/, on purpose. -->
+    <NoWarn>$(NoWarn);NU5100</NoWarn>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackCli</TargetsForTfmSpecificContentInPackage>
+    <Description>Reports SharpDrill's exception findings as build warnings in dotnet build, Visual Studio and VS Code: exceptions that may escape a controller action (SD0001, SD0002 when a global exception handler catches them) and throws that pass through a try whose catches do not match (SD0003). Add it to the Web API project; the analysis runs after each build.</Description>
+    <PackageTags>roslyn;static-analysis;aspnetcore;exceptions;msbuild;build-warnings</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="PACKAGE.md" Pack="true" PackagePath="README.md" />
+    <None Include="build/SharpDrill.MSBuild.targets" Pack="true" PackagePath="build/" />
+    <!-- Only for build order; the CLI ships as files under tools/. -->
+    <ProjectReference Include="../SharpDrill.Cli/SharpDrill.Cli.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- The CLI's publish output, the same files the tool package ships. RemoveProperties keeps the call on the instance the
+       solution build already built instead of a second one with TargetFramework set. -->
+  <Target Name="PackCli">
+    <MSBuild Projects="../SharpDrill.Cli/SharpDrill.Cli.csproj" Targets="Publish" RemoveProperties="TargetFramework" />
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="../SharpDrill.Cli/bin/$(Configuration)/net10.0/publish/**" Exclude="../SharpDrill.Cli/bin/$(Configuration)/net10.0/publish/**/*.pdb" PackagePath="tools/net10.0/%(RecursiveDir)" />
+    </ItemGroup>
+  </Target>
+
+</Project>

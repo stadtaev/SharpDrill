@@ -1,0 +1,64 @@
+PS C:\Users\StanislavTadtaev\dev\source\repos\api-osa> sharpdrill exceptions
+System.InvalidOperationException  CacheServiceExtensions.GetCacheKeyScope  src\dunnhumby.Osa.Api\CacheServiceExtensions.cs:51
+System.InvalidOperationException  ClientSettingsServiceExtensions.DeserializeStoreHierarchy  src\dunnhumby.Osa.Api\ServiceRegistration\ApiServiceRegistrationExtensions.cs:61
+System.InvalidOperationException  ClientSettingsServiceExtensions.DeserializeValidCategories  src\dunnhumby.Osa.Api\ServiceRegistration\ApiServiceRegistrationExtensions.cs:68
+System.ArgumentException  CacheHelper.GenerateCacheKey  src\dunnhumby.Osa.Api.Core\Cache\CacheHelper.cs:13
+System.ArgumentException  CacheKeyScope.ctor  src\dunnhumby.Osa.Api.Core\Cache\CacheKeyScope.cs:9
+System.ArgumentException  AvailabilityHelpers.GetComparedToFisWeekFromDateRangePeriod  src\dunnhumby.Osa.Domain\Helpers\AvailabilityHelpers.cs:106
+System.ArgumentException  HierarchyNodeDataExtensions.OrderByLostSpendDescending<T>  src\dunnhumby.Osa.Domain\Helpers\HierarchyNodeDataExtensions.cs:22
+System.ArgumentException  LocationHierarchyHelper.CombineSelectedLocations  src\dunnhumby.Osa.Domain\Helpers\LocationHierarchyHelper.cs:96
+System.InvalidOperationException  LocationHierarchyHelper.CombineSelectedLocations  src\dunnhumby.Osa.Domain\Helpers\LocationHierarchyHelper.cs:112
+System.ArgumentException  WeekCalculationHelpers.ThrowUnknownWeekOption  src\dunnhumby.Osa.Domain\Helpers\WeekCalculationHelpers.cs:40
+System.ArgumentException  WeekCalculationHelpers.CalculateWeekOption  src\dunnhumby.Osa.Domain\Helpers\WeekCalculationHelpers.cs:145
+System.Text.Json.JsonException  CachedResultDto<T>.ToResult  src\dunnhumby.Osa.Domain\Models\Cache\CachedResultDto.cs:45
+System.Text.Json.JsonException  CachedResultDto<T>.ToSuccessResult  src\dunnhumby.Osa.Domain\Models\Cache\CachedResultDto.cs:53
+System.Text.Json.JsonException  CachedResultDto<T>.ToSuccessResult  src\dunnhumby.Osa.Domain\Models\Cache\CachedResultDto.cs:58
+System.Text.Json.JsonException  CachedResultDto<T>.ToSuccessWithNoContentResult  src\dunnhumby.Osa.Domain\Models\Cache\CachedResultDto.cs:68
+System.Text.Json.JsonException  CachedResultDto<T>.ToSuccessWithNoContentResult  src\dunnhumby.Osa.Domain\Models\Cache\CachedResultDto.cs:73
+System.Text.Json.JsonException  CachedResultDto<T>.ToSuccessWithNoContentResult  src\dunnhumby.Osa.Domain\Models\Cache\CachedResultDto.cs:78
+System.Text.Json.JsonException  CachedResultDto<T>.ToFailureResult  src\dunnhumby.Osa.Domain\Models\Cache\CachedResultDto.cs:88
+System.Text.Json.JsonException  CachedResultDto<T>.ToFailureResult  src\dunnhumby.Osa.Domain\Models\Cache\CachedResultDto.cs:93
+System.Text.Json.JsonException  CachedResultDto<T>.ToFailureResult  src\dunnhumby.Osa.Domain\Models\Cache\CachedResultDto.cs:98
+System.ArgumentException  StoreInfoService.GetStoreHierarchyInfo  src\dunnhumby.Osa.Domain\Services\AppServices\StoreInfoService.cs:41
+System.ArgumentException  StoreInfoService.GetStoreCodesByLocationFilterAsync  src\dunnhumby.Osa.Domain\Services\AppServices\StoreInfoService.cs:126
+System.InvalidOperationException  ServiceCollectionExtensions.AddContextApi  src\dunnhumby.Osa.Infrastructure.ContextApi\ServiceCollectionExtensions.cs:17
+System.Net.Http.HttpRequestException  GroupsApiClient.GetGroupInfoForGroupId  src\dunnhumby.Osa.Infrastructure.GroupsApi\GroupsApiClient.cs:26
+System.InvalidOperationException  GroupsApiClient.GetGroupInfoForGroupId  src\dunnhumby.Osa.Infrastructure.GroupsApi\GroupsApiClient.cs:37
+System.Net.Http.HttpRequestException  GroupsApiClient.GetProductsForGroupId  src\dunnhumby.Osa.Infrastructure.GroupsApi\GroupsApiClient.cs:62
+System.InvalidOperationException  GroupsApiClient.GetProductsForGroupId  src\dunnhumby.Osa.Infrastructure.GroupsApi\GroupsApiClient.cs:73
+System.InvalidOperationException  ServiceExtension.AddGroupsApi  src\dunnhumby.Osa.Infrastructure.GroupsApi\ServiceExtension.cs:19
+System.ArgumentException  HeartbeatApiClient.FetchHeartbeatAsync  src\dunnhumby.Osa.Infrastructure.HeartbeatApi\HeartbeatApiClient.cs:30
+System.IO.InvalidDataException  HeartbeatServiceClientHelpers.ParseHeartbeatStatementAsync  src\dunnhumby.Osa.Infrastructure.HeartbeatApi\HeartbeatServiceClientHelpers.cs:23
+System.InvalidOperationException  ServiceExtension.AddHeartbeatApi  src\dunnhumby.Osa.Infrastructure.HeartbeatApi\ServiceExtension.cs:20
+System.InvalidOperationException  ServiceCollectionExtensions.AddPostgresBenchmarkDbStorage  src\dunnhumby.Osa.Infrastructure.PostgresDb\ServiceCollectionExtensions.cs:21
+System.ArgumentNullException  DBClient.ctor  src\dunnhumby.Osa.Infrastructure.TrinoDb\ADO.NET\DBClient.cs:10
+System.Exception  TrinoConnectionFactory.BuildTrinoConnection  src\dunnhumby.Osa.Infrastructure.TrinoDb\ADO.NET\TrinoConnectionFactory.cs:72
+System.NotImplementedException  FakeStoreDimRepository.GetStoreInfoBySelectedLocation  src\dunnhumby.Osa.Infrastructure.TrinoDb\InMemoryFakes\FakeStoreDimRepository.cs:128
+System.ArgumentNullException  TrinoOsa104WeeksDetailedRepository.ctor  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoOsa104WeeksDetailedRepository.cs:23
+System.ArgumentNullException  TrinoOsa104WeeksDetailedRepository.ctor  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoOsa104WeeksDetailedRepository.cs:24
+System.ArgumentNullException  TrinoOsa104WeeksDetailedRepository.ctor  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoOsa104WeeksDetailedRepository.cs:25
+System.ArgumentNullException  TrinoOsa104WeeksStoreRepository.ctor  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoOsa104WeeksStoreRepository.cs:24
+System.ArgumentNullException  TrinoOsa104WeeksStoreRepository.ctor  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoOsa104WeeksStoreRepository.cs:25
+System.ArgumentNullException  TrinoOsa104WeeksStoreRepository.ctor  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoOsa104WeeksStoreRepository.cs:26
+System.ArgumentNullException  TrinoOsa104WeeksSummaryRepository.ctor  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoOsa104WeeksSummaryRepository.cs:23
+System.ArgumentNullException  TrinoOsa104WeeksSummaryRepository.ctor  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoOsa104WeeksSummaryRepository.cs:24
+System.ArgumentNullException  TrinoOsa104WeeksSummaryRepository.ctor  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoOsa104WeeksSummaryRepository.cs:25
+System.ArgumentNullException  TrinoStoreDimRepository.ctor  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoStoreDimRepository.cs:24
+System.ArgumentNullException  TrinoStoreDimRepository.ctor  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoStoreDimRepository.cs:26
+System.ArgumentNullException  TrinoStoreDimRepository.ctor  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoStoreDimRepository.cs:28
+System.InvalidOperationException  TrinoStoreDimRepository.GetAllStoreInfo  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoStoreDimRepository.cs:46
+System.InvalidOperationException  TrinoStoreDimRepository.GetStoreInfoBySelectedLocation  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoStoreDimRepository.cs:72
+System.InvalidOperationException  TrinoStoreDimRepository.GetStoreCodesByLocationFilter  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoStoreDimRepository.cs:98
+System.ArgumentNullException  TrinoTestRepository.ctor  src\dunnhumby.Osa.Infrastructure.TrinoDb\Repository\TrinoTestRepository.cs:14
+System.NotSupportedException  SqlQueryBuilder.BuildStringInClause  src\dunnhumby.Osa.Infrastructure.TrinoDb\Sql\SqlQueryBuilder.cs:37
+System.NotSupportedException  SqlQueryBuilder.BuildParameterPlaceholder  src\dunnhumby.Osa.Infrastructure.TrinoDb\Sql\SqlQueryBuilder.cs:94
+53 throws in source.
+
+Sorry, we hit a bug on our side. SharpDrill could not handle 3 places in your code; results there are missing.
+We are enthusiasts and fix these quickly when we hear about them: please copy-paste the lines below into an issue at https://github.com/stadtaev/SharpDrill/issues
+  sharpdrill 0.4.0, .NET 10.0.13, Microsoft Windows 10.0.26200
+  Source body has no operation tree (PropertyDeclaration). (ClientSettingsConfiguration.cs:57:9)
+  Source body has no operation tree (PropertyDeclaration). (GetWeekDailyAvailabilityDataDto.cs:12:9)
+  Source body has no operation tree (PropertyDeclaration). (GetCategoryHierarchyAvailabilityDataForProductsDto.cs:9:5)
+Tip: run `sharpdrill skill` so GitHub Copilot and Claude Code can use SharpDrill in this repository.
+PS C:\Users\StanislavTadtaev\dev\source\repos\api-osa> 

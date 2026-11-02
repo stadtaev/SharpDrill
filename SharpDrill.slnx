@@ -1,0 +1,16 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/SharpDrill.Build/SharpDrill.Build.csproj" />
+    <Project Path="src/SharpDrill.Cli/SharpDrill.Cli.csproj" />
+    <Project Path="src/SharpDrill.Core/SharpDrill.Core.csproj" />
+    <Project Path="src/SharpDrill.Export.Mermaid/SharpDrill.Export.Mermaid.csproj" />
+    <Project Path="src/SharpDrill.Graph/SharpDrill.Graph.csproj" />
+    <Project Path="src/SharpDrill.Roslyn/SharpDrill.Roslyn.csproj" />
+  </Folder>
+  <Folder Name="/tests/"><Project Path="tests/SharpDrill.Tests/SharpDrill.Tests.csproj" /></Folder>
+</Solution>

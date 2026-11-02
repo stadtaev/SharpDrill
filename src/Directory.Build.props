@@ -8,8 +8,8 @@
     <Authors>Stanislav Tadtaev</Authors>
     <Copyright>Copyright (c) 2026 Stanislav Tadtaev</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/stadtaev/sharpview</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/stadtaev/sharpview</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/stadtaev/SharpDrill</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/stadtaev/SharpDrill</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>

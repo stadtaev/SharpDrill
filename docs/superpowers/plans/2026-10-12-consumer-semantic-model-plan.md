@@ -4,7 +4,7 @@
 
 ## Goal
 
-Move Sharpview from "two hard-wired reports" to a reusable semantic base that consumers (rules, layer overviews, evaluations) can build on cheaply:
+Move Sharpdrill from "two hard-wired reports" to a reusable semantic base that consumers (rules, layer overviews, evaluations) can build on cheaply:
 
 1. One shared `ProgramIndex` instead of per-consumer dictionaries and linear scans.
 2. Layers as a first-class model (`LayerModel` → `LayerMap` → aggregated `LayerGraph` with witnesses) plus an allowed-dependency evaluation.
@@ -18,10 +18,10 @@ Move Sharpview from "two hard-wired reports" to a reusable semantic base that co
 
 - **No regressions.** All existing tests keep passing. Existing tests may only be changed mechanically (constructor/property shape, renamed types); assertions must never be weakened or deleted. If an assertion must change, the report must justify it as a deliberate, listed behaviour change.
 - **Output comparison protocol (every task).** After implementation, from the repo root:
-  1. `dotnet build sharpview.slnx -v q` and `dotnet build tests/Fixtures/ResearchSolution/ResearchSolution.slnx -v q` — 0 errors, no new warnings.
-  2. `dotnet test sharpview.slnx` — all pass; report the count (baseline: 74).
+  1. `dotnet build SharpDrill.slnx -v q` and `dotnet build tests/Fixtures/ResearchSolution/ResearchSolution.slnx -v q` — 0 errors, no new warnings.
+  2. `dotnet test SharpDrill.slnx` — all pass; report the count (baseline: 74).
   3. `bash .superpowers/compare/capture.sh .superpowers/compare/task-<N>` then `diff -r .superpowers/compare/baseline .superpowers/compare/task-<N>`. Every difference must be one the task lists under "Expected output changes". Any other difference is a regression to fix. Paste the diff summary (or "identical") and the timing lines into the report. Self-analysis runs (`self-*`) must not become noticeably slower (> 15 %).
-- Sharpview's text formatting of existing commands (`methods`, `chains`, `controllers`, `exceptions`, `inspect` text) stays byte-identical unless a task explicitly lists a change.
+- Sharpdrill's text formatting of existing commands (`methods`, `chains`, `controllers`, `exceptions`, `inspect` text) stays byte-identical unless a task explicitly lists a change.
 - Architecture: Core stays Roslyn-free. Extraction (Roslyn) ↔ analysis (Core) ↔ formatting (CLI) stay separate. No database, DSL, plugin framework, rule scheduler or editor extension. Rules are plain C# functions returning `Finding`s.
 - Determinism (ordinal ordering everywhere), cancellation checks in loops, bounded traversal with explicit limit flags, honest uncertainty (never silently omit unsupported constructs; implementation candidates are never labelled as runtime targets).
 - Code style: match surrounding code — file-scoped namespaces, records, `ImmutableArray`, compact expression style, sparse comments that explain *why*.
@@ -32,7 +32,7 @@ Move Sharpview from "two hard-wired reports" to a reusable semantic base that co
 
 ### Task 1: Remove quadratic lookups in extraction
 
-**Files:** `src/Sharpview.Roslyn/Extraction/FactExtractor.cs`
+**Files:** `src/Sharpdrill.Roslyn/Extraction/FactExtractor.cs`
 
 `RegisterAsync` runs `bodies.Any(x => Key(x.Symbol) == Key(method))` + `RemoveAll` for every declaration node, and `RegisterMethod` runs `bodies.FirstOrDefault(x => Key(x.Symbol) == key)`. `Key()` builds a documentation-ID string each time, so extraction is quadratic in method count.
 
@@ -48,7 +48,7 @@ Move Sharpview from "two hard-wired reports" to a reusable semantic base that co
 
 ### Task 2: Evolvable snapshot, typed exception IDs, string JSON IDs
 
-**Files:** `src/Sharpview.Core/Model/Facts.cs`, `src/Sharpview.Core/Queries/ExceptionQuery.cs`, `src/Sharpview.Roslyn/Extraction/FactExtractor.cs`, `src/Sharpview.Cli/*`, tests.
+**Files:** `src/Sharpdrill.Core/Model/Facts.cs`, `src/Sharpdrill.Core/Queries/ExceptionQuery.cs`, `src/Sharpdrill.Roslyn/Extraction/FactExtractor.cs`, `src/Sharpdrill.Cli/*`, tests.
 
 1. `ProgramSnapshot` becomes a `sealed record` with `init` properties (same names, same declaration order), each defaulting to an empty `ImmutableArray`, so adding a fact family no longer breaks every constructor call. Update all construction sites (extractor, tests) to object-initialiser syntax.
 2. Add typed IDs `ThrowSiteId`, `CatchId`, `ExceptionRegionId` (`readonly record struct X(string Value)`, like `CallableId`). Use them for: `ThrowSiteFact.Id`, `ThrowSiteFact.CatchId`, `ThrowSiteFact.ProtectedRegions`, `CallSiteFact.ProtectedRegions`, `CatchFact.Id`, `CatchFact.SubsequentThrow`, `ExceptionRegionFact.Id`, `ExceptionRegionFact.Catches`, `ExceptionWitness.Origin`, `ExceptionWitness.SubsequentOrigin`, `ExceptionWitness.HandlerIds`. ID string values stay exactly as today.
@@ -103,7 +103,7 @@ Update all code that reads `Attributes` as strings (extractor's controller detec
 
 ### Task 5: ProgramIndex and query/report refactor
 
-**Files:** new `src/Sharpview.Core/Index/ProgramIndex.cs`; `CallChainQuery.cs`, `ExceptionQuery.cs`, `Layers.cs`, `src/Sharpview.Cli/TextReport.cs`, `Commands.cs`; tests.
+**Files:** new `src/Sharpdrill.Core/Index/ProgramIndex.cs`; `CallChainQuery.cs`, `ExceptionQuery.cs`, `Layers.cs`, `src/Sharpdrill.Cli/TextReport.cs`, `Commands.cs`; tests.
 
 `public sealed class ProgramIndex` built once from a `ProgramSnapshot` (O(n) construction, dictionary lookups after). Public surface (adapt names to code style, keep it small and documented):
 - `Snapshot`; `Callable(CallableId)` / `TryGetCallable`; `Type(TypeId)` / `TryGetType`; `Compilation(CompilationId)`; `ProjectName(CompilationId)` (project file name without extension; `"metadata"` when unknown — same as `TextReport.Project` today); `DeclaringType(CallableId)`.
@@ -134,7 +134,7 @@ Add `enum ExceptionReason` with one member per distinct reason the query emits t
 
 ### Task 7: Layer architecture model, layer graph, allowed-dependency rule, `layers` command
 
-**Files:** new `src/Sharpview.Core/Architecture/` (`LayerModel.cs`, `LayerMap.cs`, `LayerGraph.cs`), new `src/Sharpview.Core/Rules/` (`Finding.cs`, `LayerRules.cs`); remove `src/Sharpview.Core/Queries/Layers.cs`; CLI `Arguments.cs`, `Commands.cs`, `TextReport.cs`; tests.
+**Files:** new `src/Sharpdrill.Core/Architecture/` (`LayerModel.cs`, `LayerMap.cs`, `LayerGraph.cs`), new `src/Sharpdrill.Core/Rules/` (`Finding.cs`, `LayerRules.cs`); remove `src/Sharpdrill.Core/Queries/Layers.cs`; CLI `Arguments.cs`, `Commands.cs`, `TextReport.cs`; tests.
 
 Core:
 - `enum LayerScope { Project, Namespace }`; `LayerMapping(LayerScope Scope, string Prefix, string Layer)`; `AllowedDependency(string From, string To)`; `LayerModel(ImmutableArray<LayerMapping> Mappings, ImmutableArray<AllowedDependency> Allowed)`.
@@ -169,7 +169,7 @@ CLI:
 
 ### Task 8: Reachability with shortest witnesses, `reach` command
 
-**Files:** new `src/Sharpview.Core/Queries/ReachabilityQuery.cs`; CLI `Arguments.cs`, `Commands.cs`, `TextReport.cs`; tests.
+**Files:** new `src/Sharpdrill.Core/Queries/ReachabilityQuery.cs`; CLI `Arguments.cs`, `Commands.cs`, `TextReport.cs`; tests.
 
 Core:
 - `ReachOptions(bool FollowCandidates = false, int MaxDepth = 20, int MaxExpansions = 100000)` with `Validate()`.
@@ -197,7 +197,7 @@ Core:
 
 ### Task 9: Controller-action classification in Core
 
-**Files:** new `src/Sharpview.Core/Conventions/AspNetConventions.cs`; `Facts.cs`, `FactExtractor.cs`, `Commands.cs`, tests, README library snippet.
+**Files:** new `src/Sharpdrill.Core/Conventions/AspNetConventions.cs`; `Facts.cs`, `FactExtractor.cs`, `Commands.cs`, tests, README library snippet.
 
 - `AspNetConventions.ControllerActions(ProgramIndex)` → `ImmutableArray<ControllerActionFact>` computed purely from facts, replicating `FactExtractor.IsControllerAction` exactly: source callable of kind `Method` without `Operator | ExplicitImplementation | Finalizer | Static | Generic` modifiers and with `Accessibility == "Public"`; no `Microsoft.AspNetCore.Mvc.NonActionAttribute` on it or any member of its `Overrides` chain; declaring type not abstract, not generic; no `NonControllerAttribute` on the type or its `BaseClass` chain; type or a `BaseClass`-chain ancestor is `Microsoft.AspNetCore.Mvc.ControllerBase` or carries `Microsoft.AspNetCore.Mvc.ControllerAttribute`. Same `Convention` text, same ordering as today's snapshot array.
 - First add a test that, on the fixture and on every in-memory extraction case that exercises controller detection, the Core classification equals the extraction-time `ControllerActions` array. Only once that passes: delete extraction-time detection and `ProgramSnapshot.ControllerActions`; CLI and tests use `AspNetConventions.ControllerActions`. `ControllerActionFact` remains as the result type. `BoundaryHandlingFact` stays in the snapshot (it is invocation evidence that needs Roslyn).
@@ -224,7 +224,7 @@ Core:
 
 ### Task 11: Fix lambda / local-function callable ID collisions (executed after Task 3)
 
-**Files:** `src/Sharpview.Roslyn/Extraction/FactExtractor.cs`, tests.
+**Files:** `src/Sharpdrill.Roslyn/Extraction/FactExtractor.cs`, tests.
 
 Pre-existing bug found during Task 3 review: `Key(IMethodSymbol)` uses `GetDocumentationCommentId()`, which Roslyn also returns for lambdas (`M:Ns.Type.` — empty member name) and local functions (`M:Ns.Type.Helper`). Two same-signature lambdas anywhere in one type, or two same-named/same-signature local functions in one type, therefore share one `CallableId`; `RegisterAsync` keeps only the last body, so the other body's calls/throws are **silently dropped** and call sites bind to the wrong fact.
 

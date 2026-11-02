@@ -26,7 +26,7 @@ document changes and limitations, and commit with a reference to that change doc
 
 ## Tasks and ownership
 
-1. Graph/Search: `src/Sharpview.Graph`, `Core/Graphs`, `ProgramIndex`, `ReachabilityQuery`, graph/reach/architecture tests.
+1. Graph/Search: `src/Sharpdrill.Graph`, `Core/Graphs`, `ProgramIndex`, `ReachabilityQuery`, graph/reach/architecture tests.
    Regressions: mixed-depth candidate seeds; descendants through shorter candidate routes; late BFS sources;
    isolated quotient nodes; parallel edge IDs; budget/depth completeness; lazy witnesses; cancellation.
 2. Exceptions: `ExceptionQuery`, new summary/transfer files, exception summary tests. Verify ordinary and recursive
@@ -42,5 +42,5 @@ document changes and limitations, and commit with a reference to that change doc
 ## Validation
 
 Use the existing xUnit/VSTest test project and .NET 10 SDK. Test regressions before their fixes. Full final validation:
-`dotnet test sharpview.slnx --no-restore`, plus a fresh-process diagram export on ResearchSolution and Mermaid syntax
+`dotnet test SharpDrill.slnx --no-restore`, plus a fresh-process diagram export on ResearchSolution and Mermaid syntax
 validation. Record exact results, limits, API decisions and deferred external validation in the change document.
