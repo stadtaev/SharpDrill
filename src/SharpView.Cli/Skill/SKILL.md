@@ -11,7 +11,7 @@ description: Analyse an ASP.NET Core Web API with the sharpview CLI. Finds excep
 ## Before running
 
 - Install it with `dotnet tool install -g SharpView.Cli`. It needs a .NET 10 or newer SDK.
-- Restore the solution first (`dotnet restore`). Build it too: code that does not compile gives incomplete results, and stderr says so.
+- Restore the solution first (`dotnet restore`), or add `--restore` to the command; a "not restored" error means neither was done. Build it too: code that does not compile gives incomplete results, and stderr says so.
 - Run it in the folder that holds the `.sln`/`.slnx` (or the only `.csproj`), or pass the path right after the command: `sharpview exceptions path/to/App.slnx --uncaught`.
 - Each run loads the whole solution, which takes seconds to minutes. Pick the right view instead of running everything.
 

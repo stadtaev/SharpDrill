@@ -12,7 +12,7 @@ Results carry source evidence (file:line:column), and anything the analysis cann
 
 ## Install
 
-SharpView is a .NET tool: it analyses a whole solution at once, from each controller action through every project it calls into. It needs a .NET 10 (or newer) SDK; restore the analysed solution first (SharpView never restores or builds it).
+SharpView is a .NET tool: it analyses a whole solution at once, from each controller action through every project it calls into. It needs a .NET 10 (or newer) SDK; restore the analysed solution first, or pass `--restore` (otherwise SharpView never restores or builds it).
 
 ```sh
 dotnet tool install -g SharpView.Cli   # once per machine
@@ -130,7 +130,7 @@ dotnet run --project src/SharpView.Cli -- exceptions $F --miscaught
 dotnet run --project src/SharpView.Cli -- diagram $F
 ```
 
-Analysing your own solution: restore it first (SharpView never restores, builds or edits analysed code). Loading evaluates MSBuild projects and may run project tooling and source generators, so it is not a sandbox.
+Analysing your own solution: restore it first or pass `--restore` (otherwise SharpView never restores, builds or edits analysed code). Loading evaluates MSBuild projects and may run project tooling and source generators, so it is not a sandbox.
 
 ## Commands
 
