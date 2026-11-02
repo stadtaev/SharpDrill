@@ -346,7 +346,7 @@ public sealed class CliContractTests
     }
 
     [Fact]
-    public async Task Missing_restoration_is_rejected_without_creating_assets_or_changing_source()
+    public async Task Missing_restoration_is_rejected_without_creating_assets_or_changing_source_unless_restore_is_asked()
     {
         var directory = Path.Combine(Path.GetTempPath(), "sharpview no restore " + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -363,6 +363,11 @@ public sealed class CliContractTests
             Assert.Contains("not restored", result.Error);
             Assert.False(File.Exists(Path.Combine(directory, "obj", "project.assets.json")));
             Assert.Equal(project, await File.ReadAllTextAsync(input));
+            Assert.Equal(code, await File.ReadAllTextAsync(source));
+            var restored = await Run("projects", input, "--restore");
+            Assert.Equal(0, restored.Exit);
+            Assert.StartsWith("Unrestored [net10.0", restored.Out);
+            Assert.True(File.Exists(Path.Combine(directory, "obj", "project.assets.json")));
             Assert.Equal(code, await File.ReadAllTextAsync(source));
         }
         finally { Directory.Delete(directory, true); }

@@ -13,6 +13,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
     internal string? Framework { get; init; }
     internal bool IncludeGenerated { get; init; } = true;
     internal bool IncludeTests { get; init; }
+    internal bool Restore { get; init; }
     internal AnalysisRequest Request => new(Input, Configuration, Framework, IncludeGenerated, IncludeTests);
     internal string? Root { get; init; }
     internal int MaxDepth { get; init; } = 20;
@@ -29,7 +30,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
     internal ImmutableHashSet<string> Given { get; init; } = [];
 
     internal const string Help = """
-        SharpView — source-backed analysis of ASP.NET Core Web APIs (.NET SDK; restored inputs required)
+        SharpView — source-backed analysis of ASP.NET Core Web APIs (.NET SDK; restored inputs, or --restore)
         Usage: sharpview <command> [input.csproj|input.sln|input.slnx|directory] [options]
                Without an input, the solution (or else the single project) in the current directory.
 
@@ -69,6 +70,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                                  Diagrams default to ./diagrams_exports in the current directory.
           --configuration NAME   Default Debug.   --framework TFM  Required for ambiguous multi-target inputs.
           --exclude-generated    Skip generated sources (included by default).
+          --restore              Run dotnet restore on the input first (never done otherwise); its output goes to stderr.
           --include-tests        Also load test projects (xUnit, NUnit, TUnit, MSTest, SpecFlow/Reqnroll, Pact...); skipped by default.
           --version              Print the version; no project load.
           --help                 This text; no project load.
@@ -76,7 +78,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
         Exit: 0 complete, 1 usable but with gaps/Unknown/limits, 2 invalid request or fatal, 130 cancelled.
         """;
 
-    internal static readonly ImmutableHashSet<string> LoadingOptions = ["--configuration", "--framework", "--exclude-generated", "--include-tests"];
+    internal static readonly ImmutableHashSet<string> LoadingOptions = ["--configuration", "--framework", "--exclude-generated", "--include-tests", "--restore"];
 
     internal static Arguments? Parse(string[] args)
     {
@@ -117,6 +119,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                 "--framework" => parsed with { Framework = Value() },
                 "--exclude-generated" => parsed with { IncludeGenerated = false },
                 "--include-tests" => parsed with { IncludeTests = true },
+                "--restore" => parsed with { Restore = true },
                 _ => throw new ArgumentException($"Unknown option: {option}"),
             };
         }

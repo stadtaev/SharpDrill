@@ -22,6 +22,7 @@ internal static class EntryPoint
             if (args is ["skill", .. var options]) return SkillCommand.Run(options);
             var arguments = Arguments.Parse(args);
             if (arguments is null) { Console.WriteLine(Arguments.Help); return 0; }
+            if (arguments.Restore) await Restore.RunAsync(arguments, cancellation.Token);
             MSBuildBootstrap.RegisterSdk();
             return await Commands.RunAsync(arguments, cancellation.Token);
         }
