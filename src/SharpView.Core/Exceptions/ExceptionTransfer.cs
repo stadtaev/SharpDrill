@@ -2,7 +2,8 @@ using System.Collections.Immutable;
 
 namespace SharpView.Core;
 
-// Shared transfer semantics for detailed witnesses and fixed-point summaries.
+// What happens to an exception at one throw or call site: the one place catch matching, filters, rethrow/replacement,
+// finally and await observation are decided, for the propagation and for re-walking an example path with evidence.
 internal sealed record ExceptionFlow(ThrowSiteId Origin, ThrowSiteId? SubsequentOrigin,
     TypeUse? StaticType, TypeUse? ExactType, bool Exact, bool Changed,
     ImmutableList<SourceEvidence> Evidence, ImmutableList<CatchId> Handlers)

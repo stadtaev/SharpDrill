@@ -5,7 +5,7 @@ namespace SharpView.Cli;
 
 /// <summary>Default: every explicit throw in source. --uncaught/--caught/--miscaught: the fate of each throw along the
 /// call chains from controller actions (or --root).</summary>
-internal sealed class ExceptionsCommand : ReportCommand
+internal sealed partial class ExceptionsCommand : ReportCommand
 {
     private static readonly string[] Views = ["--uncaught", "--caught", "--miscaught"];
     private static readonly string[] TracedOptions = ["--root", "--budget", "--locations", "--declared-only"];
@@ -20,17 +20,17 @@ internal sealed class ExceptionsCommand : ReportCommand
         if (arguments.Strict && arguments.View != ExceptionView.Uncaught && !(arguments.MSBuild && arguments.View == ExceptionView.Throws)) throw new ArgumentException("--strict requires --uncaught.");
         if (arguments.View == ExceptionView.Throws && !arguments.MSBuild && arguments.Given.Overlaps(TracedOptions))
             throw new ArgumentException("Listing all throws takes no options; --root, --budget, --locations and --declared-only require --uncaught, --caught or --miscaught.");
-        SummaryQuery(arguments).Validate();
+        AnalysisOptions(arguments).Validate();
     }
 
     // Every view reads one propagation. The same budget bounds both transfer work and retained facts.
-    private static ExceptionSummaryOptions SummaryQuery(Arguments arguments) => new(arguments.Budget, arguments.Budget, !arguments.DeclaredOnly, arguments.Strict);
+    private static ExceptionSummaryOptions AnalysisOptions(Arguments arguments) => new(arguments.Budget, arguments.Budget, !arguments.DeclaredOnly, arguments.Strict);
 
     protected override ValueTask<bool> ExecuteAsync(ReportContext context, CancellationToken token)
     {
         var roots = context.Arguments.MSBuild || context.Arguments.View != ExceptionView.Throws ? Roots.Select(context.Index, context.Arguments, RootScope.Actions, token) : [];
         if (context.Arguments.View == ExceptionView.Throws && !context.Arguments.MSBuild) return ValueTask.FromResult(Throws(context, token));
-        var summaries = ExceptionSummaryQuery.Analyze(context.Index, roots, SummaryQuery(context.Arguments), token);
+        var summaries = ExceptionSummaryQuery.Analyze(context.Index, roots, AnalysisOptions(context.Arguments), token);
         string[] counts = context.Arguments.View switch
         {
             // Build warnings default to every finding worth one: uncaught and miscaught.
@@ -248,34 +248,6 @@ internal sealed class ExceptionsCommand : ReportCommand
     private static void WriteLimit(Arguments arguments) =>
         Console.Error.WriteLine($"Stopped early: the analysis budget ran out, so the list above is incomplete. Rerun with --budget {arguments.Budget * 10}.");
 
-    // Warnings the source suppresses; one count per run (one process runs one command).
-    private static int suppressed;
-
-    // --format msbuild: MSBuild's canonical message format, which Visual Studio's Error List and VS Code's $msCompile
-    // problem matcher both parse. The path stays absolute so the location resolves from any working directory.
-    private static void Warn(ReportContext context, string code, SourceEvidence at, string message)
-    {
-        if (context.Snapshot.Suppressions.Any(x => x.Covers(code, at))) { suppressed++; return; }
-        context.Output.WriteLine($"{at.Path}({at.StartLine},{at.StartColumn}): warning {code}: {message}");
-    }
-
-    // Other places in a warning: the file name is enough beside the method, and keeps the line readable in the Error List.
-    private static string FileLine(SourceEvidence at) => $"{Path.GetFileName(at.Path)}:{at.StartLine}";
-
-    // The try is where the fix goes, so the warning points at it.
-    private static void WarnMiscaught(ReportContext context, MiscaughtException miscaught, GlobalHandlers handlers, bool handled)
-    {
-        var (index, display) = (context.Index, context.Display);
-        var origin = index.ThrowSite(miscaught.Origin);
-        var region = index.Region(miscaught.Missed.Region);
-        var clauses = region.Catches.Select(x => index.Catch(x).CaughtType?.DisplayName ?? "all exceptions");
-        Warn(context, "SV0003", region.ProtectedBlock, $"{miscaught.Missed.ExceptionType ?? Thrown(origin)} thrown in {display.Short(origin.Owner)} ({FileLine(origin.Evidence)}) "
-            + $"passes through this try, which catches only {string.Join(", ", clauses)}; then {string.Join("; ", miscaught.Outcomes.Select(x => Fate(context, miscaught, x, msbuild: true, handled ? handlers.Names(miscaught.EscapesFrom) : null)))}; "
-            + Chain(context, miscaught.Example.Path, miscaught.ViaCandidate));
-    }
-
-    private static string Chain(ReportContext context, ImmutableArray<CallableId> path, bool assumed) =>
-        $"path{(assumed ? " (possible, not proven)" : "")}: {string.Join(" -> ", path.Select(context.Display.Short))}";
 
     private static void WriteCaught(ReportContext context, Report report, CaughtException caught)
     {
@@ -315,94 +287,6 @@ internal sealed class ExceptionsCommand : ReportCommand
             + string.Join("; ", origins.GroupBy(x => x.Evidence.Path).Select(x => context.Display.Where(x.First().Evidence) + string.Concat(x.Skip(1).Select(e => $", {e.Evidence.StartLine}"))))
             + (path is [_] ? "  (in the action)" : ""));
 
-    private static void WriteExample(ReportContext context, Report report, ExceptionWitness witness) =>
-        WritePath(context, report, witness.Path, witness.Sites, witness.Evidence);
-
-    // From the action down to the throw, on one line when it fits. A step through an interface/virtual call (~>) assumes
-    // which implementation runs; when source has several, the step says so, since that is where the path is a guess. A
-    // path that repeats most of an earlier finding's path refers to it and spells out only the rest (--locations keeps
-    // every step, since each has its own location).
-    private static void WritePath(ReportContext context, Report report, ImmutableArray<CallableId> path, ImmutableArray<CallSiteId> sites, ImmutableArray<SourceEvidence> evidence)
-    {
-        var (index, display) = (context.Index, context.Display);
-        string Choice(int i) => i > 0 && i - 1 < sites.Length && index.CallGraph.Resolve(sites[i - 1]) is { Kind: CallTargetKind.Dispatch, Callees.Length: var n and > 1 }
-            ? $" (1 of {n} implementations)" : "";
-        var steps = path.Select((x, i) => (Arrow: i == 0 ? "" : i - 1 < sites.Length && index.CallSite(sites[i - 1]).Dispatch != DispatchKind.Direct ? "~> " : "-> ", Name: display.Short(x) + Choice(i))).ToArray();
-        if (steps.Length > 1)
-        {
-            var (earlier, shared, same) = context.Arguments.Locations ? default : report.Earlier(path);
-            if (shared >= SharedSteps)
-            {
-                var tail = steps[shared..];
-                var head = same ? $"same as {earlier}" : $"as in {earlier} up to {steps[shared - 1].Name}" + (tail.Length == 0 ? "" : ", then");
-                var inline = string.Join(" ", [head, .. tail.Select(x => x.Arrow + x.Name)]);
-                if (report.Fits(inline)) report.Line("Path", inline);
-                else { report.Line("Path", head); foreach (var (arrow, name) in tail) report.Step(arrow, name); }
-            }
-            else
-            {
-                var inline = string.Join(" ", steps.Select(x => x.Arrow + x.Name));
-                if (report.Fits(inline)) report.Line("Path", inline);
-                else { report.Line("Path", steps[0].Name); foreach (var (arrow, name) in steps[1..]) report.Step(arrow, name); }
-                report.Remember(path);
-            }
-        }
-        if (!context.Arguments.Locations) return;
-        var places = (evidence.IsEmpty ? sites.Select(x => index.CallSite(x).Evidence) : evidence).Select(display.Where).ToArray();
-        for (var i = 0; i < places.Length; i++) if (i == 0) report.Line("Locations", places[i]); else report.More(places[i]);
-    }
-
-    // Fewer shared steps than this are cheaper to repeat than to look up.
-    private const int SharedSteps = 3;
-
-    // Numbered findings separated by blank lines, after an overview by exception type; labels share one column so the
-    // values line up.
-    private sealed class Report(TextWriter output)
-    {
-        private const int Column = 15, Width = 120;
-        private readonly List<(int Number, ImmutableArray<CallableId> Path)> paths = [];
-        private int number;
-        private bool written;
-
-        // Paths written in full, so a later finding can refer to the one sharing its longest prefix.
-        public void Remember(ImmutableArray<CallableId> path) => paths.Add((number, path));
-        public (int Number, int Shared, bool Same) Earlier(ImmutableArray<CallableId> path) => paths
-            .Select(x => (x.Number, Shared: x.Path.Zip(path).TakeWhile(p => p.First == p.Second).Count(), Same: x.Path.SequenceEqual(path)))
-            .OrderByDescending(x => x.Shared).ThenByDescending(x => x.Same).ThenBy(x => x.Number).FirstOrDefault();
-
-        private void Separate() { if (written) output.WriteLine(); written = true; }
-
-        // Left out for a single finding, where it would only repeat it.
-        public void Overview(string headline, string[] types, int others = 0)
-        {
-            if (types.Length + others < 2) return;
-            Separate();
-            output.WriteLine($"Overview: {headline}");
-            var byType = types.GroupBy(x => x).Select(x => (Type: x.Key, Count: x.Count())).OrderByDescending(x => x.Count).ThenBy(x => x.Type, StringComparer.Ordinal).ToArray();
-            var width = byType.Select(x => x.Count.ToString().Length).DefaultIfEmpty().Max();
-            foreach (var (type, count) in byType) output.WriteLine($"  {count.ToString().PadLeft(width)}  {type}");
-        }
-
-        public void Section(string title, IEnumerable<string> items)
-        {
-            Separate();
-            output.WriteLine(title);
-            foreach (var item in items) output.WriteLine($"  - {item}");
-        }
-
-        public void Begin(string title) { Separate(); output.WriteLine($"{++number}. {title}"); }
-        // Comma-separated on the label's line when it fits, else one item per line.
-        public void List(string label, IEnumerable<string> items)
-        {
-            var all = items.ToArray();
-            if (Fits(string.Join(", ", all))) { Line(label, string.Join(", ", all)); return; }
-            for (var i = 0; i < all.Length; i++) if (i == 0) Line(label, all[i]); else More(all[i]);
-        }
-        public void Line(string label, string text) => output.WriteLine($"   {label + ":",-11} {text}");
-        public void More(string text) => output.WriteLine(new string(' ', Column) + text);
-        public void Step(string arrow, string text) => output.WriteLine(new string(' ', Column - arrow.Length) + arrow + text);
-        public bool Fits(string text) => Column + text.Length <= Width;
-    }
 
     private static string Thrown(ThrowSiteFact origin) => (origin.ExactExceptionType ?? origin.StaticExceptionType)?.DisplayName is { } type
         ? type + (origin.IsExactType || origin.ExactExceptionType is not null ? "" : " (or a subclass)")
