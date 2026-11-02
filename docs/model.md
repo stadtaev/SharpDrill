@@ -18,13 +18,11 @@ Queries return IDs and structured endings; CLI formatting adds arrows and descri
 
 Suppressions are source spans where a SharpView rule is turned off: `#pragma warning disable SV000N` up to its `restore` or the end of the file (a bare `#pragma warning disable` covers every rule, as it does for the compiler), and the declaration carrying `[SuppressMessage(..., "SV000N[:name]")]`. Only `exceptions --format msbuild` applies them, to the location a warning points at; the text views list every finding.
 
-JSON exports a schema-version-3 envelope (all IDs as plain strings), producer version and the full snapshot. Absolute paths and local identities make snapshot IDs local research evidence; use `Key` for portable identity.
-
 ## Consumer model
 
 **Facts for rules.** Types record namespace, kind (class, record, struct, interface, enum, delegate), modifiers (abstract, sealed, static, generic), base class and containing type. Callables record modifiers (static, abstract, virtual, override, sealed, generic, extension, operator, explicit implementation, finalizer) and the directly overridden member. Attributes keep their rendered constructor and named arguments. Field and property types are `Field`/`Property` dependencies of their owning type.
 
-**Implementation candidates.** `ImplementationFact` pairs a declared interface or overridden member with a source implementation, one override step per fact. Candidates are not inferred runtime targets: receiver type, DI registration and further overrides decide what runs. Queries follow them only when a consumer opts in, and mark every step that does.
+**Implementation candidates.** `ImplementationFact` pairs a declared interface or overridden member with a source implementation, one override step per fact. Candidates are not inferred runtime targets: receiver type, DI registration and further overrides decide what runs. Queries follow them only when asked (the CLI asks by default; `--declared-only` turns it off), and mark every step that does.
 
 **Identity.** `CallableId`/`TypeId` stay local (they contain project paths and assembly versions). `Key` is portable: `<project>|<documentation ID>`, or for lambdas and local functions the nearest documented member plus name/ordinal and project-relative position. Lambdas and local functions have position-based IDs so same-shaped bodies in one type never share a fact. Caveats: when two projects share a file name (or two versions of an assembly are referenced) later keys get `#2`, `#3` suffixes in ID order, which can shift when projects are added; lambdas and local functions in source-generated files carry the generator output path, which may include configuration/framework folders when `EmitCompilerGeneratedFiles` is on. `SourceRoot` with `SourceEvidence.RelativeTo` yields repository-relative paths. All IDs, including `ThrowSiteId`, `CatchId` and `ExceptionRegionId`, are typed.
 
@@ -38,4 +36,4 @@ JSON exports a schema-version-3 envelope (all IDs as plain strings), producer ve
 
 **Rules.** A rule is a plain function returning `Finding(RuleId, Verdict, Subject, Message, Evidence)`. `LayerRules.AllowedDependencies` reports disallowed cross-layer edges as `Violation` and edges touching unmapped source as `Unknown`; candidate edges are not evaluated.
 
-**Reachability vs paths.** `ReachabilityQuery` is breadth-first: each reachable callable once per root, with transition distance and one deterministic shortest witness, plus explicit dispatch, unresolved, missing-body and depth boundaries. `CallChainQuery` still enumerates every path for drill-down and is exponential in the worst case. Exception witnesses carry `ExceptionReason` codes (one per distinct reason) and, for dispatch boundaries, the dispatch kind.
+**Exception reasons.** Exception witnesses carry `ExceptionReason` codes (one per distinct reason) and, for dispatch boundaries, the dispatch kind.

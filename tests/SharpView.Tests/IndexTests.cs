@@ -46,8 +46,7 @@ public sealed class IndexTests
         Assert.Equal("metadata", index.ProjectName(new("metadata|System.Runtime")));
         Assert.Equal("t2", index.ThrowSite(new("t2")).Id.Value);
         Assert.Equal(new ThrowSiteId("t1"), index.Catch(new("c1")).SubsequentThrow);
-        Assert.Equal(new ExceptionRegionId("r1"), Assert.Single(index.RegionsOf(new("c1"))).Id);
-        Assert.Empty(index.RegionsOf(new("unknown")));
+        Assert.Equal(new CatchId("c1"), Assert.Single(index.Region(new("r1")).Catches));
     }
 
     [Fact]

@@ -1,4 +1,0 @@
-OrdersController.Get -> Service.Load -> Repository.Read -> StorageException.ctor
-    at Research.Api/OrdersController.cs:8
-    at Research.Application/Service.cs:5
-    at Research.Infrastructure/Repository.cs:6

@@ -1,22 +1,14 @@
 using System.Collections.Immutable;
-using System.Text.Json.Serialization;
 
 namespace SharpView.Core;
 
-[JsonConverter(typeof(StringIdConverter<CompilationId>))]
-public readonly record struct CompilationId(string Value) : IStringId<CompilationId> { static CompilationId IStringId<CompilationId>.Create(string value) => new(value); }
-[JsonConverter(typeof(StringIdConverter<TypeId>))]
-public readonly record struct TypeId(string Value) : IStringId<TypeId> { static TypeId IStringId<TypeId>.Create(string value) => new(value); }
-[JsonConverter(typeof(StringIdConverter<CallableId>))]
-public readonly record struct CallableId(string Value) : IStringId<CallableId> { static CallableId IStringId<CallableId>.Create(string value) => new(value); }
-[JsonConverter(typeof(StringIdConverter<CallSiteId>))]
-public readonly record struct CallSiteId(string Value) : IStringId<CallSiteId> { static CallSiteId IStringId<CallSiteId>.Create(string value) => new(value); }
-[JsonConverter(typeof(StringIdConverter<ThrowSiteId>))]
-public readonly record struct ThrowSiteId(string Value) : IStringId<ThrowSiteId> { static ThrowSiteId IStringId<ThrowSiteId>.Create(string value) => new(value); }
-[JsonConverter(typeof(StringIdConverter<CatchId>))]
-public readonly record struct CatchId(string Value) : IStringId<CatchId> { static CatchId IStringId<CatchId>.Create(string value) => new(value); }
-[JsonConverter(typeof(StringIdConverter<ExceptionRegionId>))]
-public readonly record struct ExceptionRegionId(string Value) : IStringId<ExceptionRegionId> { static ExceptionRegionId IStringId<ExceptionRegionId>.Create(string value) => new(value); }
+public readonly record struct CompilationId(string Value);
+public readonly record struct TypeId(string Value);
+public readonly record struct CallableId(string Value);
+public readonly record struct CallSiteId(string Value);
+public readonly record struct ThrowSiteId(string Value);
+public readonly record struct CatchId(string Value);
+public readonly record struct ExceptionRegionId(string Value);
 public enum CallableKind { Method, Constructor, Getter, Setter, EventAdder, EventRemover, LocalFunction, Lambda }
 public enum DispatchKind { Direct, Interface, Virtual, Delegate, Dynamic, Unknown }
 // Synthesized: a compiler-provided member of a source type (implicit or record constructor, auto-property accessor,
@@ -65,7 +57,7 @@ public sealed record CallableFact(CallableId Id, CompilationId Compilation, Type
     CallableModifiers Modifiers = CallableModifiers.None, CallableId? Overrides = null, string Key = "")
 {
     // True when the callable's code is fully known: written in source, or compiler-provided and free of explicit code.
-    [JsonIgnore] public bool HasBody => Body is BodyStatus.Source or BodyStatus.Synthesized;
+    public bool HasBody => Body is BodyStatus.Source or BodyStatus.Synthesized;
 }
 public sealed record CallSiteFact(CallSiteId Id, CallableId Caller, CallableId? BoundTarget, string TargetDisplay,
     DispatchKind Dispatch, ImmutableArray<TypeUse> TypeArguments, SourceEvidence Evidence, bool IsImplicit,

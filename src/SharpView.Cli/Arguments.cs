@@ -16,18 +16,14 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
     internal AnalysisRequest Request => new(Input, Configuration, Framework, IncludeGenerated, IncludeTests);
     internal string? Root { get; init; }
     internal int MaxDepth { get; init; } = 20;
-    internal int MaxPaths { get; init; } = 1000;
     internal int Budget { get; init; } = 100000;
     internal int MaxNodes { get; init; } = 200;
     internal int MaxEdges { get; init; } = 1000;
     internal bool Locations { get; init; }
-    internal bool FollowCandidates { get; init; }
     internal bool DeclaredOnly { get; init; }
     internal bool Strict { get; init; }
     internal ExceptionView View { get; init; }
     internal bool Mermaid { get; init; }
-    internal bool Methods { get; init; }
-    internal bool Json { get; init; }
     internal bool MSBuild { get; init; }
     internal string? Output { get; init; }
     internal ImmutableHashSet<string> Given { get; init; } = [];
@@ -47,38 +43,29 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                       Findings covered by exception middleware or a global exception filter are listed last.
                       [--uncaught [--strict] | --caught | --miscaught] [--root R] [--budget N] [--declared-only] [--locations]
                       [--format msbuild]
-                      Interface/virtual calls are followed into their source implementations (results are marked
-                      as possibilities); --declared-only stops at the declaration instead.
-          reach       What each controller action can reach: every method once, with distance and shortest path.
-                      [--root R] [--follow-candidates] [--max-depth N] [--budget N] [--locations]
-          paths       Every call path from each controller action (or from any --root), with project and transitions.
-                      [--root R] [--max-depth N] [--max-paths N] [--budget N] [--locations]
           diagram     Mermaid call graph of one controller action, saved as Markdown (prompts for an action without --root).
-                      [--root R] [--follow-candidates] [--max-depth N] [--max-nodes N] [--max-edges N] [--budget N] [--output F]
-          inspect     Extraction summary; --methods lists callables and their IDs; --json writes the fact snapshot (schema v3).
-                      [--methods | --json [--output F]]
-          skill       Install the agent skill for GitHub Copilot and Claude Code: .claude/skills/sharpview/SKILL.md at the
-                      repository root, or with --user in ~/.copilot/skills and ~/.claude/skills. No project load.
+                      [--root R] [--declared-only] [--max-depth N] [--max-nodes N] [--max-edges N] [--budget N] [--output F]
+          skill       Install the agent skill for GitHub Copilot and Claude Code: .github/skills and .claude/skills (sharpview/SKILL.md)
+                      at the repository root, or with --user in ~/.copilot/skills and ~/.claude/skills. No project load.
                       [--user]
 
         Options:
-          --root R               One root: an ID (from inspect --methods) or an exact signature. Defaults to every
-                                 controller action. reach/paths accept any source method; exceptions/diagram need an action.
-          --follow-candidates    reach/diagram: also follow implementation candidates of interface/virtual calls (marked, never runtime facts).
-          --declared-only        exceptions: do not follow interface/virtual calls into source implementations.
+          --root R               One controller action, by its full signature (namespace, type, method, parameter types, e.g.
+                                 Api.OrdersController.Get(int); diagram without --root lists them). Defaults to every action.
+          --declared-only        exceptions/diagram: stop at interface/virtual calls instead of following them into their
+                                 source implementations (followed by default; such steps are possibilities, never runtime facts).
           --strict               exceptions --uncaught: also list calls into third-party libraries (NuGet packages, referenced
                                  DLLs; not .NET itself) that no catch meets on the way from the action, in a section of their own.
-          --max-depth N          reach/paths/diagram: call transitions (default 20), never runtime stack depth.
-          --max-paths N          paths: reported paths (default 1000).
+          --max-depth N          diagram: call transitions (default 20), never runtime stack depth.
           --budget N             Examined call sites (default 100000). Raise it when the output says a limit was reached.
           --max-nodes N          diagram nodes, including boundaries (default 200).   --max-edges N  diagram edges (default 1000).
-          --locations            Print call-site evidence for paths and witnesses.
+          --locations            exceptions: print call-site evidence for witnesses.
           --format msbuild       exceptions: one build warning per finding, "file(line,col): warning SV000N: ...", for MSBuild,
                                  Visual Studio and VS Code (what the SharpView package runs after each build). Without a view:
                                  uncaught and miscaught. SV0001 may escape an action, SV0002 may escape to a global exception
                                  handler, SV0003 miscaught, SV0004 third-party call with no catch on the way (--strict).
           --mermaid              projects: also save the tree as a Mermaid diagram in Markdown.
-          --output F             New file for inspect --json, diagram or projects --mermaid; existing files are never overwritten.
+          --output F             New file for diagram or projects --mermaid; existing files are never overwritten.
                                  Diagrams default to ./diagrams_exports in the current directory.
           --configuration NAME   Default Debug.   --framework TFM  Required for ambiguous multi-target inputs.
           --exclude-generated    Skip generated sources (included by default).
@@ -113,11 +100,9 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
             parsed = option switch
             {
                 "--root" => parsed with { Root = Value() },
-                "--follow-candidates" => parsed with { FollowCandidates = true },
                 "--declared-only" => parsed with { DeclaredOnly = true },
                 "--strict" => parsed with { Strict = true },
                 "--max-depth" => parsed with { MaxDepth = Number() },
-                "--max-paths" => parsed with { MaxPaths = Number() },
                 "--budget" => parsed with { Budget = Number() },
                 "--max-nodes" => parsed with { MaxNodes = Number() },
                 "--max-edges" => parsed with { MaxEdges = Number() },
@@ -126,8 +111,6 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                 "--caught" => parsed with { View = ExceptionView.Caught },
                 "--miscaught" => parsed with { View = ExceptionView.Miscaught },
                 "--mermaid" => parsed with { Mermaid = true },
-                "--methods" => parsed with { Methods = true },
-                "--json" => parsed with { Json = true },
                 "--format" => parsed with { MSBuild = Value() == "msbuild" ? true : throw new ArgumentException("--format accepts only msbuild.") },
                 "--output" => parsed with { Output = Value() },
                 "--configuration" => parsed with { Configuration = Value() },
@@ -160,6 +143,6 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
         };
     }
 
-    private static readonly ImmutableHashSet<string> KnownOptions = ["--root", "--follow-candidates", "--declared-only", "--strict", "--max-depth", "--max-paths",
-        "--budget", "--max-nodes", "--max-edges", "--locations", "--uncaught", "--caught", "--miscaught", "--mermaid", "--methods", "--json", "--format", "--output"];
+    private static readonly ImmutableHashSet<string> KnownOptions = ["--root", "--declared-only", "--strict", "--max-depth",
+        "--budget", "--max-nodes", "--max-edges", "--locations", "--uncaught", "--caught", "--miscaught", "--mermaid", "--format", "--output"];
 }

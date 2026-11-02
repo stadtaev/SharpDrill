@@ -3,7 +3,7 @@
 This file provides guidance to AI coding agents working with code in this repository.
 
 SharpView (`sharpview` dotnet tool) is a Roslyn-based static analyser for ASP.NET Core Web APIs: project map, exception
-propagation from controller actions, reachability, call paths and Mermaid diagrams. Start with `docs/overview.md`
+propagation from controller actions and Mermaid call diagrams. Start with `docs/overview.md`
 (pipeline, principles); `docs/model.md` has detailed fact/query semantics, `docs/coverage.md` what is and isn't modelled,
 and `docs/lessons.md` the design rules learned from the first real-world run.
 
@@ -35,10 +35,9 @@ Pipeline: **Load → Extract facts → Index → Queries → (Rules) → CLI rep
   `Extraction/FactExtractor*.cs` registers source symbols and bodies; `BodyWalker` walks each body's operation tree and
   records call sites, throws, catches, regions and `AnalysisGap`s. All Roslyn knowledge lives here.
 - `SharpView.Core` — plain immutable records (`Model/Facts.cs`, the `ProgramSnapshot`), `ProgramIndex` (lookups, lazy
-  call/dependency graphs), the exception engine in `Exceptions/` and other queries in `Queries/` (`ReachabilityQuery`,
-  `CallChainQuery`). **Core has no Roslyn or Mermaid dependency**: it depends only on `SharpView.Graph` and can run on a
-  snapshot loaded from JSON.
-- `SharpView.Graph` — generic immutable directed multigraph (BFS, SCC, quotient); knows nothing about C#.
+  call/dependency graphs), the exception engine in `Exceptions/` and the call diagram query in `Diagrams/`. **Core has no
+  Roslyn or Mermaid dependency**: it depends only on `SharpView.Graph` and works on a `ProgramSnapshot`.
+- `SharpView.Graph` — generic immutable directed multigraph (SCC, quotient); knows nothing about C#.
 - `SharpView.Export.Mermaid` — Mermaid/Markdown formatting; the only project with the Mermaid NuGet dependency.
 - `SharpView.Cli` — argument parsing (`Arguments.cs`, strict per-command option sets), one `ICliCommand` per command
   under `Commands/`, shared naming in `Display.cs`. Formatting only; no analysis logic. `ReportCommand` prints grouped
@@ -80,7 +79,7 @@ All in `tests/SharpView.Tests` (xUnit; `InternalsVisibleTo` exposes Roslyn inter
 
 - `ExtractionTests` compile inline C# in an `AdhocWorkspace` and run `FactExtractor` directly — the place for extraction
   and gap behaviour.
-- `CoreTests`, `ReachabilityTests`, `ArchitectureTests`, etc. build `ProgramSnapshot`s by hand.
+- `CoreTests`, `ArchitectureTests`, `GraphTests`, etc. build `ProgramSnapshot`s by hand.
 - `CliTests`, `CliContractTests`, `DiagramCliTests`, `ResearchTests` run against the ResearchSolution fixture and assert
   exact output strings and counts (witnesses, gaps, global caveats); changes to extraction or formatting usually require
   updating these.

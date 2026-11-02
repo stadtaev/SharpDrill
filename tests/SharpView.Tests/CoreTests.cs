@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Text.Json;
 using SharpView.Core;
 using Xunit;
 
@@ -309,79 +308,6 @@ public sealed class CoreTests
     }
 
     [Fact]
-    public void Snapshot_ids_serialize_as_plain_strings_and_round_trip()
-    {
-        var snapshot = Snapshot([Method("Action"), Method("Leaf")], [Call("Action", "Leaf", "al", regions: ["try"])],
-            [Throw("Leaf", regions: ["try"]) with { CatchId = new CatchId("catch") }],
-            [Handler("catch", "Action", HandlerOutcome.Rethrows, "origin")], [Region("try", "Action", "catch")]);
-        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-        var json = JsonSerializer.Serialize(snapshot, options);
-        using (var doc = JsonDocument.Parse(json))
-        {
-            var root = doc.RootElement;
-            Assert.Equal("Action", root.GetProperty("callables")[0].GetProperty("id").GetString());
-            Assert.Equal("al", root.GetProperty("callSites")[0].GetProperty("id").GetString());
-            Assert.Equal("try", root.GetProperty("callSites")[0].GetProperty("protectedRegions")[0].GetString());
-            var origin = root.GetProperty("throwSites")[0];
-            Assert.Equal("origin", origin.GetProperty("id").GetString());
-            Assert.Equal("catch", origin.GetProperty("catchId").GetString());
-            Assert.Equal("origin", root.GetProperty("catches")[0].GetProperty("subsequentThrow").GetString());
-            Assert.Equal("catch", root.GetProperty("exceptionRegions")[0].GetProperty("catches")[0].GetString());
-            Assert.Equal("test-project", root.GetProperty("callables")[0].GetProperty("compilation").GetString());
-            Assert.Equal("Exception", root.GetProperty("types")[0].GetProperty("id").GetString());
-        }
-        var back = JsonSerializer.Deserialize<ProgramSnapshot>(json, options)!;
-        Assert.Equal(new CallableId("Action"), back.Callables[0].Id);
-        Assert.Equal(new CallSiteId("al"), back.CallSites[0].Id);
-        Assert.Equal(new ExceptionRegionId("try"), Assert.Single(back.CallSites[0].ProtectedRegions));
-        Assert.Equal(new ThrowSiteId("origin"), back.ThrowSites[0].Id);
-        Assert.Equal(new CatchId("catch"), back.ThrowSites[0].CatchId);
-        Assert.Equal(new ThrowSiteId("origin"), back.Catches[0].SubsequentThrow);
-        Assert.Equal(new CatchId("catch"), Assert.Single(back.ExceptionRegions[0].Catches));
-        Assert.Equal(Project, back.Callables[0].Compilation);
-        Assert.Equal(new TypeId("Exception"), back.Types[0].Id);
-    }
-
-    [Fact]
-    public void Attribute_arguments_and_hierarchy_links_serialize_as_objects_and_ids_and_round_trip()
-    {
-        var route = new AttributeFact("RouteAttribute", ["\"orders\""], [new("Name", "\"list\"")]);
-        var snapshot = new ProgramSnapshot
-        {
-            SourceRoot = "/repo",
-            Types = [new(new("Derived"), Project, "Derived", "Public", [], [route], [], "Shop", DeclaredTypeKind.Record,
-                TypeModifiers.Sealed | TypeModifiers.Generic, new TypeId("Base"), new TypeId("Outer"), "Project|T:Shop.Derived")],
-            Callables = [Method("Run") with { Modifiers = CallableModifiers.Override | CallableModifiers.Sealed, Overrides = new CallableId("BaseRun"), Key = "Project|M:Run" }]
-        };
-        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-        var json = JsonSerializer.Serialize(snapshot, options);
-        using (var doc = JsonDocument.Parse(json))
-        {
-            var type = doc.RootElement.GetProperty("types")[0];
-            var attribute = type.GetProperty("attributes")[0];
-            Assert.Equal("RouteAttribute", attribute.GetProperty("name").GetString());
-            Assert.Equal("\"orders\"", attribute.GetProperty("arguments")[0].GetString());
-            Assert.Equal("Name", attribute.GetProperty("namedArguments")[0].GetProperty("name").GetString());
-            Assert.Equal("\"list\"", attribute.GetProperty("namedArguments")[0].GetProperty("value").GetString());
-            Assert.Equal("Base", type.GetProperty("baseClass").GetString());
-            Assert.Equal("Outer", type.GetProperty("containingType").GetString());
-            Assert.Equal("BaseRun", doc.RootElement.GetProperty("callables")[0].GetProperty("overrides").GetString());
-            Assert.Equal("/repo", doc.RootElement.GetProperty("sourceRoot").GetString());
-        }
-        var back = JsonSerializer.Deserialize<ProgramSnapshot>(json, options)!;
-        var backType = Assert.Single(back.Types);
-        var backAttribute = Assert.Single(backType.Attributes);
-        Assert.Equal("RouteAttribute", backAttribute.Name);
-        Assert.Equal(new[] { "\"orders\"" }, backAttribute.Arguments);
-        Assert.Equal(new NamedArgumentFact("Name", "\"list\""), Assert.Single(backAttribute.NamedArguments));
-        Assert.Equal(("Shop", DeclaredTypeKind.Record, TypeModifiers.Sealed | TypeModifiers.Generic, "Project|T:Shop.Derived"), (backType.Namespace, backType.Kind, backType.Modifiers, backType.Key));
-        Assert.Equal((new TypeId("Base"), new TypeId("Outer")), (backType.BaseClass, backType.ContainingType));
-        var backRun = Assert.Single(back.Callables);
-        Assert.Equal((CallableModifiers.Override | CallableModifiers.Sealed, new CallableId("BaseRun"), "Project|M:Run"), (backRun.Modifiers, backRun.Overrides, backRun.Key));
-        Assert.Equal("/repo", back.SourceRoot);
-    }
-
-    [Fact]
     public void Evidence_path_is_relative_to_root_with_forward_slashes_or_unchanged_outside_it()
     {
         var inside = Evidence with { Path = "/repo/src/App/Program.cs" };
@@ -393,49 +319,6 @@ public sealed class CoreTests
         Assert.Equal("..data/Program.cs", (Evidence with { Path = "/repo/..data/Program.cs" }).RelativeTo("/repo"));
         Assert.Equal("Example.cs", Evidence.RelativeTo("/repo"));
         Assert.Equal("/repo/src/App/Program.cs", inside.RelativeTo(""));
-    }
-
-    [Fact]
-    public void Diamond_preserves_each_witness_without_global_visited_pruning()
-    {
-        var snapshot = Snapshot([Method("Action"), Method("Left"), Method("Right"), Method("Shared")],
-            [Call("Action", "Right", "ar"), Call("Right", "Shared", "rs"), Call("Action", "Left", "al"), Call("Left", "Shared", "ls")], [Throw("Shared")]);
-        var chains = CallChainQuery.Enumerate(snapshot, [new("Action")], new());
-        Assert.Equal(new[] { "Left,Shared", "Right,Shared" }, chains.Chains.Select(x => string.Join(',', x.Steps.Select(s => s.Target!.Value.Value))));
-        Assert.All(chains.Chains, x => Assert.Equal(ChainEnd.Leaf, x.End));
-    }
-
-    [Fact]
-    public void Cycle_is_path_local_and_does_not_hide_sibling_leaf()
-    {
-        var snapshot = Snapshot([Method("Action"), Method("Loop"), Method("Leaf")],
-            [Call("Action", "Loop", "loop"), Call("Loop", "Action", "back"), Call("Action", "Leaf", "leaf")]);
-        var result = CallChainQuery.Enumerate(snapshot, [new("Action")], new());
-        Assert.Equal(2, result.Chains.Length);
-        Assert.Contains(result.Chains, x => x.End == ChainEnd.Cycle && x.Steps.Length == 2);
-        Assert.Contains(result.Chains, x => x.End == ChainEnd.Leaf && x.Steps.Length == 1);
-    }
-
-    [Fact]
-    public void Paths_stop_at_dispatch_with_the_declared_binding()
-    {
-        var snapshot = Snapshot([Method("Action"), Method("Virtual"), Method("Leaf")],
-            [Call("Action", "Virtual", "av", DispatchKind.Virtual), Call("Virtual", "Leaf", "vl")]);
-        var chain = Assert.Single(CallChainQuery.Enumerate(snapshot, [new("Action")], new()).Chains);
-        var step = Assert.Single(chain.Steps);
-        Assert.Equal(new CallableId("Virtual"), step.Target);
-        Assert.Equal(DispatchKind.Virtual, step.Dispatch);
-        Assert.Equal(ChainEnd.DispatchBoundary, chain.End);
-    }
-
-    [Fact]
-    public void Exact_output_and_work_budget_at_natural_end_is_not_truncation()
-    {
-        var snapshot = Snapshot([Method("Action"), Method("Leaf")], [Call("Action", "Leaf", "al")], [Throw("Leaf")]);
-        var chains = CallChainQuery.Enumerate(snapshot, [new("Action")], new(MaxChains: 1, MaxExpansions: 1));
-        Assert.Single(chains.Chains);
-        Assert.False(chains.OutputLimitReached);
-        Assert.False(chains.WorkLimitReached);
     }
 
     [Theory]
@@ -514,7 +397,7 @@ public sealed class CoreTests
         var missingBody = Snapshot([Method("Action") with { Body = BodyStatus.MetadataOnly }], []);
         Assert.Equal(ExceptionReason.MissingBody, Assert.Single(ExceptionSummaryQuery.Analyze(missingBody, [new("Action")]).Roots[new CallableId("Action")].Unknowns).ReasonCode);
         var missingTarget = Snapshot([Method("Action")], [Call("Action", "Absent", "missing")]);
-        Assert.Equal(ChainEnd.UnknownTarget, Assert.Single(CallChainQuery.Enumerate(missingTarget, [new("Action")], new()).Chains).End);
+        Assert.Equal(CallTargetKind.Unresolved, new ProgramIndex(missingTarget).CallGraph.Resolve(new("missing")).Kind);
     }
 
     [Theory]
@@ -605,24 +488,10 @@ public sealed class CoreTests
     }
 
     [Fact]
-    public void Duplicate_relationship_keeps_evidence_and_charges_each_site_to_work_budget()
-    {
-        var snapshot = Snapshot([Method("Action"), Method("Leaf")], [Call("Action", "Leaf", "first"), Call("Action", "Leaf", "second")]);
-        var result = CallChainQuery.Enumerate(snapshot, [new("Action")], new(MaxExpansions: 2));
-        Assert.Equal(new[] { new CallSiteId("first"), new CallSiteId("second") }, Assert.Single(Assert.Single(result.Chains).Steps).EvidenceSites);
-        Assert.Equal(2, result.ExpandedSites);
-        Assert.False(result.WorkLimitReached);
-        Assert.True(CallChainQuery.Enumerate(snapshot, [new("Action")], new(MaxExpansions: 1)).WorkLimitReached);
-    }
-
-    [Fact]
     public void Query_options_and_cancellation_are_validated()
     {
         var snapshot = Snapshot([Method("Action")], []);
         Assert.Throws<ArgumentException>(() => ExceptionSummaryQuery.Analyze(snapshot, [new("Action")], new(MaxWork: 0)));
-        Assert.Throws<ArgumentException>(() => CallChainQuery.Enumerate(snapshot, [new("Action")], new(MaxChains: 0)));
-        Assert.Throws<ArgumentException>(() => CallChainQuery.Enumerate(snapshot, [new("Action")], new(MaxDepth: -1)));
         Assert.Throws<OperationCanceledException>(() => ExceptionSummaryQuery.Analyze(snapshot, [new("Action")], new(), new CancellationToken(true)));
-        Assert.Throws<OperationCanceledException>(() => CallChainQuery.Enumerate(snapshot, [new("Action")], new(), new CancellationToken(true)));
     }
 }
