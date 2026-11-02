@@ -1,13 +1,13 @@
 # Coverage and limits
 
-What SharpView models today, and what it deliberately does not. "Boundary" and "Unknown" results are how the limits show up in reports; nothing outside the model is silently dropped.
+What SharpDrill models today, and what it deliberately does not. "Boundary" and "Unknown" results are how the limits show up in reports; nothing outside the model is silently dropped.
 
 ## Inputs and loading
 
 - Restored SDK-style C# projects and solutions (`.csproj`, `.sln`, `.slnx`), hosted on .NET 10, loaded through the SDK's MSBuild workspace (no Visual Studio).
 - One configuration/target-framework variant per project. An explicit `--framework` applies to the whole input and must be declared by every selected project.
 - Missing restore assets in any selected project abort loading. Workspace or compiler failures that still produce a compilation become visible gaps.
-- Project evaluation happens before the assets check, so project tooling and source generators may execute. SharpView never builds, restores or edits the analysed source.
+- Project evaluation happens before the assets check, so project tooling and source generators may execute. SharpDrill never builds, restores or edits the analysed source.
 - Generated documents are included by default; `--exclude-generated` records each exclusion as evidence.
 
 ## Controller actions
@@ -49,7 +49,7 @@ Implementation candidates come from source types' interface maps and overrides; 
   - async iterators, custom awaitables, and tasks that are never awaited (`var t = CallAsync(); ... await t;` and `await Task.WhenAll(t, u)` count as awaited);
   - dispatch through an interface or virtual member that source implements or overrides, when `--declared-only` is given (the default follows it);
   - iterator bodies.
-- **async void:** its own `try/catch` applies as in any method. What still leaves it never reaches a caller (it is rethrown on the thread pool and ends the process), so it is a finding (`Crashes`, SV0005), not Unknown, and a `try` around the call does not catch it.
+- **async void:** its own `try/catch` applies as in any method. What still leaves it never reaches a caller (it is rethrown on the thread pool and ends the process), so it is a finding (`Crashes`, SD0005), not Unknown, and a `try` around the call does not catch it.
 - **Recursion is not uncertainty.** All views share one fixed-point propagation, so a recursive call is followed like any other.
 - **Library calls are not uncertainty.** A call to a method with no source body (framework or NuGet code) ends the trace there: its exceptions are not modelled, so it never makes a result Unknown. Exception views report how many library methods were called, and `--uncaught` lists a few per action. This applies to direct calls and to interface/virtual calls to library members that no source type overrides.
 - **Compiler-provided members are known.** Implicit and record constructors, auto-property accessors and record members of source types have no explicit code, so they cannot throw explicitly and are never "missing".
@@ -86,7 +86,7 @@ Implementation candidates come from source types' interface maps and overrides; 
 
 ## How this is verified
 
-Tests combine independently built Core snapshots, in-memory Roslyn compilations, a three-project Web API fixture and fresh CLI processes (see [validation](validation.md)). SharpView's own solution is used only as a loader smoke input; no external Web API analysis is claimed yet.
+Tests combine independently built Core snapshots, in-memory Roslyn compilations, a three-project Web API fixture and fresh CLI processes (see [validation](validation.md)). SharpDrill's own solution is used only as a loader smoke input; no external Web API analysis is claimed yet.
 
 
 ## Graph analysis and diagram exports

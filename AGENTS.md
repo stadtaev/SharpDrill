@@ -2,7 +2,7 @@
 
 This file provides guidance to AI coding agents working with code in this repository.
 
-SharpView (`sharpview` dotnet tool) is a Roslyn-based static analyser for ASP.NET Core Web APIs: project map, exception
+SharpDrill (`sharpdrill` dotnet tool) is a Roslyn-based static analyser for ASP.NET Core Web APIs: project map, exception
 propagation from controller actions and Mermaid call diagrams. Start with `docs/overview.md`
 (pipeline, principles); `docs/model.md` has detailed fact/query semantics, `docs/coverage.md` what is and isn't modelled,
 and `docs/lessons.md` the design rules learned from the first real-world run.
@@ -14,14 +14,14 @@ FOR NOW IT'S STARTING MAIN GOAL IS TO PROIDE ACCURATE FACTS WITH MINIMAL NECESSA
 Requires the .NET 10 SDK from `global.json`.
 
 ```sh
-dotnet restore sharpview.slnx
+dotnet restore SharpDrill.slnx
 dotnet build tests/Fixtures/ResearchSolution/ResearchSolution.slnx   # tests analyse this fixture; build it first
-dotnet test sharpview.slnx                                           # ~2 minutes
-dotnet test tests/SharpView.Tests --filter "FullyQualifiedName~ExtractionTests.Some_test_name"
-dotnet pack sharpview.slnx -c Release                                # CI also packs
+dotnet test SharpDrill.slnx                                           # ~2 minutes
+dotnet test tests/SharpDrill.Tests --filter "FullyQualifiedName~ExtractionTests.Some_test_name"
+dotnet pack SharpDrill.slnx -c Release                                # CI also packs
 
 # Run the CLI from source on the fixture
-dotnet run --project src/SharpView.Cli -- exceptions tests/Fixtures/ResearchSolution/ResearchSolution.slnx --miscaught
+dotnet run --project src/SharpDrill.Cli -- exceptions tests/Fixtures/ResearchSolution/ResearchSolution.slnx --miscaught
 ```
 
 Exit code 1 on the fixture is expected (top-level statements in `Program.cs` are a gap). 0 = complete, 1 = usable but
@@ -31,21 +31,21 @@ with gaps/Unknown/limits, 2 = invalid request or fatal, 130 = cancelled.
 
 Pipeline: **Load → Extract facts → Index → Queries → (Rules) → CLI report**.
 
-- `SharpView.Roslyn` — `RoslynProgramLoader` opens the solution via MSBuild (never restores/builds the target).
+- `SharpDrill.Roslyn` — `RoslynProgramLoader` opens the solution via MSBuild (never restores/builds the target).
   `Extraction/FactExtractor*.cs` registers source symbols and bodies; `BodyWalker` walks each body's operation tree and
   records call sites, throws, catches, regions and `AnalysisGap`s. All Roslyn knowledge lives here.
-- `SharpView.Core` — plain immutable records (`Model/Facts.cs`, the `ProgramSnapshot`), `ProgramIndex` (lookups, lazy
+- `SharpDrill.Core` — plain immutable records (`Model/Facts.cs`, the `ProgramSnapshot`), `ProgramIndex` (lookups, lazy
   call/dependency graphs), the exception engine in `Exceptions/` and the call diagram query in `Diagrams/`. **Core has no
-  Roslyn or Mermaid dependency**: it depends only on `SharpView.Graph` and works on a `ProgramSnapshot`.
-- `SharpView.Graph` — generic immutable directed multigraph (SCC, quotient); knows nothing about C#.
-- `SharpView.Export.Mermaid` — Mermaid/Markdown formatting; the only project with the Mermaid NuGet dependency.
-- `SharpView.Cli` — argument parsing (`Arguments.cs`, strict per-command option sets), one `ICliCommand` per command
+  Roslyn or Mermaid dependency**: it depends only on `SharpDrill.Graph` and works on a `ProgramSnapshot`.
+- `SharpDrill.Graph` — generic immutable directed multigraph (SCC, quotient); knows nothing about C#.
+- `SharpDrill.Export.Mermaid` — Mermaid/Markdown formatting; the only project with the Mermaid NuGet dependency.
+- `SharpDrill.Cli` — argument parsing (`Arguments.cs`, strict per-command option sets), one `ICliCommand` per command
   under `Commands/`, shared naming in `Display.cs`. Formatting only; no analysis logic. `ReportCommand` prints grouped
-  gaps to stderr after each report; results go to stdout, diagnostics to stderr. Packed as the `SharpView.Cli` tool.
+  gaps to stderr after each report; results go to stdout, diagnostics to stderr. Packed as the `SharpDrill` tool.
   `skill` (like `--version`) is handled before argument parsing and loads nothing: it writes the embedded
   `Skill/SKILL.md`, the agent-facing guide to the CLI. Update it when commands, options or output change.
-- `SharpView.Build` — no code: the `SharpView` MSBuild package. `build/SharpView.targets` runs the packed CLI's
-  `exceptions --format msbuild` after each build, so findings become SV000N warnings in dotnet build, VS and VS Code.
+- `SharpDrill.Build` — no code: the `SharpDrill.MSBuild` package. `build/SharpDrill.MSBuild.targets` runs the packed CLI's
+  `exceptions --format msbuild` after each build, so findings become SD000N warnings in dotnet build, VS and VS Code.
 
 ### Where exception behaviour is decided
 
@@ -74,8 +74,8 @@ One question per place; change the place that owns the question.
 
 ## Tests
 
-All in `tests/SharpView.Tests` (xUnit; `InternalsVisibleTo` exposes Roslyn internals). Ignore the stray
-`tests/Sharpview.Tests` directory (build output only).
+All in `tests/SharpDrill.Tests` (xUnit; `InternalsVisibleTo` exposes Roslyn internals). Ignore the stray
+`tests/Sharpdrill.Tests` directory (build output only).
 
 - `ExtractionTests` compile inline C# in an `AdhocWorkspace` and run `FactExtractor` directly — the place for extraction
   and gap behaviour.

@@ -32,20 +32,20 @@ This section takes precedence over older stage details below. The user has reque
 
 **Fixture acceptance:** controller → application → infrastructure; caught caller exception, unrelated protected call, incompatible catch, rethrow, replacement, conditional filter, interface dispatch, recursion, directly awaited/caught operation, unobserved task, throw expression, static-type throw and action escape with separate boundary evidence.
 
-**Validation:** meaningful extraction, graph-budget, exception and fresh-process CLI tests; SDK build and full test run; restore only repository-owned fixtures explicitly. Preserve source evidence and all call sites. User-code experiment remains pending unless an input is supplied; analysing Sharpview itself is a loader smoke check only.
+**Validation:** meaningful extraction, graph-budget, exception and fresh-process CLI tests; SDK build and full test run; restore only repository-owned fixtures explicitly. Preserve source evidence and all call sites. User-code experiment remains pending unless an input is supplied; analysing Sharpdrill itself is a loader smoke check only.
 
 **Scope decisions:** reuse existing projects and retain the public model/query naming from section 5 where useful. Consolidate test projects and related small fact files to keep the research increment small. Defer optional local-tool packaging and editor tasks until the research behaviour is established. Do not commit/push/publish automatically; leave a reviewable workspace diff.
 
 **Execution update:** the initial checkout already contains partial model, extraction, query and fixture work. Preserve and complete that work. The user subsequently authorised .NET skills and subagents for quality: assign disjoint extraction/loading, core analysis/tests, and review tasks while completing CLI formatting and integration in the primary agent. This overrides the earlier no-delegation guidance. Validate exception replacement followed by an outer handler, unsupported async observations and declared dispatch boundaries before claiming the research increment complete.
 
-**Implementation record:** the four updated increments above are implemented in the existing three production projects, with one shared test project. The repository fixture builds with the SDK; host build has zero warnings/errors; the expanded suite has 74 passing tests. CLI sample reports, model/coverage notes and requirement-to-test evidence are in `docs/samples`, `docs/model.md`, `docs/coverage.md` and `docs/validation.md`. Loading `.csproj`, `.sln` and `.slnx`, output safeguards and no implicit restore are tested. Missing assets currently fail the whole selected input rather than returning partial compilations; requested frameworks apply across selected projects. Optional packaging, editor tasks and a separate generator fixture remain deferred. Sharpview self-analysis is only a smoke check; the external Web API experiment is pending input selection. Changes remain uncommitted for review.
+**Implementation record:** the four updated increments above are implemented in the existing three production projects, with one shared test project. The repository fixture builds with the SDK; host build has zero warnings/errors; the expanded suite has 74 passing tests. CLI sample reports, model/coverage notes and requirement-to-test evidence are in `docs/samples`, `docs/model.md`, `docs/coverage.md` and `docs/validation.md`. Loading `.csproj`, `.sln` and `.slnx`, output safeguards and no implicit restore are tested. Missing assets currently fail the whole selected input rather than returning partial compilations; requested frameworks apply across selected projects. Optional packaging, editor tasks and a separate generator fixture remain deferred. Sharpdrill self-analysis is only a smoke check; the external Web API experiment is pending input selection. Changes remain uncommitted for review.
 
 ## 1. What success looks like
 
 From a terminal or VS Code terminal:
 
 ```sh
-dotnet run --project src/Sharpview.Cli -- chains tests/Fixtures/ResearchSolution/ResearchSolution.slnx --root 'Research.Api.Controller.Get()'
+dotnet run --project src/Sharpdrill.Cli -- chains tests/Fixtures/ResearchSolution/ResearchSolution.slnx --root 'Research.Api.Controller.Get()'
 ```
 
 Expected stdout includes:
@@ -59,9 +59,9 @@ The same operation must be possible through a C# library call. The CLI must not 
 Also support:
 
 ```sh
-dotnet run --project src/Sharpview.Cli -- methods ./ExistingSolution.slnx
-dotnet run --project src/Sharpview.Cli -- chains ./ExistingSolution.slnx
-dotnet run --project src/Sharpview.Cli -- inspect ./ExistingSolution.slnx --format json --output snapshot.json
+dotnet run --project src/Sharpdrill.Cli -- methods ./ExistingSolution.slnx
+dotnet run --project src/Sharpdrill.Cli -- chains ./ExistingSolution.slnx
+dotnet run --project src/Sharpdrill.Cli -- inspect ./ExistingSolution.slnx --format json --output snapshot.json
 ```
 
 `methods` lists source callables and identifiers. `chains` without a root attempts chains starting at every source callable, in deterministic order and within explicit budgets. This ensures mutually recursive components are included even when they have no incoming-edge-free root.
@@ -82,7 +82,7 @@ The first release is a research tool to inspect semantics. No NuGet publication,
 - Every unresolved/unsupported scenario is represented by a scoped gap or an explicit call-site status. Metadata-only body absence is a normal boundary, not a project-load failure.
 - No database, general graph framework, custom rule language, plugin infrastructure, interprocedural data-flow engine or editor extension.
 - Implement only the five stages in this plan. VS Code terminal use works immediately; editor tasks can be added as a small part of Stage 5.
-- Implement in the existing Sharpview repository (`/home/stan/source/repos/sharpal` on the current machine). Never change synced `sources/` files in the separate ChatGPT reference mirror.
+- Implement in the existing Sharpdrill repository (`/home/stan/source/repos/sharpal` on the current machine). Never change synced `sources/` files in the separate ChatGPT reference mirror.
 
 ## 3. Call-chain semantics — implement this exactly
 
@@ -158,14 +158,14 @@ Default `--max-chains` is 1,000 across the entire command. Default `--max-expans
 
 ## 4. Repository and file responsibilities
 
-Use the existing `Sharpview` name and `sharpview.slnx` solution. Preserve the current Core, Roslyn and CLI projects; do not recreate them.
+Use the existing `Sharpdrill` name and `SharpDrill.slnx` solution. Preserve the current Core, Roslyn and CLI projects; do not recreate them.
 
 ```text
 global.json                         # Selected installed stable SDK
 Directory.Build.props               # net10.0, nullable, deterministic
 Directory.Packages.props            # Pinned compatible package versions
-sharpview.slnx
-src/Sharpview.Core/
+SharpDrill.slnx
+src/Sharpdrill.Core/
   Model/Identifiers.cs
   Model/Declarations.cs
   Model/UsageFacts.cs
@@ -175,7 +175,7 @@ src/Sharpview.Core/
   Queries/CallChainQuery.cs
   Queries/CallChainResult.cs
   Queries/DependencyQueries.cs
-src/Sharpview.Roslyn/
+src/Sharpdrill.Roslyn/
   Loading/AnalysisRequest.cs
   Loading/MSBuildBootstrap.cs
   Loading/WorkspaceLoader.cs
@@ -184,20 +184,20 @@ src/Sharpview.Roslyn/
   Extraction/DeclarationExtractor.cs
   Extraction/OperationExtractor.cs
   Extraction/SourceEvidenceFactory.cs
-src/Sharpview.Cli/
+src/Sharpdrill.Cli/
   Program.cs
   Arguments.cs
   Commands.cs
   Formatting/ChainTextWriter.cs
   Formatting/SnapshotJsonWriter.cs
-tests/Sharpview.Core.Tests/
+tests/Sharpdrill.Core.Tests/
   CallChainTests.cs
   DependencyQueryTests.cs
-tests/Sharpview.Roslyn.Tests/
+tests/Sharpdrill.Roslyn.Tests/
   LoadingTests.cs
   IdentityTests.cs
   ExtractionTests.cs
-tests/Sharpview.Cli.Tests/
+tests/Sharpdrill.Cli.Tests/
   CliProcessTests.cs
 tests/Fixtures/ResearchSolution/
   ResearchSolution.slnx
@@ -424,7 +424,7 @@ Generate a separate source-generator fixture using a minimal local generator pro
 
 ## 7. Stage 1 — repository, model and fixtures
 
-Scaffold already present: `Sharpview.Core`, `Sharpview.Roslyn` and `Sharpview.Cli`, with CLI → Core/Roslyn and Roslyn → Core references. SDK pinning, nullable settings and `sharpview.slnx` already exist. Review and extend them; do not scaffold replacements. Roslyn NuGet dependencies and extraction implementation remain work for the stages below.
+Scaffold already present: `Sharpdrill.Core`, `Sharpdrill.Roslyn` and `Sharpdrill.Cli`, with CLI → Core/Roslyn and Roslyn → Core references. SDK pinning, nullable settings and `SharpDrill.slnx` already exist. Review and extend them; do not scaffold replacements. Roslyn NuGet dependencies and extraction implementation remain work for the stages below.
 
 **Files:** scaffold and model files listed in Section 4, fixture projects, `docs/model.md` and model tests.
 
@@ -438,7 +438,7 @@ Scaffold already present: `Sharpview.Core`, `Sharpview.Roslyn` and `Sharpview.Cl
 - [ ] Add a model test that mutates an input builder after snapshot creation and verifies the snapshot is unchanged.
 - [ ] Add tests confirming source evidence coordinate conventions and that unresolved targets can be represented without fabricated IDs.
 - [ ] Document the structural meaning of a call chain before implementing traversal.
-- [ ] Run `dotnet build sharpview.slnx` and `dotnet test tests/Sharpview.Core.Tests`.
+- [ ] Run `dotnet build SharpDrill.slnx` and `dotnet test tests/Sharpdrill.Core.Tests`.
 - [ ] Commit if the product checkout is a normal Git repository and commits are within the authorised workflow.
 
 **Acceptance:** fixture and host build using only the SDK; public model has no Roslyn dependency and retains the data needed for printed chains.
@@ -458,7 +458,7 @@ Scaffold already present: `Sharpview.Core`, `Sharpview.Roslyn` and `Sharpview.Cl
 - [ ] Ensure cancellation is passed to loading/compilation operations and resources are disposed on failure.
 - [ ] Test `.csproj`, `.sln` and `.slnx` input, project-reference inclusion, invalid paths, ambiguous multi-target input, explicit framework selection, missing references and cancellation.
 - [ ] Restore a repository-owned fixture and then analyse it. Use an isolated fixture copy with unavailable assets to test the no-silent-restore policy.
-- [ ] Run `dotnet test tests/Sharpview.Roslyn.Tests --filter LoadingTests` and the fresh-process bootstrap check.
+- [ ] Run `dotnet test tests/Sharpdrill.Roslyn.Tests --filter LoadingTests` and the fresh-process bootstrap check.
 - [ ] Commit the independently testable loader.
 
 **Acceptance:** compilation selection is observable; load failure cannot be mistaken for an empty complete solution; no Visual Studio components are required.
@@ -555,7 +555,7 @@ Mark a global limit as reached only when additional work/results were prevented.
 - [ ] Implement path-local traversal and deterministic global budgets across roots.
 - [ ] Implement `SignatureUses` by dependency reason; test nested generic references, avoiding namespace-name heuristics inside the library.
 - [ ] Keep text formatting outside the query library: results contain IDs, steps and end status, not preformatted arrows.
-- [ ] Run `dotnet test tests/Sharpview.Core.Tests` and commit.
+- [ ] Run `dotnet test tests/Sharpdrill.Core.Tests` and commit.
 
 Essential expectations:
 
@@ -584,12 +584,12 @@ Essential expectations:
 ### 5A. Command contract
 
 ```text
-sharpview methods <input> [--configuration Debug] [--framework <tfm>]
-sharpview chains <input> [--root <signature> | --root-id <id>]
+sharpdrill methods <input> [--configuration Debug] [--framework <tfm>]
+sharpdrill chains <input> [--root <signature> | --root-id <id>]
                      [--dispatch declared|direct]
                      [--max-depth 20] [--max-chains 1000] [--max-expansions 100000]
                      [--configuration Debug] [--framework <tfm>] [--locations]
-sharpview inspect <input> [--format text|json] [--output <path>]
+sharpdrill inspect <input> [--format text|json] [--output <path>]
                       [--configuration Debug] [--framework <tfm>]
 ```
 
@@ -633,7 +633,7 @@ Research.Api.Controller.Get() --> Research.Application.Service.Load() --> Resear
 - [ ] Pack the CLI as a local .NET tool only after process tests pass; test local package installation without publishing it.
 - [ ] Run on an existing solution supplied by the user. If none is available, complete fixture validation and explicitly mark the user-code experiment as pending; do not claim it occurred.
 - [ ] Record load gaps, surprising targets and the first model changes justified by actual code. Add focused regression fixtures for demonstrated bugs.
-- [ ] Run `dotnet build sharpview.slnx`, `dotnet test sharpview.slnx` and the CLI smoke command. Report what works and remaining gaps.
+- [ ] Run `dotnet build SharpDrill.slnx`, `dotnet test SharpDrill.slnx` and the CLI smoke command. Report what works and remaining gaps.
 - [ ] Commit the five-stage baseline in the normal product repository.
 
 **Acceptance:** an SDK-only terminal run prints correct arrow chains across projects; the same capabilities are callable from C#; output remains honest about boundaries and limits.
@@ -662,8 +662,8 @@ Suggested initial `AGENTS.md` content for the product repository:
 ```text
 Implement the C# call-chain research plan, stages 1–5.
 Use the .NET SDK and CLI; no Visual Studio integrations.
-Keep Roslyn types inside Sharpview.Roslyn.
-Keep traversal in Sharpview.Core, formatting/arguments in Sharpview.Cli.
+Keep Roslyn types inside Sharpdrill.Roslyn.
+Keep traversal in Sharpdrill.Core, formatting/arguments in Sharpdrill.Cli.
 Never modify user projects being analysed.
 Call chains represent static declared relationships, not execution traces.
 Preserve all call-site evidence even when display relationships are collapsed.

@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+<PackageReference Include="Microsoft.Build" ExcludeAssets="runtime" PrivateAssets="all" />
+<PackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" PrivateAssets="all" />
+    <ProjectReference Include="../SharpDrill.Core/SharpDrill.Core.csproj" />
+    <ProjectReference Include="../SharpDrill.Export.Mermaid/SharpDrill.Export.Mermaid.csproj" />
+    <ProjectReference Include="../SharpDrill.Roslyn/SharpDrill.Roslyn.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- MSBuild is loaded from the user's newest installed SDK, so run on the newest runtime too. -->
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+
+  <!-- .NET tool package: dotnet tool install -g SharpDrill (the MSBuild package is SharpDrill.MSBuild, src/SharpDrill.Build).
+       Released versions come from git tags (release workflow). -->
+  <PropertyGroup>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>sharpdrill</ToolCommandName>
+    <PackageId>SharpDrill</PackageId>
+    <HasOwnReadme>true</HasOwnReadme>
+    <Description>Source-backed analysis of ASP.NET Core Web APIs for people and agents: the MSBuild project reference map with build settings, where exceptions are thrown, caught, miscaught or may escape an action, and Mermaid call diagrams of controller actions. Uses Roslyn and your installed .NET SDK; never builds or edits the analysed code.</Description>
+    <PackageTags>roslyn;static-analysis;aspnetcore;exceptions;call-graph;mermaid;dotnet-tool;architecture</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="PACKAGE.md" Pack="true" PackagePath="README.md" />
+    <EmbeddedResource Include="Skill/SKILL.md" LogicalName="SKILL.md" />
+  </ItemGroup>
+
+</Project>

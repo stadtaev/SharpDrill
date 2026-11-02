@@ -8,7 +8,7 @@ This document records why, because the causes were design mistakes, not bugs: wr
 
 | Symptom in the output | Cause | Fixed by |
 | --- | --- | --- |
-| `Unknown [MissingBody]` **with** a file:line (record parameters, property declarations) | Auto-property accessors and record constructors have no body in source, so they were classed "missing" | [`BodyStatus.Synthesized`](../src/SharpView.Core/Model/Facts.cs) |
+| `Unknown [MissingBody]` **with** a file:line (record parameters, property declarations) | Auto-property accessors and record constructors have no body in source, so they were classed "missing" | [`BodyStatus.Synthesized`](../src/SharpDrill.Core/Model/Facts.cs) |
 | `Unknown [MissingBody]` **without** a location | Any call into framework or NuGet code | Library calls are counted, never Unknown |
 | `Virtual dispatch` on `Ok(...)`, `StatusCode(...)` | Virtual members of `ControllerBase`: library code | Same as above |
 | `Interface dispatch` on every service call | The analysis stopped at each DI interface, so nothing behind it was ever reached | Exception views follow source implementations by default |
@@ -40,7 +40,7 @@ Only a genuine "we cannot decide something we are trying to decide" belongs in *
 
 They belong to *our* code and cannot contain an explicit `throw`. Calling them "missing" made every action that built a record or read a DTO property "unknown", which in this codebase was every action.
 
-[`IsCompilerProvided`](../src/SharpView.Roslyn/Extraction/FactExtractor.Symbols.cs) now classifies them: member of a source assembly, not abstract, not extern, not on an interface or delegate, and either implicitly declared, an accessor of a property or event, or a constructor declared by the type syntax itself. Abstract and interface members stay `NoBody`: they really have no code.
+[`IsCompilerProvided`](../src/SharpDrill.Roslyn/Extraction/FactExtractor.Symbols.cs) now classifies them: member of a source assembly, not abstract, not extern, not on an interface or delegate, and either implicitly declared, an accessor of a property or event, or a constructor declared by the type syntax itself. Abstract and interface members stay `NoBody`: they really have no code.
 
 **Rule:** a status describes what we know about the *code that runs*. "Has no syntax" and "has no code" are different things; check what the compiler provides before reporting something missing.
 
@@ -64,7 +64,7 @@ Following candidates exposed a precision problem we had not met before:
 
 > `foreach` over a `List<T>` ends with an implicit `Dispose()`. Roslyn reports it as `IDisposable.Dispose`, an interface call. Our candidate lookup for that interface method is *every* `Dispose` implemented anywhere in the program. So every `foreach` in the application looked as though it might call any disposable class we had written.
 
-The compiler binds a call written in source to the receiver type's own member. We now resolve implicit calls the same way ([`ImplicitCall`](../src/SharpView.Roslyn/Extraction/BodyWalker.cs)): a library receiver becomes a library call, and a source receiver has candidates only among its own overrides.
+The compiler binds a call written in source to the receiver type's own member. We now resolve implicit calls the same way ([`ImplicitCall`](../src/SharpDrill.Roslyn/Extraction/BodyWalker.cs)): a library receiver becomes a library call, and a source receiver has candidates only among its own overrides.
 
 **Rule:** choose defaults for the typical program, not the principled corner. A default that returns nothing for the common case is a bug even when it is "conservative". Keep the honesty in the marking, not in the refusal.
 

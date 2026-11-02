@@ -73,7 +73,7 @@ constructor chains or generated Main requires separate extraction work; global c
 
 Review follow-up verification:
 
-- `dotnet build sharpview.slnx` succeeded with **0 warnings and 0 errors**; `dotnet test sharpview.slnx --no-build` passed
+- `dotnet build SharpDrill.slnx` succeeded with **0 warnings and 0 errors**; `dotnet test SharpDrill.slnx --no-build` passed
   **202/202**, with **0 failures and 0 skipped**.
 - Fresh CLI output was compared against the pre-follow-up graph commit (`b8fb7a4`) on the fixture and a frozen
   self-analysis source. `controllers`, `chains`, `methods`, `inspect` (text and JSON), `layers`, direct-only `reach` and
@@ -207,7 +207,7 @@ checks precede the final solution run. Exact final commands, counts and parser v
 
 Final verification completed:
 
-- `dotnet test sharpview.slnx --no-restore --logger 'trx;LogFileName=full-suite.trx' --results-directory /tmp/sharpview-test-results`
+- `dotnet test SharpDrill.slnx --no-restore --logger 'trx;LogFileName=full-suite.trx' --results-directory /tmp/sharpdrill-test-results`
   passed **192/192**, with **0 failures and 0 skipped** (1 minute 58 seconds). The TRX counters were inspected independently:
   total/executed/passed 192, failed/error/timeout/aborted/not-executed 0. This command built all projects successfully.
 - Earlier focused graph/diagram checks passed 45 tests, then 33 graph/reach/CLI tests with TRX output. Focused Core exception
@@ -216,7 +216,7 @@ Final verification completed:
   Core tests cover actual candidate edges. The final 192-test run includes the corrected test and all added cases.
 - Official Mermaid parsers **11.17.2** and **12.2.0** accepted the generated direct fixture, declared-interface, recursive,
   special-character label and real-candidate synthetic exports. Node/parser packages were installed only under
-  `/tmp/sharpview-mermaid-validation`; no JavaScript dependency was added to the repository.
+  `/tmp/sharpdrill-mermaid-validation`; no JavaScript dependency was added to the repository.
 - Fresh-process CLI tests verify the default binary-relative directory, numeric picker, EOF/quit, exact action signature
   and ID selection, full absolute saved path, output limits, summary CLI and refusal to overwrite.
 - `git diff --check` passed. Independent graph, diagram and final architecture reviews found no remaining actionable
@@ -241,14 +241,14 @@ consumers expecting direct-preferred witnesses or fewer Unknowns, and their publ
 - Full-program drawings, DOT, reusable generic attribute bags and NetworkX node-link export are future increments, not implied
   by the Mermaid feature. No new graph library or runtime database is necessary for the current in-memory analysis.
 - External Web API validation is still unavailable without a working package feed/restore. The earlier archive's configured
-  feed returned HTTP 404. Repository fixture and Sharpview inputs are used here; external validation is not claimed.
+  feed returned HTTP 404. Repository fixture and Sharpdrill inputs are used here; external validation is not claimed.
 
 ## Follow-up: use a maintained Mermaid generator
 
 At the user's request, handwritten flowchart serialization is replaced by **Mermaid.NET.Flowcharts 6.0.0**, centrally pinned
-in `Directory.Packages.props` and referenced by `Sharpview.Core`. The package models nodes, project subgraphs, link kinds and
+in `Directory.Packages.props` and referenced by `Sharpdrill.Core`. The package models nodes, project subgraphs, link kinds and
 root styles, and owns Mermaid formatting and standard text escaping. Graph projection, stable IDs, edge evidence, boundaries,
-limits, selection, filenames and Markdown reporting remain Sharpview responsibilities.
+limits, selection, filenames and Markdown reporting remain Sharpdrill responsibilities.
 
 The package was selected after checking its source, tests, license, CI and releases on 2026-10-18:
 
@@ -272,10 +272,10 @@ validated against the official Mermaid parsers. The checked-in diagram sample is
 
 Validation for this follow-up:
 
-- `dotnet restore sharpview.slnx` succeeded; the resolved package targets .NET 10 and has no transitive runtime dependencies.
+- `dotnet restore SharpDrill.slnx` succeeded; the resolved package targets .NET 10 and has no transitive runtime dependencies.
 - Updated text/escaping expectations were first run against the old formatter and failed as expected; the package-backed
   implementation then passed all 8 focused diagram tests before blank-label coverage was added.
-- `dotnet test sharpview.slnx --no-restore --logger 'trx;LogFileName=mermaid-package.trx' --results-directory /tmp/sharpview-test-results`
+- `dotnet test SharpDrill.slnx --no-restore --logger 'trx;LogFileName=mermaid-package.trx' --results-directory /tmp/sharpdrill-test-results`
   passed **195/195**, with **0 failures and 0 skipped**, in 1 minute 11 seconds. TRX counters were inspected. This includes
   existing fresh-process diagram/CLI integration tests and the new
   `Library_generation_preserves_edge_identity_root_style_and_markdown_safe_labels` and
@@ -288,13 +288,13 @@ Validation for this follow-up:
 
 ## Follow-up: extract the export adapter without DI
 
-The Mermaid/Markdown formatter moves to a dedicated **`Sharpview.Export.Mermaid`** project. The NuGet reference moves with it;
-`Sharpview.Core` now depends only on `Sharpview.Graph`. Core retains the format-independent `CallDiagram` records,
+The Mermaid/Markdown formatter moves to a dedicated **`Sharpdrill.Export.Mermaid`** project. The NuGet reference moves with it;
+`Sharpdrill.Core` now depends only on `Sharpdrill.Graph`. Core retains the format-independent `CallDiagram` records,
 `DiagramOptions` and `CallDiagramQuery` analysis/projection. CLI and tests explicitly reference the new exporter project, which
-is included in `sharpview.slnx`.
+is included in `SharpDrill.slnx`.
 
-The static entry point is now `Sharpview.Export.Mermaid.MermaidExporter.Markdown(CallDiagram)`. Source consumers must reference
-the new project and import `Sharpview.Export.Mermaid`; the README example is updated. The exporter implementation is moved
+The static entry point is now `Sharpdrill.Export.Mermaid.MermaidExporter.Markdown(CallDiagram)`. Source consumers must reference
+the new project and import `Sharpdrill.Export.Mermaid`; the README example is updated. The exporter implementation is moved
 unchanged apart from its namespace and Core import, so formatting, escaping, evidence, limits, file selection and absolute-path
 reporting retain their prior behavior. The call remains static: no DI container, exporter interface, registration extension,
 hosting package or new service abstraction is introduced.
@@ -302,19 +302,19 @@ hosting package or new service abstraction is introduced.
 Dependency direction:
 
 ```text
-Sharpview.Cli -> Sharpview.Core -> Sharpview.Graph
-Sharpview.Cli -> Sharpview.Export.Mermaid -> Sharpview.Core
-Sharpview.Export.Mermaid -> Mermaid.NET.Flowcharts
+Sharpdrill.Cli -> Sharpdrill.Core -> Sharpdrill.Graph
+Sharpdrill.Cli -> Sharpdrill.Export.Mermaid -> Sharpdrill.Core
+Sharpdrill.Export.Mermaid -> Mermaid.NET.Flowcharts
 ```
 
 Validation for the extraction:
 
-- `dotnet build sharpview.slnx` succeeded with **0 warnings and 0 errors**, restoring/building the new project as part of the solution.
-- `dotnet test sharpview.slnx --no-build --no-restore --logger 'trx;LogFileName=export-extraction.trx' --results-directory /tmp/sharpview-test-results`
+- `dotnet build SharpDrill.slnx` succeeded with **0 warnings and 0 errors**, restoring/building the new project as part of the solution.
+- `dotnet test SharpDrill.slnx --no-build --no-restore --logger 'trx;LogFileName=export-extraction.trx' --results-directory /tmp/sharpdrill-test-results`
   passed the same **195/195** tests, with **0 failures and 0 skipped**, in 1 minute 13 seconds. TRX counters were inspected.
   Existing exporter tests and fresh-process CLI integration tests now reference/use the new assembly.
 - A source comparison verified that exporter code differs from its previous implementation only by namespace and the Core
   import. No new behavior tests were necessary for this mechanical extraction.
-- Core's restored assets contain only the `Sharpview.Graph` project dependency, confirming that the Mermaid package no longer
+- Core's restored assets contain only the `Sharpdrill.Graph` project dependency, confirming that the Mermaid package no longer
   appears in Core's dependency closure. All CLI/test source references and README usage imports were updated.
 - `git diff --check` passed. No DI or service-registration dependency was added.
