@@ -3,12 +3,12 @@ using SharpView.Core;
 
 namespace SharpView.Cli;
 
-internal sealed record ReportContext(ProgramIndex Index, Arguments Arguments, TextWriter Output, Stream? OutputFile, Display Display)
+internal sealed record ReportContext(ProgramIndex Index, Arguments Arguments, TextWriter Output, Display Display)
 {
     internal ProgramSnapshot Snapshot => Index.Snapshot;
 }
 
-/// <summary>Text-report commands: shared output target, coverage trailer and exit code.</summary>
+/// <summary>Text-report commands: shared coverage trailer and exit code.</summary>
 internal abstract class ReportCommand : ICliCommand
 {
     public abstract ImmutableHashSet<string> Options { get; }
@@ -17,9 +17,7 @@ internal abstract class ReportCommand : ICliCommand
 
     public async Task<int> RunAsync(ProgramIndex index, Arguments arguments, CancellationToken token)
     {
-        using var file = arguments.Output is null ? null : new StreamWriter(new FileStream(arguments.Output, FileMode.CreateNew, FileAccess.Write));
-        var output = (TextWriter?)file ?? Console.Out;
-        var context = new ReportContext(index, arguments, output, file?.BaseStream, new Display(index, arguments.Input));
+        var context = new ReportContext(index, arguments, Console.Out, new Display(index, arguments.Input));
         var incomplete = await ExecuteAsync(context, token);
         token.ThrowIfCancellationRequested();
         return WriteCoverage(index.Snapshot) | incomplete ? 1 : 0;

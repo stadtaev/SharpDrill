@@ -15,9 +15,9 @@ flowchart LR
     A[".sln / .slnx / .csproj<br/>(restored)"] --> B["Load<br/>MSBuild + Roslyn"]
     B --> C["Extract facts<br/>ProgramSnapshot"]
     C --> D["Index<br/>ProgramIndex"]
-    D --> E["Analyses & models<br/>projects · exceptions · reach · paths"]
+    D --> E["Analyses & models<br/>projects · exceptions · call diagram"]
     E --> F["Rules<br/>Finding + Verdict"]
-    E --> G["Reports<br/>CLI text / JSON"]
+    E --> G["Reports<br/>CLI text / Markdown"]
     F --> G
 ```
 
@@ -26,20 +26,20 @@ flowchart LR
 | Load | `SharpView.Roslyn` | Opens the solution with the .NET SDK. Never restores, builds or edits your code. |
 | Extract facts | `SharpView.Roslyn` | Turns compiler symbols into small immutable records: types, callables, call sites, dependencies, throws, catches, implementation candidates, gaps. |
 | Index | `SharpView.Core` | `ProgramIndex` builds lookups once (callers, callees, members, ancestors, candidates…) and, on first use, the whole-program `CallGraph` and type `DependencyGraph`. |
-| Analyses & models | `SharpView.Core` | Queries over the index: project map, exception propagation and handling, reachability, call paths, layer graph (library only). |
+| Analyses & models | `SharpView.Core` | Queries over the index: project map, exception propagation and handling, call diagram, layer graph (library only). |
 | Rules | `SharpView.Core` | Plain C# functions that turn analysis results into `Finding`s. |
 | Diagram export | `SharpView.Export.Mermaid` | Formats the project map and call-diagram projections as Mermaid/Markdown; owns the Mermaid NuGet dependency. |
-| Reports | `SharpView.Cli` | Formats text/JSON. No analysis logic lives here. |
+| Reports | `SharpView.Cli` | Formats text and saves Markdown. No analysis logic lives here. |
 
-`SharpView.Core` depends only on `SharpView.Graph`, with no Roslyn or Mermaid dependency: once a snapshot exists (or is loaded from JSON), all analysis runs on plain records.
+`SharpView.Core` depends only on `SharpView.Graph`, with no Roslyn or Mermaid dependency: once a snapshot exists, all analysis runs on plain records.
 
-`SharpView.Graph` is a small generic graph library underneath Core (it knows nothing about C#): an immutable directed multigraph (`DiGraph`) with NetworkX-style operations — out/in edges, successors/predecessors, `Where` and `Subgraph` (materialized copies sharing payload), breadth-first search with shortest paths, `ReachableFrom`, `Quotient` (collapse nodes into groups such as layers) and `StronglyConnectedComponents` (cycles). Everything keeps insertion order, so results are deterministic. Reachability searches the call graph with shared parent links; witnesses materialize on demand. The layer graph is a quotient of the call and dependency graphs, with isolated groups and original node membership retained. Node identities and edge endpoints must remain stable. Cached graph accessors accept cancellation tokens and publish complete graphs only.
+`SharpView.Graph` is a small generic graph library underneath Core (it knows nothing about C#): an immutable directed multigraph (`DiGraph`) with NetworkX-style operations — out/in edges, successors/predecessors, `Where` and `Subgraph` (materialized copies sharing payload), `Quotient` (collapse nodes into groups such as layers) and `StronglyConnectedComponents` (cycles). Everything keeps insertion order, so results are deterministic. The layer graph is a quotient of the call and dependency graphs, with isolated groups and original node membership retained. Node identities and edge endpoints must remain stable. Cached graph accessors accept cancellation tokens and publish complete graphs only.
 
 ## Principles
 
 1. **Declared, candidate and runtime are different things.**
    - *Declared binding* — what the source code calls, e.g. `IRepository.Read()`. Always recorded.
-   - *Implementation candidate* — a source method that implements or overrides it, e.g. `SqlRepository.Read()`. Recorded separately; followed only on request and always marked "candidate".
+   - *Implementation candidate* — a source method that implements or overrides it, e.g. `SqlRepository.Read()`. Recorded separately; followed by default in `exceptions` and `diagram` (`--declared-only` turns that off) and always marked as a possibility.
    - *Runtime target* — what actually runs (depends on DI, receiver type…). SharpView never claims this.
 2. **Unknown is a result, not an error.** Interface dispatch, missing bodies, a `finally` that can throw, tasks never awaited, depth limits… produce explicit Unknown/boundary entries with a reason.
 3. **Evidence everywhere.** Facts and results point at source locations; reports can be checked by hand.
@@ -57,10 +57,8 @@ Snippets below are from the sample Web API, with names and paths shortened; the 
 | Which exceptions may escape an action with no catch on the way? | `exceptions --uncaught` | [exceptions-uncaught.txt](samples/exceptions-uncaught.txt) |
 | Which are caught, and where? | `exceptions --caught` | [exceptions-caught.txt](samples/exceptions-caught.txt) |
 | Which pass through a `try` that doesn't catch them? | `exceptions --miscaught` | [exceptions-miscaught.txt](samples/exceptions-miscaught.txt) |
-| What can this action reach? | `reach` | [reach.txt](samples/reach.txt) |
-| What are all the call paths from an action (or any method)? | `paths` | [paths.txt](samples/paths.txt) |
-| What did SharpView extract? | `inspect` (`--methods`, `--json`) | — |
-| How does a coding agent learn to use SharpView? | `skill` (`--user`) | `.claude/skills/sharpview/SKILL.md` |
+| What does one action call, as a picture? | `diagram` | [diagram.md](samples/diagram.md) |
+| How does a coding agent learn to use SharpView? | `skill` (`--user`) | `.github/skills/sharpview/SKILL.md`, `.claude/skills/sharpview/SKILL.md` |
 
 ### When to use which command
 
@@ -68,9 +66,7 @@ Snippets below are from the sample Web API, with names and paths shortened; the 
 | --- | --- |
 | Orientation in an unfamiliar solution | `projects`, then `exceptions` |
 | Exception-handling review | `exceptions --uncaught`, `--caught`, `--miscaught` |
-| Everyday call analysis | `reach`, `diagram` |
-| Every route through one small endpoint, or from a method that is not an action | `paths` |
-| Lookups, coverage checks and machine-readable facts | `inspect` |
+| Reviewing or explaining one endpoint | `diagram` |
 
 **`projects` — how is the solution put together?** The `<ProjectReference>` tree with each project's framework, `Nullable`, whether nullable (or all) warnings are errors, and compiler warning and error counts. Values come from MSBuild's evaluation, including inherited `Directory.Build.props`.
 
@@ -90,27 +86,7 @@ A `Not followed:` line on stderr says where the analysis stopped and needs a hum
 
 *`--format msbuild`* prints the uncaught and miscaught findings (or one view's) as one MSBuild warning per line: `SV0001` may escape an action, `SV0002` may escape to a global exception handler, `SV0003` miscaught, `SV0004` third-party call with `--strict`. Run it in CI (the README has a GitLab CI job) or as a VS Code task with the `$msCompile` problem matcher; the optional `SharpView` package runs it after each build instead, so the findings also land in Visual Studio's Error List. `#pragma warning disable SV000N` and `[SuppressMessage("SharpView", "SV000N")]` at the warning's location suppress it.
 
-**`reach` — what can this endpoint touch?** Each reachable method once, with distance and one shortest path. Its cost grows with the size of the code, not the number of paths, so it is the right default on large solutions.
-
-- *Impact analysis:* before changing `Repository.Save()`, run `reach` over all actions to see which endpoints can get to it.
-- *Architecture checks:* an Infrastructure method at distance 1 from a controller means the Application project was skipped. The rule in [Writing your own rule](#writing-your-own-rule) is built on exactly this.
-- *Onboarding and review:* a flat list of everything an endpoint depends on, without wading through paths.
-- *Security and audit:* can any endpoint reach `File.Delete` or a raw SQL helper? Framework methods that are called directly appear too, with `Project: metadata`.
-
-**`paths` — every route through an endpoint.** All call paths from each action, with project, type and transitions per step.
-
-- *Explaining one endpoint in full*, for example in a code review or design discussion, when the order of calls matters.
-- *Seeing where projects are crossed:* each path shows exactly where it moves from API to Application to Infrastructure.
-- *Entry points that are not controller actions:* background jobs, message handlers, `Program.Main`, library APIs and minimal-API lambdas (which are not recognised as actions). Pass any source method with `--root`.
-- *Limit:* the number of paths grows exponentially. Use it on small or medium endpoints; on anything large, use `reach` or `diagram`.
-
-**`diagram` — a picture of one endpoint.** A Mermaid call graph for pull requests, design docs or onboarding notes. It stays readable where `paths` would produce thousands of paths, because shared callees are drawn once.
-
-**`inspect` — what did SharpView extract?**
-
-- *Summary (default):* a quick check after loading: each project and its framework; counts of types, callables, calls, dependencies, throws, catches, actions and gaps; call sites by dispatch kind; and the exception landscape (every explicit throw and catch, with evidence).
-- *`--methods`:* every source callable with its kind, body status and ID. Copy a `--root` from here: an ID or the exact signature, and the ID when overloads or lambdas share a signature. A method missing from the list was not extracted from source (for example, it lives only in a referenced assembly, or is generated code dropped by `--exclude-generated`). Look here first when a result seems wrong.
-- *`--json`:* the full fact snapshot (schema v3). Use it to feed scripts, agents or dashboards without writing C# against the library, or to compare snapshots across commits, since IDs are stable keys. It also answers "was this call site extracted at all?" when debugging SharpView itself.
+**`diagram` — a picture of one endpoint.** A Mermaid call graph for pull requests, design docs or onboarding notes, grouped by project. Shared callees are drawn once, so it stays readable on large endpoints. Interface and virtual calls lead into their source implementations, marked as candidates; `--declared-only` stops at the declaration.
 
 ### `projects` — the reference tree
 
@@ -122,17 +98,6 @@ Research.Api [net10.0 | Nullable: enable | Nullable warnings as errors: no | All
 ```
 
 A project referenced from several places is described once; later occurrences say `(described above)`. Warning counts are compiler diagnostics; analyzer and NuGet warnings are not included.
-
-### `reach` — one line per reachable method
-
-```text
-Root: Research.Api.OrdersController.Get()
-  [1] Research.Application.Service.Load() | Project: Research.Application
-  [2] Research.Infrastructure.Repository.Read() | Project: Research.Infrastructure
-    Path: OrdersController.Get() --> Service.Load() --> Repository.Read()
-```
-
-`[n]` is the number of call transitions (not stack depth). Each method appears once with one shortest allowed path after a complete search. A work-limited result retains a valid admitted path; its distance still agrees with its witness. With candidates enabled, `Distance`/`Witness` describe the shortest allowed route, while nullable `DirectDistance` and lazy `DirectWitness` preserve the direct-call-only route. `ViaCandidate` indicates no bounded direct proof was established; `WitnessUsesCandidate` describes the displayed path. Only examined sites produce per-site boundaries; a depth stop is a single boundary. Prefer `reach` over `paths` on large code: path enumeration grows exponentially, reachability does not.
 
 ### `exceptions` — four views
 
@@ -194,21 +159,19 @@ earlier finding's path reads `same as 2` or `as in 2 up to <method>, then -> ...
 A rule is a function over the index (and optionally derived models) that returns `Finding`s:
 
 ```csharp
-// "Controllers must not reach Infrastructure directly."
+// "Controllers must not call Infrastructure directly."
 static IEnumerable<Finding> NoDirectInfrastructure(ProgramIndex index, LayerMap layers)
 {
-    var actions = AspNetConventions.ControllerActions(index).Select(x => x.Method).ToImmutableArray();
-    foreach (var root in ReachabilityQuery.Analyze(index, actions, new ReachOptions(FollowCandidates: true)).Roots)
-        foreach (var hit in root.Reached.Where(x => x.DirectDistance == 1 && layers.LayerOf(x.Callable) == "Infrastructure"))
+    foreach (var action in AspNetConventions.ControllerActions(index).Select(x => x.Method))
+        foreach (var site in index.Outgoing(action).Where(x => x.BoundTarget is { } target && layers.LayerOf(target) == "Infrastructure"))
             yield return new("no-direct-infrastructure", Verdict.Violation,
-                index.Callable(root.Root).DisplaySignature, $"Calls {index.Callable(hit.Callable).DisplaySignature} directly.",
-                [index.CallSite(hit.DirectWitness[0].Site).Evidence]);
+                index.Callable(action).DisplaySignature, $"Calls {site.TargetDisplay} directly.", [site.Evidence]);
 }
 ```
 
-Even with candidates enabled, this rule uses `DirectDistance == 1` and `DirectWitness` for its violation and evidence. A candidate shortcut cannot turn a longer direct route into a direct-call violation. Candidate possibilities can be evaluated separately as Unknown; this example enforces direct calls only.
+The rule reads declared call targets only; an interface call into Infrastructure is not a direct-call violation.
 
-Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `SharpView.Graph` algorithms, `ProjectMap` (MSBuild references and settings), `LayerMap`/`LayerGraph` (your own layer mapping, library only), `ReachabilityQuery`, `CallChainQuery`, `ExceptionSummaryQuery` (with `ExceptionReason` codes), `ExceptionHandlingQuery` (caught/miscaught, where one throw ends), `AspNetConventions`. Keep `Verdict.Unknown` separate from `Pass` — it is how a rule stays honest.
+Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `SharpView.Graph` algorithms, `ProjectMap` (MSBuild references and settings), `LayerMap`/`LayerGraph` (your own layer mapping, library only), `CallDiagramQuery`, `ExceptionSummaryQuery` (with `ExceptionReason` codes), `ExceptionHandlingQuery` (caught/miscaught, where one throw ends), `AspNetConventions`. Keep `Verdict.Unknown` separate from `Pass` — it is how a rule stays honest.
 
 ## Glossary
 
@@ -219,7 +182,7 @@ Building blocks: `ProgramIndex` (lookups, `CallGraph`, `DependencyGraph`), `Shar
 | Transition / distance | One call edge. Not runtime stack depth. |
 | Witness | A concrete path plus source locations that justifies a result. |
 | Boundary | Where traversal stopped and why (dispatch, missing body, unresolved, depth/work limit). |
-| Gap | Something extraction could not model (e.g. top-level statements). `inspect` lists them all; other commands mention one only when it affects their result. |
+| Gap | Something extraction could not model (e.g. top-level statements). Commands mention one only when it affects their result. |
 | Key | Portable identity (`<project>\|<documentation ID>`); IDs are local to one analysis run. |
 
 ## Further reading
@@ -242,5 +205,5 @@ depends on the number of distinct effects, call sites and fixed-point transfers,
 `CallDiagramQuery` projects a bounded action subgraph without enumerating all paths. `MermaidExporter` in `SharpView.Export.Mermaid` formats that projection;
 it does not infer layers or analyze exception behavior. The CLI `diagram` command supplies selection and safe file output.
 Project groups are labels for source ownership; collapsed project/layer graphs must never replace the method graph for
-reachability or exception propagation. See [the implementation change document](changes/2026-10-18-graph-analysis-and-mermaid.md)
+call or exception analysis. See [the implementation change document](changes/2026-10-18-graph-analysis-and-mermaid.md)
 for contracts, defaults, regressions and limitations.

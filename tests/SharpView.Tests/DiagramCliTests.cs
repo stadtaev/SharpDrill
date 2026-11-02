@@ -1,10 +1,9 @@
 using System.Diagnostics;
-using System.Text.Json;
 using Xunit;
 
 namespace SharpView.Tests;
 
-public sealed class DiagramCliTests
+public sealed class DiagramCliTests(ResearchFixture fixture) : IClassFixture<ResearchFixture>
 {
     private static Task<(int Exit, string Out, string Error)> Run(string input, params string[] args) => RunIn(ResearchFixture.Root, input, args);
 
@@ -48,22 +47,23 @@ public sealed class DiagramCliTests
     [Fact]
     public async Task Explicit_action_id_selects_without_prompt_and_preserves_dispatch_when_candidates_are_absent()
     {
-        var snapshot = await Run("", "inspect", ResearchFixture.Input, "--json");
-        using var json = JsonDocument.Parse(snapshot.Out);
-        var id = json.RootElement.GetProperty("snapshot").GetProperty("callables").EnumerateArray()
-            .Single(x => x.GetProperty("displaySignature").GetString() == "Research.Api.OrdersController.Interface(Research.Infrastructure.IRepository)")
-            .GetProperty("id").GetString()!;
+        // IDs are deterministic across runs, so one from an in-process load names the same action in the CLI.
+        var id = Assert.Single(fixture.Snapshot.Callables, x => x.DisplaySignature == "Research.Api.OrdersController.Interface(Research.Infrastructure.IRepository)").Id.Value;
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        var declared = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
         try
         {
-            var result = await Run("", "diagram", ResearchFixture.Input, "--root", id, "--follow-candidates", "--output", path);
+            // Implementation candidates are followed by default, as in exceptions; IRepository has none in source.
+            var result = await Run("", "diagram", ResearchFixture.Input, "--root", id, "--output", path);
             Assert.Equal(1, result.Exit); Assert.DoesNotContain("Choose an action", result.Out);
             Assert.Contains("Saved diagram: " + Path.GetFullPath(path), result.Out);
             var document = await File.ReadAllTextAsync(path);
             Assert.DoesNotContain(": possible candidate", document); Assert.Contains("declared dispatch", document);
             Assert.Contains("Implementation candidates followed: True", document);
+            Assert.Equal(1, (await Run("", "diagram", ResearchFixture.Input, "--root", id, "--declared-only", "--output", declared)).Exit);
+            Assert.Contains("Implementation candidates followed: False", await File.ReadAllTextAsync(declared));
         }
-        finally { File.Delete(path); }
+        finally { File.Delete(path); File.Delete(declared); }
     }
 
     [Theory]
@@ -114,13 +114,12 @@ public sealed class DiagramCliTests
         Assert.Contains("Not followed: 1 task that is never awaited (e.g. Research.Application/Service.cs:15).", unobserved.Error);
         var limited = await Run("", "exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Get()", "--budget", "1");
         Assert.Equal(1, limited.Exit); Assert.Contains("Stopped early: the analysis budget ran out", limited.Error);
-        var invalid = await Run("", "reach", "missing.slnx", "--uncaught");
+        var invalid = await Run("", "projects", "missing.slnx", "--uncaught");
         Assert.Equal(2, invalid.Exit); Assert.DoesNotContain("Input not found", invalid.Error);
     }
 
     [Theory]
     [InlineData("--max-depth", "1")]
-    [InlineData("--max-paths", "10")]
     [InlineData("--budget", "0")]
     public async Task Invalid_summary_options_fail_before_loading(string option, string value)
     {
@@ -131,12 +130,13 @@ public sealed class DiagramCliTests
     [Theory]
     [InlineData("--max-nodes", "0")]
     [InlineData("--max-edges", "0")]
-    [InlineData("--max-paths", "10")]
+    [InlineData("--max-depth", "-1")]
+    [InlineData("--follow-candidates", null)]
     [InlineData("--budget", "0")]
     [InlineData("--layer", "project:X=X")]
-    public async Task Invalid_diagram_options_fail_before_loading(string option, string value)
+    public async Task Invalid_diagram_options_fail_before_loading(string option, string? value)
     {
-        var result = await Run("", "diagram", "missing.slnx", option, value);
+        var result = await Run("", value is null ? ["diagram", "missing.slnx", option] : ["diagram", "missing.slnx", option, value]);
         Assert.Equal(2, result.Exit);
         Assert.DoesNotContain("Input not found", result.Error);
     }
@@ -145,8 +145,8 @@ public sealed class DiagramCliTests
     public async Task Diagram_requires_controller_action_and_size_options_are_diagram_only()
     {
         var root = await Run("", "diagram", ResearchFixture.Input, "--root", "Research.Application.Service.Load()");
-        Assert.Equal(2, root.Exit); Assert.Contains("recognised action", root.Error);
-        var wrongCommand = await Run("", "reach", "missing.slnx", "--max-nodes", "20");
+        Assert.Equal(2, root.Exit); Assert.Contains("--root Research.Application.Service.Load() is not a recognised controller action", root.Error);
+        var wrongCommand = await Run("", "projects", "missing.slnx", "--max-nodes", "20");
         Assert.Equal(2, wrongCommand.Exit); Assert.DoesNotContain("Input not found", wrongCommand.Error);
     }
 }

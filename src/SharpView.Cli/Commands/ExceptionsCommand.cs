@@ -28,7 +28,7 @@ internal sealed partial class ExceptionsCommand : ReportCommand
 
     protected override ValueTask<bool> ExecuteAsync(ReportContext context, CancellationToken token)
     {
-        var roots = context.Arguments.MSBuild || context.Arguments.View != ExceptionView.Throws ? Roots.Select(context.Index, context.Arguments, RootScope.Actions, token) : [];
+        var roots = context.Arguments.MSBuild || context.Arguments.View != ExceptionView.Throws ? Roots.Select(context.Index, context.Arguments, token) : [];
         if (context.Arguments.View == ExceptionView.Throws && !context.Arguments.MSBuild) return ValueTask.FromResult(Throws(context, token));
         var summaries = ExceptionSummaryQuery.Analyze(context.Index, roots, AnalysisOptions(context.Arguments), token);
         string[] counts = context.Arguments.View switch

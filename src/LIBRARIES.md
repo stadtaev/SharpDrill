@@ -4,8 +4,8 @@ Building blocks of [SharpView](https://github.com/stadtaev/sharpview), source-ba
 
 | Package | Contents |
 | --- | --- |
-| `SharpView.Graph` | A small generic, immutable directed multigraph with breadth-first search, shortest paths, reachability, quotients and strongly connected components. Knows nothing about C#. |
-| `SharpView.Core` | The fact model (types, callables, call sites, throws, catches), `ProgramIndex`, and the queries over it: reachability, call paths, exception propagation and handling, the MSBuild project map, and layer rules. No Roslyn dependency; works on a loaded or deserialized snapshot. |
+| `SharpView.Graph` | A small generic, immutable directed multigraph with subgraphs, quotients and strongly connected components. Knows nothing about C#. |
+| `SharpView.Core` | The fact model (types, callables, call sites, throws, catches), `ProgramIndex`, and the queries over it: exception propagation and handling, call diagrams, the MSBuild project map, and layer rules. No Roslyn dependency. |
 | `SharpView.Roslyn` | Loads a `.csproj`, `.sln` or `.slnx` with MSBuild and Roslyn and extracts the fact snapshot. Never restores, builds or edits the analysed code. |
 | `SharpView.Export.Mermaid` | Formats project maps and call diagrams as Mermaid flowcharts in Markdown. |
 

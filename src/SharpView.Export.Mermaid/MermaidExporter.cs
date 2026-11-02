@@ -49,7 +49,7 @@ public static class MermaidExporter
         output.AppendLine($"Relevant extraction gaps: {diagram.Gaps.Length}. Ownerless gaps are included because their affected calls cannot be localized.");
         foreach (var gap in diagram.Gaps.Take(20))
             output.AppendLine($"- {gap.Kind}: {Html(gap.Message)}" + (gap.Evidence is { } e ? $" ({Html(e.Path)}:{e.StartLine}:{e.StartColumn})" : ""));
-        if (diagram.Gaps.Length > 20) output.AppendLine($"- {diagram.Gaps.Length - 20} further gaps; use inspect JSON for full evidence.");
+        if (diagram.Gaps.Length > 20) output.AppendLine($"- {diagram.Gaps.Length - 20} further gaps not listed.");
         // Portable deterministic output, irrespective of the host operating system's newline convention.
         return output.ToString().Replace("\r\n", "\n", StringComparison.Ordinal);
     }

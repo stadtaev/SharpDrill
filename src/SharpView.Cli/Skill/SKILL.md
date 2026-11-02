@@ -1,8 +1,8 @@
 ---
 name: sharpview
-description: Analyse an ASP.NET Core Web API with the sharpview CLI. Finds exceptions that may escape controller actions, catches that miss, third-party calls with no catch, what an endpoint reaches, call paths and the project reference map. Use for questions about exception handling, error paths, endpoint impact or the structure of a .NET Web API, and for SV0001-SV0004 build warnings.
-# Written by `sharpview skill` {{version}}. Rerun it after `dotnet tool update -g SharpView.Cli` to refresh this file.
+description: Analyse an ASP.NET Core Web API with the sharpview CLI. Finds exceptions that may escape controller actions, catches that miss, third-party calls with no catch, call diagrams of an endpoint and the project reference map. Use for questions about exception handling, error paths or the structure of a .NET Web API, and for SV0001-SV0004 build warnings.
 ---
+<!-- Written by `sharpview skill` {{version}}. Rerun it after `dotnet tool update -g SharpView.Cli` to refresh this file. -->
 
 # SharpView
 
@@ -24,13 +24,10 @@ description: Analyse an ASP.NET Core Web API with the sharpview CLI. Finds excep
 | Which `try` blocks catch the wrong exception type? | `sharpview exceptions --miscaught` |
 | Where is each exception caught, and what does the handler do? | `sharpview exceptions --caught` |
 | Where is anything thrown? | `sharpview exceptions` |
-| What can an endpoint reach? Which endpoints reach this method? | `sharpview reach` (each method once, shortest path) |
-| Every call path through one small endpoint | `sharpview paths --root "<signature>"` (grows exponentially; prefer `reach` on large code) |
-| A picture of one endpoint | `sharpview diagram --root "<signature>"` (Mermaid, saved to a Markdown file) |
+| What does one endpoint call, as a picture? | `sharpview diagram --root "<signature>"` (Mermaid, saved to a Markdown file) |
 | How do the projects reference each other, and how is each built? | `sharpview projects` |
-| Exact method IDs and signatures for `--root` | `sharpview inspect --methods` |
 
-Useful options: `--root "<exact signature or ID>"` limits a run to one action (`reach`/`paths` accept any method), `--locations` adds `file:line` for every step, `--declared-only` stops at interface calls instead of following their implementations, and `--budget N` raises the work limit when stderr says the run stopped early.
+Useful options: `--root "<exact signature or ID>"` limits a run to one controller action (an action name from `exceptions` output such as `OrdersController.Get` is not exact, but the error lists the matching full signatures to copy), `--locations` adds `file:line` to every path step in `exceptions`, `--declared-only` stops at interface calls instead of following their implementations (`exceptions` and `diagram`), and `--budget N` raises the work limit when stderr says the run stopped early.
 
 ## Reading the output
 

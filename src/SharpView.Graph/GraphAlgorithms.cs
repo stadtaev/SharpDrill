@@ -16,16 +16,6 @@ public sealed record Quotient<TNode, TGroup, TKey, TEdge>(
 
 public static class GraphAlgorithms
 {
-    // Nodes reachable from the sources (sources included) in breadth-first discovery order.
-    public static ImmutableArray<TNode> ReachableFrom<TNode, TEdge>(this DiGraph<TNode, TEdge> graph, IEnumerable<TNode> sources,
-        Func<TEdge, bool>? follow = null, CancellationToken cancellationToken = default) where TNode : notnull where TEdge : IEdge<TNode>
-    {
-        var search = new BreadthFirstSearch<TNode, TEdge>(graph, cancellationToken: cancellationToken);
-        foreach (var source in sources) search.AddSource(source);
-        search.Run(follow);
-        return [.. search.Discovered];
-    }
-
     // Collapses nodes into groups (e.g. layers or projects) and buckets edges by (from group, to group, key).
     // Buckets appear in first-edge order; a null group means "not in any group" and sends the edge to Unassigned.
     public static Quotient<TNode, TGroup, TKey, TEdge> Quotient<TNode, TEdge, TGroup, TKey>(this DiGraph<TNode, TEdge> graph,
