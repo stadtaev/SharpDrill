@@ -21,6 +21,14 @@ public sealed record MiscaughtException(ThrowSiteId Origin, MissedRegion Missed,
     public ImmutableArray<CallableId> EscapesFrom { get; init; } = [];
 }
 
+/// <summary>An exception that leaves an async void method (Method) reached from roots: no caller can catch it, so it ends
+/// the process. Roots are every root whose calls reach Method (Method itself when it is an async void root).</summary>
+public sealed record CrashingException(ThrowSiteId Origin, ThrowSiteId? SubsequentOrigin, string? ExceptionType, CallableId Method,
+    ImmutableArray<CallableId> Roots, ExceptionWitness Example)
+{
+    public bool ViaCandidate => Example.ViaCandidate;
+}
+
 /// <summary>Catches and misses read from the same propagation as --uncaught (ExceptionSummaryQuery), deduplicated across
 /// roots and paths. Each transfer step records the handlers it matched and the try regions it passed; a miss's outcomes
 /// are the fates of the fact it became, which depend only on that fact, not on the path that produced it. The example
@@ -61,7 +69,8 @@ public static class ExceptionHandlingQuery
                 {
                     ExceptionStatus.Intercepted => new Fate([ExceptionStatus.Intercepted], [], null),
                     ExceptionStatus.Unknown => new Fate([ExceptionStatus.Unknown], [], step),
-                    _ => step.To is { } to ? fates.TryGetValue(to, out var known) ? known : fates[to] = FateOf(result, to) : new Fate([], [], null),
+                    ExceptionStatus.EscapesAsyncVoid => new Fate([ExceptionStatus.EscapesAsyncVoid], [], null),
+                    _ => step.To is { } to ? fates.TryGetValue(to, out var known) ? known : fates[to] = FateOf(index, result, to) : new Fate([], [], null),
                 };
                 var key = (step.Result.Flow.Origin, missed.Region);
                 if (!found.TryGetValue(key, out var existing)) found[key] = (missed, example, fate);
@@ -75,12 +84,39 @@ public static class ExceptionHandlingQuery
             })];
     }
 
+    public static ImmutableArray<CrashingException> Crashing(ProgramIndex index, ExceptionSummaryResult result, CancellationToken token = default)
+    {
+        var witnesses = new Witnesses(index, result, token);
+        var found = new Dictionary<(ThrowSiteId, ThrowSiteId?, string?, CallableId), ExceptionWitness>();
+        void Add(ExceptionFlow flow, CallableId method, ExceptionWitness? example)
+        {
+            if (example is null) return;
+            var key = (flow.Origin, flow.SubsequentOrigin, flow.Type?.DisplayName, method);
+            if (!found.TryGetValue(key, out var existing) || Better(example, existing)) found[key] = example;
+        }
+        foreach (var step in result.Steps.Where(x => x.Result.Status == ExceptionStatus.EscapesAsyncVoid))
+        {
+            token.ThrowIfCancellationRequested();
+            Add(step.Result.Flow, step.From!.Value.Method, witnesses.Of(step));
+        }
+        // An async void action has no caller in source: what leaves it is a root fact, not a crossing.
+        foreach (var root in result.Roots.Keys.Where(x => index.Callable(x).IsAsyncVoid))
+            foreach (var key in result.KeysAt(root).Where(x => !result.ThirdPartyCalls.ContainsKey(x.Origin)))
+            {
+                token.ThrowIfCancellationRequested();
+                var path = result.Shortest(root, [key]);
+                Add(result.Flow(new(root, key)), root, ExceptionTransfer.Witness(index, root, path.Path, [.. path.Sites.Select(index.CallSite)], key.ViaCandidate, index.ThrowSite(key.Origin), token));
+            }
+        return [.. found.OrderBy(x => x.Value, witnesses.Order).ThenBy(x => index.ThrowSite(x.Key.Item1).Evidence.SpanStart)
+            .Select(x => new CrashingException(x.Key.Item1, x.Key.Item2, x.Key.Item3, x.Key.Item4, witnesses.RootsAbove(x.Key.Item4), x.Value))];
+    }
+
     /// <summary>Where one throw ends: one example per handler that stops it, per place it becomes Unknown and per root it
     /// may escape, in the order of their actions.</summary>
     public static ImmutableArray<ExceptionWitness> Fates(ProgramIndex index, ExceptionSummaryResult result, ThrowSiteId origin, CancellationToken token = default)
     {
         var witnesses = new Witnesses(index, result, token);
-        var stopped = result.Steps.Where(x => x.Result.Flow.Origin == origin && x.Result.Status is ExceptionStatus.Intercepted or ExceptionStatus.Unknown)
+        var stopped = result.Steps.Where(x => x.Result.Flow.Origin == origin && x.Result.Status is ExceptionStatus.Intercepted or ExceptionStatus.Unknown or ExceptionStatus.EscapesAsyncVoid)
             .Select(witnesses.Of).OfType<ExceptionWitness>();
         // Every fact of the origin at a root, typed or not (an unbound type ends Unknown there); a proven path first.
         var escaped = result.Roots.Keys.Select(root => (Root: root, Keys: result.KeysAt(root).Where(x => x.Origin == origin).OrderBy(x => x.ViaCandidate).ToArray()))
@@ -99,7 +135,7 @@ public static class ExceptionHandlingQuery
     }
 
     // Every step reachable upward from the fact: a root it reaches lets it escape (Unknown when its type is unbound).
-    private static Fate FateOf(ExceptionSummaryResult result, ExceptionSummaryResult.FactRef start)
+    private static Fate FateOf(ProgramIndex index, ExceptionSummaryResult result, ExceptionSummaryResult.FactRef start)
     {
         var (outcomes, roots) = (ImmutableHashSet.CreateBuilder<ExceptionStatus>(), ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal));
         ExceptionSummaryResult.Step? undetermined = null;
@@ -109,14 +145,16 @@ public static class ExceptionHandlingQuery
         {
             if (result.Roots.ContainsKey(fact.Method))
             {
-                outcomes.Add(result.Flow(fact).Type is null ? ExceptionStatus.Unknown : ExceptionStatus.MayEscape);
-                if (result.Flow(fact).Type is not null) roots.Add(fact.Method.Value);
+                if (index.Callable(fact.Method).IsAsyncVoid) outcomes.Add(ExceptionStatus.EscapesAsyncVoid);
+                else outcomes.Add(result.Flow(fact).Type is null ? ExceptionStatus.Unknown : ExceptionStatus.MayEscape);
+                if (result.Flow(fact).Type is not null && !index.Callable(fact.Method).IsAsyncVoid) roots.Add(fact.Method.Value);
             }
             foreach (var step in result.StepsFrom[fact])
                 switch (step.Result.Status)
                 {
                     case ExceptionStatus.Intercepted: outcomes.Add(ExceptionStatus.Intercepted); break;
                     case ExceptionStatus.Unknown: outcomes.Add(ExceptionStatus.Unknown); undetermined ??= step; break;
+                    case ExceptionStatus.EscapesAsyncVoid: outcomes.Add(ExceptionStatus.EscapesAsyncVoid); break;
                     default: if (step.To is { } to && seen.Add(to)) pending.Enqueue(to); break;
                 }
         }
@@ -151,6 +189,15 @@ public static class ExceptionHandlingQuery
                 witness = ExceptionTransfer.Witness(index, path[0], path, sites, via, index.ThrowSite(step.Result.Flow.Origin), token);
             }
             return cache[step] = witness;
+        }
+
+        // Every root whose calls reach the method, through proven calls or implementation candidates, ordinal by ID.
+        public ImmutableArray<CallableId> RootsAbove(CallableId method)
+        {
+            var seen = new HashSet<CallableId> { method }; var pending = new Queue<CallableId>([method]);
+            while (pending.TryDequeue(out var at))
+                foreach (var (site, _) in result.Callers.GetValueOrDefault(at, [])) if (seen.Add(site.Caller)) pending.Enqueue(site.Caller);
+            return [.. seen.Where(result.Roots.ContainsKey).OrderBy(x => x.Value, StringComparer.Ordinal)];
         }
 
         private (ImmutableArray<CallableId> Path, ImmutableArray<CallSiteFact> Sites, bool Via)? Above(CallableId method) =>

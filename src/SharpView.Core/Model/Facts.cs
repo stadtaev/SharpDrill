@@ -58,6 +58,9 @@ public sealed record CallableFact(CallableId Id, CompilationId Compilation, Type
 {
     // True when the callable's code is fully known: written in source, or compiler-provided and free of explicit code.
     public bool HasBody => Body is BodyStatus.Source or BodyStatus.Synthesized;
+    public bool ReturnsVoid { get; init; }
+    // An exception leaving it never reaches a caller: it is rethrown on the thread pool and ends the process.
+    public bool IsAsyncVoid => IsAsync && ReturnsVoid;
 }
 public sealed record CallSiteFact(CallSiteId Id, CallableId Caller, CallableId? BoundTarget, string TargetDisplay,
     DispatchKind Dispatch, ImmutableArray<TypeUse> TypeArguments, SourceEvidence Evidence, bool IsImplicit,

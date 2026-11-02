@@ -16,4 +16,6 @@ public static class Service
     public static void Branch(bool flag) { if (flag) Repository.Read(); else Repository.Quiet(); }
     public static void Repeat() { Repository.Quiet(); Repository.Quiet(); }
     public static void Nested() { try { try { Repository.Read(); } catch (StorageException) { throw; } } catch (Exception) { } }
+    public static async void Fire() { try { await Repository.ReadAsync(); } catch (ArgumentException) { } }
+    public static async void Guarded() { try { await Repository.ReadAsync(); } catch (Exception) { } }
 }

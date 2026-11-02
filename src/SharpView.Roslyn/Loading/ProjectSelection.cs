@@ -31,7 +31,7 @@ internal static class ProjectSelection
         var assets = project.GetPropertyValue("ProjectAssetsFile");
         if (string.IsNullOrEmpty(assets)) assets = Path.Combine(Path.GetDirectoryName(path)!, "obj", "project.assets.json");
         if (!Path.IsPathRooted(assets)) assets = Path.Combine(Path.GetDirectoryName(path)!, assets);
-        if (!File.Exists(assets)) throw new ArgumentException($"Dependencies are not restored for {path}. Restore the input explicitly before analysis.");
+        if (!File.Exists(assets)) throw new ArgumentException($"Dependencies are not restored for {path}. Run dotnet restore first, or pass --restore.");
         var directory = Path.GetDirectoryName(path)!;
         return new(selected, project.GetPropertyValue("Nullable"),
             string.Equals(project.GetPropertyValue("TreatWarningsAsErrors"), "true", StringComparison.OrdinalIgnoreCase),
