@@ -1,8 +1,7 @@
 name: Release
 
-# Every push to main that changes code publishes a new version of the SharpView tool to nuget.org.
-# github-tag-action computes the version from Conventional Commit messages since the last v* tag:
-# patch by default, minor for feat:, major for feat!: or a BREAKING CHANGE: footer.
+# Every push to main that changes code publishes a new version of the SharpDrill packages to nuget.org.
+# The version comes from Conventional Commit messages since the last v* tag (see the Next version step).
 on:
   push:
     branches: [main]
@@ -12,6 +11,10 @@ on:
       - '.idea/**'
       - '.superpowers/**'
   workflow_dispatch:
+    inputs:
+      version:
+        description: Exact version to publish, e.g. 1.0.0 (empty computes it from the commits)
+        required: false
 
 # Releases run one at a time so two pushes cannot claim the same version.
 concurrency:
@@ -28,52 +31,82 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # full history: the version action falls back to it when the compare API is unavailable
+          fetch-depth: 0 # full history and tags: the version step reads the commits since the last v* tag
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
       - name: Restore
-        run: dotnet restore sharpview.slnx
+        run: dotnet restore SharpDrill.slnx
       - name: Build fixture
         run: dotnet build tests/Fixtures/ResearchSolution/ResearchSolution.slnx
       - name: Test
-        run: dotnet test sharpview.slnx -c Release
+        run: dotnet test SharpDrill.slnx -c Release
 
-      # Calculate only; the tag is created after nuget.org accepts the package, so a failed push never burns a version.
+      # Calculate only; the tag is created after nuget.org accepts the packages, so a failed push never burns a version.
+      # Conventional Commits since the last v* tag pick the bump; [skip-release] commits do not count. The first release
+      # is 0.1.0. On 0.x a breaking change (type! or a BREAKING CHANGE: footer) or feat: bumps the minor version and
+      # anything else the patch; from 1.0.0 a breaking change bumps the major and feat: the minor. A bump never leaves
+      # 0.x: publish 1.0.0 by running the workflow manually with that version.
       - name: Next version
         id: version
-        uses: mathieudutour/github-tag-action@af99e60ce8132224b8e6ebab5023449fe256ed46 # v7.0.0
-        with:
-          github_token: ${{ github.token }}
-          default_bump: patch
-          dry_run: true
+        env:
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          if [[ -n $REQUESTED ]]; then
+            [[ $REQUESTED =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "Not a version: $REQUESTED"; exit 1; }
+            git rev-parse -q --verify "refs/tags/v$REQUESTED" >/dev/null && { echo "v$REQUESTED already exists."; exit 1; }
+            echo "version=$REQUESTED" >> "$GITHUB_OUTPUT"; echo "tag=v$REQUESTED" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          last=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)
+          breaking='^[a-z]+(\([^)]*\))?!:'; feat='^feat(\([^)]*\))?:'
+          bump=
+          while IFS= read -r -d '' message; do
+            [[ $message == *'[skip-release]'* ]] && continue
+            subject=${message%%$'\n'*}
+            if [[ $subject =~ $breaking || $message == *$'\n'BREAKING\ CHANGE:* ]]; then bump=major
+            elif [[ $subject =~ $feat && $bump != major ]]; then bump=minor
+            elif [[ -z $bump ]]; then bump=patch; fi
+          done < <(git log -z --format=%B "${last:+$last..}HEAD")
+          [[ -z $bump ]] && { echo "No releasable commits since ${last:-the start}."; exit 0; }
+          if [[ -z $last ]]; then next=0.1.0
+          else
+            IFS=. read -r major minor patch <<< "${last#v}"
+            if (( major == 0 )) && [[ $bump == major ]]; then bump=minor; fi
+            case $bump in
+              major) next=$((major + 1)).0.0 ;;
+              minor) next=$major.$((minor + 1)).0 ;;
+              patch) next=$major.$minor.$((patch + 1)) ;;
+            esac
+          fi
+          echo "Next version: $next ($bump since ${last:-the start})"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "tag=v$next" >> "$GITHUB_OUTPUT"
 
       - name: Pack
-        if: steps.version.outputs.new_tag != ''
-        run: dotnet pack sharpview.slnx -c Release -p:Version="$VERSION" -p:ContinuousIntegrationBuild=true
+        if: steps.version.outputs.tag != ''
+        run: dotnet pack SharpDrill.slnx -c Release -p:Version="$VERSION" -p:ContinuousIntegrationBuild=true
         env:
-          VERSION: ${{ steps.version.outputs.new_version }}
+          VERSION: ${{ steps.version.outputs.version }}
 
       # Trusted publishing: exchanges this run's OIDC token for a short-lived API key. The policy on nuget.org
-      # must name this repository and this workflow file (release.yml) and cover the SharpView* package IDs.
+      # must name this repository and this workflow file (release.yml) and cover the SharpDrill* package IDs.
       - name: NuGet login
         id: nuget
-        if: steps.version.outputs.new_tag != ''
+        if: steps.version.outputs.tag != ''
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         with:
           user: stadtaev
 
       - name: Publish to nuget.org
-        if: steps.version.outputs.new_tag != ''
+        if: steps.version.outputs.tag != ''
         run: dotnet nuget push "nupkg/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
         env:
           NUGET_API_KEY: ${{ steps.nuget.outputs.NUGET_API_KEY }}
 
       # gh creates the tag at the tested commit together with the release.
       - name: GitHub release
-        if: steps.version.outputs.new_tag != ''
-        run: gh release create "$TAG" nupkg/*.nupkg --target "$GITHUB_SHA" --title "$TAG" --notes "$CHANGELOG"
+        if: steps.version.outputs.tag != ''
+        run: gh release create "$TAG" nupkg/*.nupkg --target "$GITHUB_SHA" --title "$TAG" --generate-notes
         env:
-          TAG: ${{ steps.version.outputs.new_tag }}
-          CHANGELOG: ${{ steps.version.outputs.changelog }}
+          TAG: ${{ steps.version.outputs.tag }}
           GH_TOKEN: ${{ github.token }}

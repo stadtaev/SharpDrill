@@ -36,13 +36,13 @@ The initial increment uses the existing production projects and a shared xUnit t
 | Controller classification in Core | `ConventionTests`, `Core_controller_classification_matches_extraction_on_edge_cases` |
 | Argument failures before loading | `Invalid_options_fail_before_loading` |
 
-Reproduce with `dotnet build tests/Fixtures/ResearchSolution/ResearchSolution.slnx`, `dotnet build sharpview.slnx --no-incremental`, and `dotnet test sharpview.slnx`. Reports are in `docs/samples`.
+Reproduce with `dotnet build tests/Fixtures/ResearchSolution/ResearchSolution.slnx`, `dotnet build SharpDrill.slnx --no-incremental`, and `dotnet test SharpDrill.slnx`. Reports are in `docs/samples`.
 
-The self-analysis smoke check (on the frozen pre-refactor source) loaded SharpView's four projects and exported 953 callable facts, 2,870 call sites, 32 throw sites, four catches, 22 implementation candidates and 93 explicitly recorded gaps; before the lambda/local-function identity fix it reported 834 callables and 2,649 call sites because same-shaped lambda bodies collapsed into one fact. This checks loading/extraction on the host's own code; it does not replace an external Web API experiment.
+The self-analysis smoke check (on the frozen pre-refactor source) loaded SharpDrill's four projects and exported 953 callable facts, 2,870 call sites, 32 throw sites, four catches, 22 implementation candidates and 93 explicitly recorded gaps; before the lambda/local-function identity fix it reported 834 callables and 2,649 call sites because same-shaped lambda bodies collapsed into one fact. This checks loading/extraction on the host's own code; it does not replace an external Web API experiment.
 
 ## Regression comparison (consumer model increment)
 
-Every task of the consumer-model plan was compared against a frozen baseline (the pre-refactor commit, built separately): 13 CLI runs covering `controllers`, `exceptions`, `chains` (declared and direct), `methods`, `inspect` (text and JSON) on the fixture, and `inspect`/`chains`/`methods`/JSON on a frozen copy of SharpView's own source. Final result: every fixture text report is byte-identical to the baseline. Intended differences only: JSON schema 3 (string IDs, new facts, `controllerActions` computed instead of stored); self-analysis counts grew because overridden members are registered (+8 callables), lambda/local bodies are no longer collapsed (+103 bodies) and field/property dependencies were added. Old-vs-new runs with a `namespace:<TypeName>` mapping equal new runs with `type:<TypeName>`.
+Every task of the consumer-model plan was compared against a frozen baseline (the pre-refactor commit, built separately): 13 CLI runs covering `controllers`, `exceptions`, `chains` (declared and direct), `methods`, `inspect` (text and JSON) on the fixture, and `inspect`/`chains`/`methods`/JSON on a frozen copy of SharpDrill's own source. Final result: every fixture text report is byte-identical to the baseline. Intended differences only: JSON schema 3 (string IDs, new facts, `controllerActions` computed instead of stored); self-analysis counts grew because overridden members are registered (+8 callables), lambda/local bodies are no longer collapsed (+103 bodies) and field/property dependencies were added. Old-vs-new runs with a `namespace:<TypeName>` mapping equal new runs with `type:<TypeName>`.
 
 ## External Web API attempt (2026-10-17)
 
@@ -50,7 +50,7 @@ Input: the locally supplied `api-osa.zip`, extracted into a temporary directory 
 Git metadata and existing build outputs. The archive and its source files were not modified. No external source or
 package-feed credentials are included in this repository.
 
-Source inventory (not SharpView analysis results): 13 source projects, 355 C# source files, and 12 files named
+Source inventory (not SharpDrill analysis results): 13 source projects, 355 C# source files, and 12 files named
 `*Controller.cs`, including a base controller. This is a useful validation target for cross-project call relationships
 and interface boundaries.
 

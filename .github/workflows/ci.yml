@@ -17,11 +17,11 @@ jobs:
         with:
           global-json-file: global.json
       - name: Restore
-        run: dotnet restore sharpview.slnx
+        run: dotnet restore SharpDrill.slnx
       # The tests analyse this fixture, which must be restored and built first.
       - name: Build fixture
         run: dotnet build tests/Fixtures/ResearchSolution/ResearchSolution.slnx
       - name: Test
-        run: dotnet test sharpview.slnx -c Release
+        run: dotnet test SharpDrill.slnx -c Release
       - name: Pack
-        run: dotnet pack sharpview.slnx -c Release
+        run: dotnet pack SharpDrill.slnx -c Release
