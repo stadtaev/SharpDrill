@@ -9,10 +9,7 @@ internal static class Commands
     {
         "projects" => new ProjectsCommand(),
         "exceptions" => new ExceptionsCommand(),
-        "reach" => new ReachCommand(),
-        "paths" => new PathsCommand(),
         "diagram" => new DiagramCommand(Console.In, Console.Out),
-        "inspect" => new InspectCommand(),
         _ => throw new ArgumentException($"Unknown command: {name}. Use --help."),
     };
 

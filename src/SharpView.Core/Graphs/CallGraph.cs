@@ -32,10 +32,9 @@ public readonly record struct CallTarget(CallTargetKind Kind, ImmutableArray<Cal
 
 // Whole-program call graph over every callable. Out-edges follow ProgramIndex.Outgoing order (target display, then
 // site ID); a non-direct site's Declared edge is followed by its Candidate edges in ID order. Sites without a known
-// target are not edges: they are listed per caller so traversals can report them as boundaries.
+// target are not edges: they are listed in UnresolvedSites so traversals can report them as boundaries.
 public sealed class CallGraph
 {
-    private readonly Dictionary<CallableId, ImmutableArray<CallSiteFact>> unresolved;
     private readonly Dictionary<CallSiteId, CallTarget> targets;
 
     public DiGraph<CallableId, CallEdge> Graph { get; }
@@ -44,15 +43,11 @@ public sealed class CallGraph
     private CallGraph(DiGraph<CallableId, CallEdge> graph, ImmutableArray<CallSiteFact> unresolvedSites, Dictionary<CallSiteId, CallTarget> targets)
     {
         Graph = graph; UnresolvedSites = unresolvedSites; this.targets = targets;
-        unresolved = unresolvedSites.GroupBy(x => x.Caller).ToDictionary(x => x.Key, x => x.ToImmutableArray());
     }
 
     // What the site leads to. A Dispatch target's Callees are its source implementation candidates in ID order:
     // possibilities, never inferred runtime targets. Every site of the snapshot resolves; an unknown ID is a caller bug.
     public CallTarget Resolve(CallSiteId site) => targets.TryGetValue(site, out var target) ? target : throw new KeyNotFoundException($"Unknown call site: {site.Value}");
-
-    // Unresolved sites of a caller, in Outgoing order.
-    public ImmutableArray<CallSiteFact> Unresolved(CallableId caller) => unresolved.GetValueOrDefault(caller, []);
 
     public static CallGraph Build(ProgramIndex index, CancellationToken cancellationToken = default)
     {

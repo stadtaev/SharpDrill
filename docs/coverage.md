@@ -27,12 +27,12 @@ Recognised by convention, classified in Core from extracted facts:
 
 | Supported (followed) | Boundary (recorded, not followed) | Gap (not modelled, listed) |
 | --- | --- | --- |
-| Normal invocations, explicit construction, source constructors | Interface and virtual calls, including virtual members with bodies (an explicit root may still inspect its own body) | Top-level statements (one gap per file) |
+| Normal invocations, explicit construction, source constructors | Interface and virtual calls at their declared target, including virtual members with bodies | Top-level statements (one gap per file) |
 | Property/event accessors, user-defined operators and conversions | Delegates, `dynamic`, function pointers, invalid operations | Iterator bodies (one gap per iterator) |
 | Reduced extension methods; local functions and lambdas as separately owned bodies | Metadata-only (library) bodies | `await` of a task held in a field, property or parameter |
 | Field/property initialisers, as code of the constructors that run them (static ones in the static constructor, which no call path reaches) | | |
 
-Implementation candidates come from source types' interface maps and overrides; dependency-injection registrations are not read.
+Implementation candidates come from source types' interface maps and overrides; dependency-injection registrations are not read. `exceptions` and `diagram` follow them by default, marked as possibilities; `--declared-only` stops at the declared target.
 
 ## Exceptions
 
@@ -90,10 +90,8 @@ Tests combine independently built Core snapshots, in-memory Roslyn compilations,
 
 ## Graph analysis and diagram exports
 
-- Generic directed multigraph: both adjacency directions, parallel edges, deterministic insertion order, phased shortest-path
-  relaxation, quotient groups with original memberships (including isolated nodes), and iterative SCC discovery.
-- Reach: shared immutable parent links, lazy witness arrays, separate direct-only distance/witness and candidate-inclusive routes, per-root work
-  truncation, and explicit dispatch/unresolved/body/depth boundaries. A work stop can leave a valid nonoptimal path.
+- Generic directed multigraph: both adjacency directions, parallel edges, deterministic insertion order,
+  quotient groups with original memberships (including isolated nodes), and iterative SCC discovery.
 - Exception summaries: one monotone worklist fixed point from explicit origins up through their callers, per-site transfers, finite fact identities,
   shortest example witnesses (breadth-first over every recorded provenance link), separate uncertainty and work/fact limits. Caught and miscaught are read from the same propagation: each transfer step records the catches it matched and the `try` blocks it passed, and a miss's outcomes are the fates of what got past it. Ownerless gaps (top-level statements, minimal APIs) belong to no root and do not make a result incomplete; owned gaps remain associated with reached methods.
   Unknown propagation is conservative; summaries do not remove arbitrary unknown effects merely because a catch-all exists.

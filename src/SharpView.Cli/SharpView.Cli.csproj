@@ -24,7 +24,7 @@
     <ToolCommandName>sharpview</ToolCommandName>
     <PackageId>SharpView.Cli</PackageId>
     <HasOwnReadme>true</HasOwnReadme>
-    <Description>Source-backed analysis of ASP.NET Core Web APIs for people and agents: the MSBuild project reference map with build settings, where exceptions are thrown, caught, miscaught or may escape an action, call paths and reachability from controller actions, and Mermaid diagrams. Uses Roslyn and your installed .NET SDK; never builds or edits the analysed code.</Description>
+    <Description>Source-backed analysis of ASP.NET Core Web APIs for people and agents: the MSBuild project reference map with build settings, where exceptions are thrown, caught, miscaught or may escape an action, and Mermaid call diagrams of controller actions. Uses Roslyn and your installed .NET SDK; never builds or edits the analysed code.</Description>
     <PackageTags>roslyn;static-analysis;aspnetcore;exceptions;call-graph;mermaid;dotnet-tool;architecture</PackageTags>
   </PropertyGroup>
 

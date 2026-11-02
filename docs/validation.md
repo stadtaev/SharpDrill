@@ -4,7 +4,7 @@ The initial increment uses the existing production projects and a shared xUnit t
 
 | Requirement | Evidence |
 |---|---|
-| Controller → application → infrastructure source bindings | `Source_bindings_link_projects_and_preserve_locations`, `Fresh_process_prints_cross_project_chain_and_evidence` |
+| Controller → application → infrastructure source bindings | `Source_bindings_link_projects_and_preserve_locations` |
 | Matching, unrelated and incompatible catches; rethrow/replacement | `The_catch_around_each_call_site_decides_the_fate_of_the_repository_throw` parameter cases |
 | Caught/miscaught from the shared propagation: outcomes across actions, catches above recursion | `A_miss_reports_every_fate_of_what_got_past_it_across_actions`, `A_catch_above_recursion_is_found_with_an_acyclic_example` |
 | One call-site resolution for every traversal | `Call_sites_resolve_to_one_target_kind_shared_by_all_traversals` |
@@ -13,7 +13,7 @@ The initial increment uses the existing production projects and a shared xUnit t
 | Static vs exact constructed type, including explicit casts | `Cast_throw_retains_static_type_and_exact_construction_separately`, `Exact_construction_beneath_base_conversion_matches_derived_handler_and_preserves_static_type` |
 | Assembly-aware and uncertain type matching | `Same_display_name_in_different_assemblies_does_not_match_handler`, `Different_constructed_generic_arguments_are_not_false_matching_handlers`, `Unbound_exception_type_does_not_skip_typed_handler` |
 | Controller conventions and inherited exclusions | `Controller_convention_excludes_abstract_generic_and_inherited_opt_outs` |
-| Interface boundaries, recursion that is not uncertainty, declared bindings | `Interface_without_implementation_is_uncertain_and_recursion_alone_is_not`, `Paths_preserve_the_declared_binding_at_dispatch` |
+| Interface boundaries, recursion that is not uncertainty, declared bindings | `Interface_without_implementation_is_uncertain_and_recursion_alone_is_not` |
 | Await observation and unsupported async propagation | `Direct_await_observation_and_aliased_task_unknown_are_distinguished`, `Task_exception_requires_direct_observation_before_caller_handler`, `Async_void_and_custom_awaitable_propagation_are_unknown` |
 | Skill tip: install or update when needed, quiet otherwise and for redirected output | `Skill_hint_asks_for_an_install_or_an_update_and_otherwise_stays_quiet`, `Strict_adds_a_third_party_count_and_leaves_framework_calls_out` |
 | Agent skill install: repository root, refresh, foreign files kept, per-user folders, commands and codes named | `Skill_installs_at_the_repository_root_refreshes_its_own_file_and_keeps_foreign_ones`, `Skill_user_installs_for_copilot_and_claude_code` |
@@ -22,9 +22,6 @@ The initial increment uses the existing production projects and a shared xUnit t
 | Library calls, compiler-provided members, candidate following and de-duplication | `ExceptionScopeTests`, `Fixture_uncertainty_is_only_what_the_analysis_cannot_decide`, `Compiler_provided_members_are_synthesized_while_written_bodies_and_declarations_keep_their_status`, `Foreach_and_using_record_their_implicit_calls_and_only_the_async_forms_remain_gaps` |
 | Exception views: every throw, caught (thrown/caught/outcome), miscaught (non-matching try) | `Default_lists_every_throw_with_method_type_and_project`, `Caught_reports_where_thrown_and_where_caught_with_the_handler_outcome`, `Miscaught_reports_the_try_whose_clauses_do_not_match_and_what_happens_next` |
 | Project references, MSBuild settings and Mermaid export | `Project_map_follows_msbuild_references_and_reports_settings`, `Projects_print_the_reference_tree_with_build_settings`, `Framework_selection_uses_conditional_assets_and_rejects_ambiguity` |
-| Projects and call transitions in paths | `Paths_show_projects_and_distance_is_transitions` |
-| Branches, diamonds, cycles and repeated call-site evidence | `Call_paths_do_not_invent_sibling_edges_and_retain_duplicates`, `Diamond_preserves_each_witness_without_global_visited_pruning`, `Cycle_is_path_local_and_does_not_hide_sibling_leaf` |
-| Depth/work/output limits and cancellation | `Graph_limits_are_honest_and_cancellation_is_observed`, `Exact_output_and_work_budget_at_natural_end_is_not_truncation`, `Traversal_limits_have_nonzero_status_and_visible_marker` |
 | Constructors/accessors/operators and nested callable ownership | `Expression_bodied_property_and_base_accessor_have_source_and_direct_dispatch`, `Operators_conversions_and_type_only_declarations_are_not_lost`, `Nested_callables_own_calls_without_invented_parent_edges` |
 | Partial/reduced generic binding and dependencies | `Partial_methods_reduced_extensions_and_nested_generic_dependencies_keep_identity` |
 | Generated exclusion and evidence | `Generated_exclusion_has_explicit_evidence` |
@@ -36,11 +33,8 @@ The initial increment uses the existing production projects and a shared xUnit t
 | Reason codes consistent with statuses | `Every_fixture_example_has_a_reason_code_consistent_with_its_final_status`, reason assertions in `CoreTests` |
 | Layer precedence, graph edges, allowed-dependency rule (library) | `ArchitectureTests` |
 | Per-command options, removed commands and options | `Invalid_requests_fail_before_loading`, `Removed_commands_are_rejected`, `Removed_options_are_rejected_before_loading`, `Option_of_another_command_names_the_command` |
-| Reachability, boundaries, candidates, `reach` CLI | `ReachabilityTests`, `Reach_lists_each_callable_once_with_a_shortest_witness` |
 | Controller classification in Core | `ConventionTests`, `Core_controller_classification_matches_extraction_on_edge_cases` |
-| Argument failures before loading, IDs and deterministic JSON | `Invalid_options_fail_before_loading`, `Snapshot_ids_round_trip_and_json_is_deterministic` |
-| Offline schema-3 loading and query execution | `Schema_three_document_supports_offline_reachability`, `Snapshot_ids_round_trip_and_json_is_deterministic` (reads actual CLI output through Core) |
-| Versioned export, envelope validation, cancellation and stream ownership | `Writer_preserves_schema_three_envelope_and_string_ids`, `Unsupported_schema_is_rejected_before_payload_deserialization`, `Invalid_envelope_is_rejected`, `Cancellation_is_honored_without_closing_streams` |
+| Argument failures before loading | `Invalid_options_fail_before_loading` |
 
 Reproduce with `dotnet build tests/Fixtures/ResearchSolution/ResearchSolution.slnx`, `dotnet build sharpview.slnx --no-incremental`, and `dotnet test sharpview.slnx`. Reports are in `docs/samples`.
 
@@ -70,8 +64,8 @@ The configured Artifactory source returned `NU1301` / HTTP 404 for package looku
 The API also references private packages, so replacing the feed with nuget.org would not establish a faithful build.
 No semantic analysis accuracy, coverage percentages, or performance conclusions can be claimed from this attempt.
 
-To finish: supply a working package-source configuration or a restored checkout, run `inspect --json`, `reach`
-(both with and without `--follow-candidates`), `projects`, and the four `exceptions` views on the API project. Record extraction gaps,
+To finish: supply a working package-source configuration or a restored checkout, run `projects`, the four `exceptions` views
+and `diagram` (with and without `--declared-only`) on the API project. Record extraction gaps,
 dispatch/missing-body boundaries, limit flags, and exception reason counts. Check representative controller-to-service
 paths and exception witnesses against source before judging the reports useful. Keep raw reports outside the repository
 unless the application's source identifiers are intended for publication.

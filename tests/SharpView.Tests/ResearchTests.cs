@@ -72,12 +72,10 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
     // Same code as the "Writing your own rule" example in docs/overview.md; keeps the documentation honest.
     private static IEnumerable<Finding> NoDirectInfrastructure(ProgramIndex index, LayerMap layers)
     {
-        var actions = AspNetConventions.ControllerActions(index).Select(x => x.Method).ToImmutableArray();
-        foreach (var root in ReachabilityQuery.Analyze(index, actions, new ReachOptions(FollowCandidates: true)).Roots)
-            foreach (var hit in root.Reached.Where(x => x.DirectDistance == 1 && layers.LayerOf(x.Callable) == "Infrastructure"))
+        foreach (var action in AspNetConventions.ControllerActions(index).Select(x => x.Method))
+            foreach (var site in index.Outgoing(action).Where(x => x.BoundTarget is { } target && layers.LayerOf(target) == "Infrastructure"))
                 yield return new("no-direct-infrastructure", Verdict.Violation,
-                    index.Callable(root.Root).DisplaySignature, $"Calls {index.Callable(hit.Callable).DisplaySignature} directly.",
-                    [index.CallSite(hit.DirectWitness[0].Site).Evidence]);
+                    index.Callable(action).DisplaySignature, $"Calls {site.TargetDisplay} directly.", [site.Evidence]);
     }
     [Fact]
     public void Documented_custom_rule_example_runs_on_the_fixture()
@@ -175,24 +173,11 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
         Assert.Equal("System.Exception", staticThrow.StaticExceptionType?.DisplayName);
     }
     [Fact]
-    public void Call_paths_do_not_invent_sibling_edges_and_retain_duplicates()
+    public void Call_graph_keeps_each_call_site_and_invents_no_sibling_edges()
     {
-        var root = Method("Research.Application.Service.Branch(bool)");
-        var paths = CallChainQuery.Enumerate(S, [root.Id], new());
-        Assert.Equal(2, paths.Chains.Length);
-        Assert.DoesNotContain(paths.Chains, x => x.Steps.Any(s => s.Caller == Method("Research.Infrastructure.Repository.Read()").Id && s.Target == Method("Research.Infrastructure.Repository.Quiet()").Id));
-        var repeat = CallChainQuery.Enumerate(S, [Method("Research.Application.Service.Repeat()").Id], new());
-        Assert.Equal(2, Assert.Single(Assert.Single(repeat.Chains).Steps).EvidenceSites.Length);
-    }
-    [Fact]
-    public void Graph_limits_are_honest_and_cancellation_is_observed()
-    {
+        var index = new ProgramIndex(S);
         var quiet = Method("Research.Infrastructure.Repository.Quiet()").Id;
-        Assert.False(CallChainQuery.Enumerate(S, [quiet], new(MaxChains: 1)).OutputLimitReached);
-        var root = Method("Research.Application.Service.Branch(bool)").Id;
-        Assert.True(CallChainQuery.Enumerate(S, [root], new(MaxChains: 1)).OutputLimitReached);
-        Assert.Equal(ChainEnd.DepthLimit, Assert.Single(CallChainQuery.Enumerate(S, [root], new(MaxDepth: 0)).Chains).End);
-        Assert.True(CallChainQuery.Enumerate(S, [root], new(MaxExpansions: 1)).WorkLimitReached);
-        Assert.Throws<OperationCanceledException>(() => CallChainQuery.Enumerate(S, [quiet], new(), new CancellationToken(true)));
+        Assert.Equal([quiet, quiet], index.CallGraph.Graph.OutEdges(Method("Research.Application.Service.Repeat()").Id).Select(x => x.Target));
+        Assert.DoesNotContain(index.CallGraph.Graph.OutEdges(Method("Research.Infrastructure.Repository.Read()").Id), x => x.Target == quiet);
     }
 }

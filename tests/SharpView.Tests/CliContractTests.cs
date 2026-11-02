@@ -1,7 +1,4 @@
 using System.Diagnostics;
-using System.Text.Json;
-using System.Text;
-using SharpView.Core;
 using Xunit;
 
 namespace SharpView.Tests;
@@ -31,7 +28,7 @@ public sealed class CliContractTests
         return (process.ExitCode, await stdout, await stderr);
     }
     [Theory]
-    [InlineData("--max-paths", "0")]
+    [InlineData("--max-nodes", "0")]
     [InlineData("--budget", "-1")]
     [InlineData("--max-depth", "oops")]
     [InlineData("--format", "yaml")]
@@ -39,7 +36,7 @@ public sealed class CliContractTests
     [InlineData("--unknown", "x")]
     public async Task Invalid_options_fail_before_loading(string option, string value)
     {
-        var result = await Run("paths", "missing.slnx", option, value);
+        var result = await Run("diagram", "missing.slnx", option, value);
         Assert.Equal(2, result.Exit);
         Assert.NotEmpty(result.Error);
         Assert.DoesNotContain("Input not found", result.Error);
@@ -47,21 +44,14 @@ public sealed class CliContractTests
     [Theory]
     [InlineData("projects", "--root", "X()")]
     [InlineData("projects", "--output", "x.md")]
-    [InlineData("paths", "--follow-candidates")]
     [InlineData("exceptions", "--root", "X()")]
     [InlineData("exceptions", "--declared-only")]
-    [InlineData("projects", "--follow-candidates")]
+    [InlineData("projects", "--declared-only")]
     [InlineData("exceptions", "--uncaught", "--caught")]
     [InlineData("exceptions", "--strict")]
     [InlineData("exceptions", "--miscaught", "--strict")]
-    [InlineData("reach", "--strict")]
+    [InlineData("diagram", "--strict")]
     [InlineData("exceptions", "--uncaught", "--max-depth", "3")]
-    [InlineData("exceptions", "--caught", "--max-paths", "0")]
-    [InlineData("reach", "--max-paths", "5")]
-    [InlineData("inspect", "--methods", "--json")]
-    [InlineData("inspect", "--output", "x.json")]
-    [InlineData("inspect", "--root", "X()")]
-    [InlineData("inspect", "--format", "json")]
     [InlineData("exceptions", "--format", "json")]
     [InlineData("exceptions", "--caught", "--format", "msbuild")]
     [InlineData("exceptions", "--format", "msbuild", "--locations")]
@@ -79,15 +69,17 @@ public sealed class CliContractTests
         {
             Directory.CreateDirectory(Path.Combine(repository.FullName, ".git"));
             var nested = Directory.CreateDirectory(Path.Combine(repository.FullName, "src", "Api")).FullName;
-            var skill = Path.Combine(repository.FullName, ".claude", "skills", "sharpview", "SKILL.md");
+            var (copilot, skill) = (Path.Combine(repository.FullName, ".github", "skills", "sharpview", "SKILL.md"), Path.Combine(repository.FullName, ".claude", "skills", "sharpview", "SKILL.md"));
             var first = await RunIn(nested, "skill");
             Assert.Equal(0, first.Exit);
-            Assert.Equal(skill + "\n", first.Out.ReplaceLineEndings("\n"));
+            Assert.Equal($"{copilot}\n{skill}\n", first.Out.ReplaceLineEndings("\n"));
             var text = File.ReadAllText(skill);
-            Assert.StartsWith("---\nname: sharpview\ndescription: ", text);
+            Assert.Equal(text, File.ReadAllText(copilot));
+            // Frontmatter holds only name and description: the version marker follows it, out of every agent's YAML parser.
+            Assert.Matches("^---\nname: sharpview\ndescription: [^\n]+\n---\n<!-- Written by `sharpview skill` ", text);
             // The skill must keep up with the CLI: every command, view and warning code is named.
-            foreach (var term in new[] { "sharpview projects", "sharpview exceptions --uncaught", "--strict", "--caught", "--miscaught", "sharpview reach",
-                "sharpview paths", "sharpview diagram", "sharpview inspect --methods", "--format msbuild", "SV0000", "SV0001", "SV0002", "SV0003", "SV0004" })
+            foreach (var term in new[] { "sharpview projects", "sharpview exceptions --uncaught", "--strict", "--caught", "--miscaught", 
+                "sharpview diagram", "--format msbuild", "SV0000", "SV0001", "SV0002", "SV0003", "SV0004" })
                 Assert.Contains(term, text);
             Assert.Equal(0, (await RunIn(nested, "skill")).Exit);
             File.WriteAllText(skill, "my own skill");
@@ -95,6 +87,8 @@ public sealed class CliContractTests
             Assert.Equal(2, foreign.Exit);
             Assert.Contains("was not written by sharpview", foreign.Error);
             Assert.Equal("my own skill", File.ReadAllText(skill));
+            // A refusal leaves the other folder as it was.
+            Assert.Equal(text, File.ReadAllText(copilot));
             Assert.Equal(2, (await RunIn(nested, "skill", "--global")).Exit);
         }
         finally { repository.Delete(true); }
@@ -118,6 +112,9 @@ public sealed class CliContractTests
             Assert.Null(Cli.SkillCommand.HintFor(nested, home, "0.0.0-dev"));
             Write(Path.Combine(home, ".copilot"), Ours("0.3.0"));
             Assert.Null(Cli.SkillCommand.HintFor(nested, home, "0.3.0"));
+            // The marker after the frontmatter, as written now, is read the same way.
+            Write(Path.Combine(home, ".copilot"), "---\nname: sharpview\ndescription: x\n---\n<!-- Written by `sharpview skill` 0.2.1. Rerun it. -->\n");
+            Assert.Contains("is from 0.2.1;", Cli.SkillCommand.HintFor(nested, home, "0.3.0"));
             // A planted marker cannot put terminal escape sequences on the console.
             Write(Path.Combine(home, ".copilot"), Ours("\u001b]0;pwned\u0007"));
             Assert.Null(Cli.SkillCommand.HintFor(nested, home, "0.3.0"));
@@ -167,23 +164,24 @@ public sealed class CliContractTests
     [Fact]
     public async Task Traversal_limits_have_nonzero_status_and_visible_marker()
     {
-        var result = await Run("paths", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--max-depth", "0");
-        Assert.Equal(1, result.Exit);
-        Assert.Equal("OrdersController.Get  (ends: --max-depth)\n", result.Out.ReplaceLineEndings("\n"));
-        Assert.Contains("1 path cut at --max-depth 0", result.Error);
-    }
-    [Fact]
-    public async Task Paths_preserve_the_declared_binding_at_dispatch()
-    {
-        var result = await Run("paths", ResearchFixture.Input, "--root", "Research.Application.Service.Interface(Research.Infrastructure.IRepository)");
-        Assert.Equal(1, result.Exit);
-        Assert.Contains("Service.Interface -> [interface call Research.Infrastructure.IRepository.Read()]", result.Out);
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
+        try
+        {
+            var result = await Run("diagram", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--max-depth", "0", "--output", path);
+            Assert.Equal(1, result.Exit);
+            Assert.Contains("The diagram is cut short (depth); raise --max-depth", result.Out);
+            Assert.Contains("Truncated: Depth limit reached", await File.ReadAllTextAsync(path));
+        }
+        finally { File.Delete(path); }
     }
     [Theory]
     [InlineData("chains")]
     [InlineData("controllers")]
     [InlineData("methods")]
     [InlineData("layers")]
+    [InlineData("reach")]
+    [InlineData("paths")]
+    [InlineData("inspect")]
     public async Task Removed_commands_are_rejected(string command)
     {
         var result = await Run(command, "missing.slnx");
@@ -193,12 +191,16 @@ public sealed class CliContractTests
     [InlineData("exceptions", "--dispatch", "direct")]
     [InlineData("exceptions", "--summary")]
     [InlineData("exceptions", "--paths")]
-    [InlineData("paths", "--layer", "project:X=X")]
-    [InlineData("reach", "--allow", "A=B")]
+    [InlineData("diagram", "--layer", "project:X=X")]
+    [InlineData("diagram", "--allow", "A=B")]
     [InlineData("exceptions", "--max-facts", "5")]
-    [InlineData("paths", "--max-chains", "5")]
-    [InlineData("reach", "--max-expansions", "5")]
-    [InlineData("paths", "--root-id", "x")]
+    [InlineData("diagram", "--max-chains", "5")]
+    [InlineData("diagram", "--max-expansions", "5")]
+    [InlineData("diagram", "--root-id", "x")]
+    [InlineData("diagram", "--follow-candidates")]
+    [InlineData("diagram", "--max-paths", "5")]
+    [InlineData("projects", "--methods")]
+    [InlineData("projects", "--json")]
     public async Task Removed_options_are_rejected_before_loading(string command, params string[] options)
     {
         var result = await Run([command, "missing.slnx", .. options]);
@@ -207,47 +209,35 @@ public sealed class CliContractTests
     [Fact]
     public async Task Option_of_another_command_names_the_command()
     {
-        var result = await Run("projects", "missing.slnx", "--follow-candidates");
-        Assert.Equal(2, result.Exit); Assert.Contains("projects does not accept --follow-candidates", result.Error);
+        var result = await Run("projects", "missing.slnx", "--declared-only");
+        Assert.Equal(2, result.Exit); Assert.Contains("projects does not accept --declared-only", result.Error);
     }
     [Fact]
-    public async Task Snapshot_ids_round_trip_and_json_is_deterministic()
+    public async Task Exception_output_is_byte_identical_across_runs()
     {
-        var first = await Run("inspect", ResearchFixture.Input, "--json");
-        var second = await Run("inspect", ResearchFixture.Input, "--json");
-        Assert.Equal(0, first.Exit); Assert.Equal(first.Out, second.Out);
-        using var saved = new MemoryStream(Encoding.UTF8.GetBytes(first.Out));
-        var restored = await SnapshotJson.ReadAsync(saved);
-        var index = new ProgramIndex(restored.Snapshot);
-        var action = Assert.Single(restored.Snapshot.Callables, x => x.DisplaySignature == "Research.Api.OrdersController.Get()");
-        var reach = Assert.Single(ReachabilityQuery.Analyze(index, [action.Id], new()).Roots);
-        Assert.Contains(reach.Reached, x => index.Callable(x.Callable).DisplaySignature == "Research.Application.Service.Load()");
-        using var doc = JsonDocument.Parse(first.Out);
-        var method = doc.RootElement.GetProperty("snapshot").GetProperty("callables").EnumerateArray()
-            .Single(x => x.GetProperty("displaySignature").GetString() == "Research.Api.OrdersController.Get()");
-        var id = method.GetProperty("id").GetString()!;
-        var result = await Run("paths", ResearchFixture.Input, "--root", id);
-        Assert.Equal(0, result.Exit);
-        Assert.Contains("OrdersController.Get -> Service.Load", result.Out);
+        var first = await Run("exceptions", ResearchFixture.Input, "--caught");
+        var second = await Run("exceptions", ResearchFixture.Input, "--caught");
+        Assert.Equal(1, first.Exit); Assert.NotEmpty(first.Out);
+        Assert.Equal((first.Out, first.Error), (second.Out, second.Error));
+    }
+    [Fact]
+    public async Task Unmatched_root_suggests_actions_by_text_then_by_method_name()
+    {
+        var text = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--root", "orderscontroller.get");
+        Assert.Equal(2, text.Exit);
+        Assert.Contains("No controller action matches --root orderscontroller.get exactly. Did you mean:\n  Research.Api.OrdersController.Get()\n", text.Error.ReplaceLineEndings("\n"));
+        var name = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--root", "Shop.OrdersController.GET(int)");
+        Assert.Contains("Did you mean:\n  Research.Api.OrdersController.Get()\n", name.Error.ReplaceLineEndings("\n"));
+        var none = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--root", "Nothing()");
+        Assert.Contains("No controller action matches --root Nothing(). Pass an action's full signature", none.Error);
     }
     [Fact]
     public async Task Output_refuses_to_overwrite_an_input_file()
     {
         var before = await File.ReadAllBytesAsync(ResearchFixture.Input);
-        var result = await Run("inspect", ResearchFixture.Input, "--json", "--output", ResearchFixture.Input);
+        var result = await Run("projects", ResearchFixture.Input, "--mermaid", "--output", ResearchFixture.Input);
         Assert.Equal(2, result.Exit);
         Assert.Equal(before, await File.ReadAllBytesAsync(ResearchFixture.Input));
-    }
-    [Fact]
-    public async Task Inspect_landscape_includes_catch_protected_regions_and_static_types()
-    {
-        var result = await Run("inspect", ResearchFixture.Input);
-        Assert.Equal(0, result.Exit);
-        Assert.Contains("Subsequent origin:", result.Out);
-        Assert.Contains("Gaps (code the analysis does not model):\n  [Unsupported] x1 Top-level statements", result.Out.ReplaceLineEndings("\n"));
-        Assert.Contains("Protected region:", result.Out);
-        Assert.Contains("Filter: enabled", result.Out);
-        Assert.Contains("static; runtime type may differ", result.Out);
     }
     [Fact]
     public async Task Default_lists_every_throw_with_method_type_and_project()
@@ -356,15 +346,6 @@ public sealed class CliContractTests
     }
 
     [Fact]
-    public async Task Depth_limited_reach_reports_one_stop_without_unexamined_dispatch_sites()
-    {
-        var result = await Run("reach", ResearchFixture.Input, "--root", "Research.Application.Service.Interface(Research.Infrastructure.IRepository)", "--max-depth", "0");
-        Assert.Equal(1, result.Exit);
-        Assert.Equal("Service.Interface\n  Stops at: --max-depth in Service.Interface  Research.Application/Service.cs:12\n", result.Out.ReplaceLineEndings("\n"));
-        Assert.Contains("deeper than --max-depth 0", result.Error);
-    }
-
-    [Fact]
     public async Task Missing_restoration_is_rejected_without_creating_assets_or_changing_source()
     {
         var directory = Path.Combine(Path.GetTempPath(), "sharpview no restore " + Guid.NewGuid().ToString("N"));
@@ -377,7 +358,7 @@ public sealed class CliContractTests
         {
             await File.WriteAllTextAsync(input, project);
             await File.WriteAllTextAsync(source, code);
-            var result = await Run("inspect", input);
+            var result = await Run("projects", input);
             Assert.Equal(2, result.Exit);
             Assert.Contains("not restored", result.Error);
             Assert.False(File.Exists(Path.Combine(directory, "obj", "project.assets.json")));
@@ -400,9 +381,8 @@ public sealed class CliContractTests
     }
     [Theory]
     [InlineData("--max-depth", "3")]
-    [InlineData("--max-paths", "5")]
-    [InlineData("--follow-candidates")]
-    public async Task Exception_views_have_no_depth_or_path_limits_and_no_follow_flag(string option, params string[] value)
+    [InlineData("--max-nodes", "5")]
+    public async Task Exception_views_have_no_depth_or_size_limits(string option, params string[] value)
     {
         var result = await Run(["exceptions", "missing.slnx", "--uncaught", option, .. value]);
         Assert.Equal(2, result.Exit); Assert.Contains($"exceptions does not accept {option}", result.Error);
