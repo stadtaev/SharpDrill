@@ -18,7 +18,6 @@ public sealed class ProgramIndex
     private readonly Dictionary<ThrowSiteId, ThrowSiteFact> throwSites;
     private readonly Dictionary<CatchId, CatchFact> catches;
     private readonly Dictionary<ExceptionRegionId, ExceptionRegionFact> regions;
-    private readonly Dictionary<CatchId, ImmutableArray<ExceptionRegionFact>> regionsByCatch;
     private readonly Dictionary<TypeId, ImmutableArray<CallableFact>> members;
     private readonly Dictionary<CallableId, ImmutableArray<ImplementationFact>> implementations;
     private readonly Dictionary<CallableId, ImmutableArray<ImplementationFact>> implemented;
@@ -82,8 +81,6 @@ public sealed class ProgramIndex
         catchesByOwner = Group(snapshot.Catches, x => x.Owner, x => x.OrderBy(s => s.Id.Value, StringComparer.Ordinal));
         // Snapshot order is retained: gaps are already sorted by compilation, location and message.
         gapsByOwner = Group(snapshot.Gaps.Where(x => x.Owner is not null), x => x.Owner!.Value, x => x);
-        regionsByCatch = Group(snapshot.ExceptionRegions.SelectMany(r => r.Catches.Select(c => (Catch: c, Region: r))), x => x.Catch, x => x)
-            .ToDictionary(x => x.Key, x => x.Value.Select(v => v.Region).ToImmutableArray());
         members = Group(snapshot.Callables.Where(x => x.DeclaringType is not null), x => x.DeclaringType!.Value,
             x => x.OrderBy(c => c.DisplaySignature, StringComparer.Ordinal).ThenBy(c => c.Id.Value, StringComparer.Ordinal));
         implementations = Group(snapshot.Implementations, x => x.Declared, x => x.OrderBy(i => i.Implementation.Value, StringComparer.Ordinal).ThenBy(i => i.Kind));
@@ -117,8 +114,6 @@ public sealed class ProgramIndex
     public bool TryGetThrowSite(ThrowSiteId id, out ThrowSiteFact fact) => throwSites.TryGetValue(id, out fact!);
     public CatchFact Catch(CatchId id) => catches.TryGetValue(id, out var fact) ? fact : throw new KeyNotFoundException($"Unknown catch: {id.Value}");
     public ExceptionRegionFact Region(ExceptionRegionId id) => regions.TryGetValue(id, out var fact) ? fact : throw new KeyNotFoundException($"Unknown region: {id.Value}");
-    // Regions listing the handler, in snapshot order.
-    public ImmutableArray<ExceptionRegionFact> RegionsOf(CatchId handler) => regionsByCatch.GetValueOrDefault(handler, []);
     // Callables declared by the type, ordered by display signature, then ID.
     public ImmutableArray<CallableFact> Members(TypeId type) => members.GetValueOrDefault(type, []);
 

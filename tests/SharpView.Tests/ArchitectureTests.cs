@@ -73,7 +73,7 @@ public sealed class ArchitectureTests
         Assert.Equal(["Get>Load Direct c1", "Get>Load Direct c2", "Load>IRepo.Read Declared c3", "Load>IRepo.Read Candidate c3 self",
             "Load>Repo.Read Candidate c3", "Load>WriteLine Direct c4", "Run>Load Direct c6"],
             calls.Graph.Edges.Select(x => $"{x.Source.Value}>{x.Target.Value} {x.Kind} {x.Site.Id.Value}{(x.IsDeclaredTargetCandidate ? " self" : "")}"));
-        Assert.Equal(["c5"], calls.Unresolved(new("Get")).Select(x => x.Id.Value));
+        Assert.Equal(["c5"], calls.UnresolvedSites.Select(x => x.Id.Value));
         Assert.Same(calls, index.CallGraph);
 
         var withBase = new ProgramIndex(index.Snapshot with

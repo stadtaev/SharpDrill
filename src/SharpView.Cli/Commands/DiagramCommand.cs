@@ -7,19 +7,19 @@ namespace SharpView.Cli;
 
 internal sealed class DiagramCommand(TextReader input, TextWriter output) : ICliCommand
 {
-    public ImmutableHashSet<string> Options { get; } = ["--root", "--follow-candidates", "--max-depth", "--max-nodes", "--max-edges", "--budget", "--output"];
+    public ImmutableHashSet<string> Options { get; } = ["--root", "--declared-only", "--max-depth", "--max-nodes", "--max-edges", "--budget", "--output"];
 
     public void Validate(Arguments arguments) => Query(arguments).Validate();
 
     private static DiagramOptions Query(Arguments arguments) =>
-        new(arguments.FollowCandidates, arguments.MaxDepth, arguments.MaxNodes, arguments.MaxEdges, arguments.Budget);
+        new(!arguments.DeclaredOnly, arguments.MaxDepth, arguments.MaxNodes, arguments.MaxEdges, arguments.Budget);
 
     public async Task<int> RunAsync(ProgramIndex index, Arguments arguments, CancellationToken token)
     {
         var actions = AspNetConventions.ControllerActions(index, token).Select(x => index.Callable(x.Method))
             .OrderBy(x => x.DisplaySignature, StringComparer.Ordinal).ThenBy(x => x.Id.Value, StringComparer.Ordinal).ToArray();
         CallableFact? selected;
-        if (arguments.Root is not null) selected = Roots.Match(actions, arguments, "diagram requires a recognised action");
+        if (arguments.Root is { } root) selected = Roots.Match(index, actions, root);
         else
         {
             if (actions.Length == 0) { await output.WriteLineAsync("No recognised controller actions. No diagram saved."); return 0; }

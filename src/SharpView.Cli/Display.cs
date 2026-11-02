@@ -38,8 +38,6 @@ internal sealed class Display(ProgramIndex index, string? input = null)
 
     internal string TypeOf(CallableId id) => index.DeclaringType(id)?.DisplayName ?? "<no containing type>";
 
-    internal static string Location(SourceEvidence evidence) => $"{evidence.Path}:{evidence.StartLine}:{evidence.StartColumn}";
-
     /// <summary>File and line relative to the analysed solution or project, so lines stay short.</summary>
     internal string Where(SourceEvidence evidence)
     {

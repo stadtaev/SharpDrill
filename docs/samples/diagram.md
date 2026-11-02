@@ -5,7 +5,7 @@ Research.Api.OrdersController.Get()
 Nodes: 4; edges: 3; examined call sites: 3.
 Solid arrows: direct calls. Dotted arrows: declared dispatch, possible implementation candidates, or unresolved calls.
 Branches show possible static calls, not execution order. Shared methods appear once; cycles represent recursion.
-Implementation candidates followed: False. Completeness: partial (see boundaries, limits and gaps below).
+Implementation candidates followed: True. Completeness: partial (see boundaries, limits and gaps below).
 
 ```mermaid
 flowchart TB

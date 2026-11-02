@@ -7,8 +7,8 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <Description>Small generic immutable directed multigraph for .NET: out/in edges, breadth-first search with shortest paths, reachability, quotient graphs and strongly connected components. Deterministic by construction; independent of C# and Roslyn.</Description>
-    <PackageTags>graph;digraph;multigraph;bfs;scc;shortest-path</PackageTags>
+    <Description>Small generic immutable directed multigraph for .NET: out/in edges, filtered and induced subgraphs, quotient graphs and strongly connected components. Deterministic by construction; independent of C# and Roslyn.</Description>
+    <PackageTags>graph;digraph;multigraph;scc;quotient</PackageTags>
   </PropertyGroup>
 
 </Project>
