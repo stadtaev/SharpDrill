@@ -2,7 +2,8 @@
 
   <!-- SharpView: exception findings as build warnings after each build of the referencing project.
        SV0001 may escape a controller action; SV0002 may escape to a global exception handler; SV0003 passes through a try
-       whose catches do not match; SV0004 third-party call with no catch on the way (only in strict mode, see below);
+       whose catches do not match; SV0004 third-party call with no catch on the way (only in strict mode, see below); SV0005 leaves an async void
+       method, where no caller can catch it;
        SV0000 the analysis itself failed. Silence a rule with NoWarn, fail on one with WarningsAsErrors. -->
   <PropertyGroup>
     <!-- false skips the analysis, e.g. <SharpViewEnabled Condition="'$(CI)' != 'true'">false</SharpViewEnabled> for CI only. -->

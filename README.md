@@ -12,7 +12,7 @@ Results carry source evidence (file:line:column), and anything the analysis cann
 
 ## Install
 
-SharpView is a .NET tool: it analyses a whole solution at once, from each controller action through every project it calls into. It needs a .NET 10 (or newer) SDK; restore the analysed solution first (SharpView never restores or builds it).
+SharpView is a .NET tool: it analyses a whole solution at once, from each controller action through every project it calls into. It needs a .NET 10 (or newer) SDK; restore the analysed solution first, or pass `--restore` (otherwise SharpView never restores or builds it).
 
 ```sh
 dotnet tool install -g SharpView.Cli   # once per machine
@@ -48,6 +48,7 @@ dotnet sharpview exceptions --uncaught
 | `SV0002` | The same, but a global exception handler (exception middleware or filter) receives it. |
 | `SV0003` | A throw passes through a `try` whose catch clauses do not match its type. |
 | `SV0004` | A third-party call with no catch on the way (only with `--strict`). |
+| `SV0005` | An exception leaves an `async void` method reached from an action: no caller can catch it, so the process ends. |
 
 To accept one finding, suppress it where the warning points (the throw, the `try` or the call), as for a compiler warning. The count of suppressed findings goes to stderr.
 
@@ -130,7 +131,7 @@ dotnet run --project src/SharpView.Cli -- exceptions $F --miscaught
 dotnet run --project src/SharpView.Cli -- diagram $F
 ```
 
-Analysing your own solution: restore it first (SharpView never restores, builds or edits analysed code). Loading evaluates MSBuild projects and may run project tooling and source generators, so it is not a sandbox.
+Analysing your own solution: restore it first or pass `--restore` (otherwise SharpView never restores, builds or edits analysed code). Loading evaluates MSBuild projects and may run project tooling and source generators, so it is not a sandbox.
 
 ## Commands
 
@@ -211,7 +212,7 @@ A saved file can return exit code 1 because it contains useful but partial resul
     - **Intercepted** by a matching handler. This does not prove recovery.
     - **Rethrown or replaced**, followed by the subsequent status.
     - **May escape** the controller action. It is never called "unhandled": middleware may still handle it.
-    - **Unknown**, with a reason. Causes include dispatch, missing bodies, a `finally` that can throw, async void, tasks that are never awaited, and depth limits. The CLI sums them up in one `Not followed:` line.
+    - **Unknown**, with a reason. Causes include dispatch, missing bodies, a `finally` that can throw, async iterators and custom awaitables, tasks that are never awaited, and depth limits. The CLI sums them up in one `Not followed:` line.
   - Directly awaited task-producing calls propagate.
   - One action can show an intercepted origin next to Unknown results for other calls; each witness stands alone.
   - The `--uncaught` summary computes a finite fixed point over direct-call strongly connected components. Recursion alone does not make a summary unknown. Origins remain distinct even when their exception types match; call-site catches transform each incoming effect separately.

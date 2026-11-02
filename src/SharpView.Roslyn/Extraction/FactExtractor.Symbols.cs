@@ -81,7 +81,7 @@ internal sealed partial class FactExtractor
         // Insert before recursively registering containing local functions.
         methods[id] = new(id, compilation, s.ContainingType is null ? null : RegisterType(s.ContainingType), null, kind, Signature(s), s.DeclaredAccessibility.ToString(), Use(s.ReturnType), s.Parameters.Select(x => new ParameterFact(x.Name, Use(x.Type), x.RefKind.ToString())).ToImmutableArray(), Attributes(s), body, Declarations(s), s.IsAsync,
             s.ReturnType is INamedTypeSymbol returnType && returnType.ContainingNamespace.ToDisplayString() == "System.Threading.Tasks" && returnType.Name is "Task" or "ValueTask",
-            ModifiersOf(s), null, CallableKey(s, compilation));
+            ModifiersOf(s), null, CallableKey(s, compilation)) { ReturnsVoid = s.ReturnsVoid };
         registeredMethods.Add((id, s));
         if (s.ContainingSymbol is IMethodSymbol parent) methods[id] = methods[id] with { ContainingCallable = RegisterMethod(parent) };
         foreach (var use in new[] { methods[id].ReturnType }.Concat(methods[id].Parameters.Select(x => x.Type))) AddDependency(methods[id], use, DependencyKind.Signature, methods[id].Declarations.FirstOrDefault());

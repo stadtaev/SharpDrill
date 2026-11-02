@@ -46,9 +46,10 @@ Implementation candidates come from source types' interface maps and overrides; 
 - **`finally`** is transparent unless it can throw itself (a `throw` or a call into source code); only then is the result Unknown.
 - **Unknown, with a reason:**
   - a `finally` that may throw;
-  - custom awaitables, async void, and tasks that are never awaited (`var t = CallAsync(); ... await t;` and `await Task.WhenAll(t, u)` count as awaited);
+  - async iterators, custom awaitables, and tasks that are never awaited (`var t = CallAsync(); ... await t;` and `await Task.WhenAll(t, u)` count as awaited);
   - dispatch through an interface or virtual member that source implements or overrides, when `--declared-only` is given (the default follows it);
   - iterator bodies.
+- **async void:** its own `try/catch` applies as in any method. What still leaves it never reaches a caller (it is rethrown on the thread pool and ends the process), so it is a finding (`Crashes`, SV0005), not Unknown, and a `try` around the call does not catch it.
 - **Recursion is not uncertainty.** All views share one fixed-point propagation, so a recursive call is followed like any other.
 - **Library calls are not uncertainty.** A call to a method with no source body (framework or NuGet code) ends the trace there: its exceptions are not modelled, so it never makes a result Unknown. Exception views report how many library methods were called, and `--uncaught` lists a few per action. This applies to direct calls and to interface/virtual calls to library members that no source type overrides.
 - **Compiler-provided members are known.** Implicit and record constructors, auto-property accessors and record members of source types have no explicit code, so they cannot throw explicitly and are never "missing".

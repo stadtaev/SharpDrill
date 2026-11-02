@@ -1,5 +1,5 @@
-Overview: 7 caught exceptions
-  7  Research.Infrastructure.StorageException
+Overview: 8 caught exceptions
+  8  Research.Infrastructure.StorageException
 
 1. Research.Infrastructure.StorageException
    Thrown:     Repository.ReadAsync  Research.Infrastructure/Repository.cs:8
@@ -23,27 +23,34 @@ Overview: 7 caught exceptions
    Path:       OrdersController.Filter -> Service.Filter -> Repository.Read
 
 4. Research.Infrastructure.StorageException
+   Thrown:     Repository.ReadAsync  Research.Infrastructure/Repository.cs:8
+   Caught by:  Service.Guarded  Research.Application/Service.cs:20
+               catch (System.Exception)
+   Handler:    handles it
+   Path:       OrdersController.Fire -> Service.Guarded -> Repository.ReadAsync
+
+5. Research.Infrastructure.StorageException
    Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
    Caught by:  Service.Nested  Research.Application/Service.cs:18
                catch (Research.Infrastructure.StorageException)
    Handler:    rethrows it
    Path:       OrdersController.Nested -> Service.Nested -> Repository.Read
 
-5. Research.Infrastructure.StorageException
+6. Research.Infrastructure.StorageException
    Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
    Caught by:  Service.Nested  Research.Application/Service.cs:18
                catch (System.Exception)
    Handler:    handles it
-   Path:       same as 4
+   Path:       same as 5
 
-6. Research.Infrastructure.StorageException
+7. Research.Infrastructure.StorageException
    Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
    Caught by:  Service.Replace  Research.Application/Service.cs:10
                catch (Research.Infrastructure.StorageException)
    Handler:    throws a different exception instead
    Path:       OrdersController.Replace -> Service.Replace -> Repository.Read
 
-7. Research.Infrastructure.StorageException
+8. Research.Infrastructure.StorageException
    Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
    Caught by:  Service.Rethrow  Research.Application/Service.cs:9
                catch (Research.Infrastructure.StorageException)

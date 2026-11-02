@@ -17,9 +17,10 @@ The usual way to run SharpView is the `SharpView.Cli` tool, in CI or on demand: 
 | `SV0002` | The same, but a global exception handler (exception middleware or filter) receives it. |
 | `SV0003` | A throw passes through a `try` whose catch clauses do not match its type. |
 | `SV0004` | A third-party call with no catch on the way from the action (only with `--strict`). |
+| `SV0005` | An exception leaves an `async void` method reached from an action: no caller can catch it, so the process ends. |
 | `SV0000` | The analysis itself failed; build with `-v:n` to see why. |
 
-Each warning points at the throw (SV0001/2), the `try` (SV0003) or the call (SV0004), and names the actions and one example path. Interface and virtual calls are followed into their source implementations; such paths say "possible, not proven".
+Each warning points at the throw (SV0001/2/5), the `try` (SV0003) or the call (SV0004), and names the actions and one example path. Interface and virtual calls are followed into their source implementations; such paths say "possible, not proven".
 
 ## Suppressing one finding
 
@@ -34,7 +35,7 @@ try { Load(); } catch (ArgumentException) { }
 public Order Find(int id) => orders.Get(id) ?? throw new NotFoundException(id);
 ```
 
-A pragma covers the code up to its `restore` (or the end of the file); an attribute covers the method, property or type it is on. Assembly-level `[assembly: SuppressMessage]` is not read. The build log counts suppressed warnings. If the IDE flags these as unnecessary suppressions (IDE0079), add `dotnet_remove_unnecessary_suppression_exclusions = SV0001,SV0002,SV0003,SV0004` to `.editorconfig`.
+A pragma covers the code up to its `restore` (or the end of the file); an attribute covers the method, property or type it is on. Assembly-level `[assembly: SuppressMessage]` is not read. The build log counts suppressed warnings. If the IDE flags these as unnecessary suppressions (IDE0079), add `dotnet_remove_unnecessary_suppression_exclusions = SV0001,SV0002,SV0003,SV0004,SV0005` to `.editorconfig`.
 
 ## Settings
 
