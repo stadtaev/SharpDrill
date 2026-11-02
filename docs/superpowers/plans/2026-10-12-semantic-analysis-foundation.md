@@ -57,27 +57,27 @@ Sources:
 
 ## Repository layout
 
-Use the existing `Sharpview` project names and `sharpview.slnx`; do not recreate or rename the scaffold.
+Use the existing `Sharpdrill` project names and `SharpDrill.slnx`; do not recreate or rename the scaffold.
 
 ```text
 global.json
 Directory.Build.props
 Directory.Packages.props
-sharpview.slnx
+SharpDrill.slnx
 src/
-  Sharpview.Core/                  # Facts, identifiers, queries, rule contracts
+  Sharpdrill.Core/                  # Facts, identifiers, queries, rule contracts
     Model/
     Queries/
     Rules/
-  Sharpview.Roslyn/           # Compilation loading and extraction
+  Sharpdrill.Roslyn/           # Compilation loading and extraction
     Loading/
     Extraction/
     Identity/
-  Sharpview.Cli/              # Arguments, bootstrap, formatting, exit policy
+  Sharpdrill.Cli/              # Arguments, bootstrap, formatting, exit policy
 tests/
-  Sharpview.Core.Tests/
-  Sharpview.Roslyn.Tests/
-  Sharpview.Cli.Tests/
+  Sharpdrill.Core.Tests/
+  Sharpdrill.Roslyn.Tests/
+  Sharpdrill.Cli.Tests/
   Fixtures/ResearchSolution/     # Small real multi-project SDK solution
 examples/
   ResearchRules/                 # Plain C# library consumer
@@ -100,7 +100,7 @@ Three production projects are sufficient. Do not create a separate abstraction p
 These are the initial API shapes. Final record fields are fixed in Tasks 1 and 3 after fixture-based review.
 
 ```csharp
-// Sharpview.Core
+// Sharpdrill.Core
 public readonly record struct CallableId(string Value);
 public readonly record struct TypeId(string Value);
 
@@ -124,14 +124,14 @@ public sealed class ProgramSnapshot
     public IReadOnlyList<AnalysisGap> Gaps { get; }
 }
 
-// Sharpview.Roslyn
+// Sharpdrill.Roslyn
 public static class RoslynProgramLoader
 {
     public static Task<ProgramSnapshot> LoadAsync(
         AnalysisRequest request, CancellationToken cancellationToken = default);
 }
 
-// Sharpview.Core.Queries
+// Sharpdrill.Core.Queries
 public static class CallPaths
 {
     public static PathSearchResult FindShortest(
@@ -139,7 +139,7 @@ public static class CallPaths
         PathSearchOptions options);
 }
 
-// Sharpview.Core.Rules
+// Sharpdrill.Core.Rules
 public interface IProgramRule
 {
     IEnumerable<Finding> Evaluate(ProgramSnapshot snapshot);
@@ -176,7 +176,7 @@ No public generic graph traversal API is necessary initially. Expose typed facts
 
 ## Task 2: Load real project compilations reliably
 
-**Create:** `Loading/AnalysisRequest.cs`, `SdkBootstrap.cs`, `WorkspaceLoader.cs`; `tests/Sharpview.Roslyn.Tests/LoadingTests.cs`.
+**Create:** `Loading/AnalysisRequest.cs`, `SdkBootstrap.cs`, `WorkspaceLoader.cs`; `tests/Sharpdrill.Roslyn.Tests/LoadingTests.cs`.
 
 **Consumes:** `AnalysisRequest`: input path, configuration, optional project selection, framework selection and include-generated flag.
 
@@ -239,13 +239,13 @@ Fact decisions:
 
 ## Task 5: Expose library capabilities through the CLI
 
-**Create:** `Sharpview.Cli/Program.cs`, `Arguments.cs`, `SnapshotJsonWriter.cs`, `TextReportWriter.cs`; process-level CLI tests.
+**Create:** `Sharpdrill.Cli/Program.cs`, `Arguments.cs`, `SnapshotJsonWriter.cs`, `TextReportWriter.cs`; process-level CLI tests.
 
 **Commands:**
 ```text
-sharpview inspect ./Example.slnx --configuration Debug --format json --output snapshot.json
-sharpview inspect ./Example.csproj --framework net10.0 --format text
-sharpview path ./Example.slnx --from <callable-id> --to <callable-id> --max-depth 20
+sharpdrill inspect ./Example.slnx --configuration Debug --format json --output snapshot.json
+sharpdrill inspect ./Example.csproj --framework net10.0 --format text
+sharpdrill path ./Example.slnx --from <callable-id> --to <callable-id> --max-depth 20
 ```
 
 `inspect` lists declarations, call sites, typed dependencies, explicit throw sites and gaps. Its output supplies IDs for `path`. This JSON is an inspectable export with a schema version; loading persisted snapshots is not yet a feature.
@@ -296,7 +296,7 @@ For implementation, use a normal repository and add an `AGENTS.md` stating:
 ```text
 Read docs/model.md and the implementation plan before changing the model.
 Use C# and the .NET SDK; do not add Visual Studio integrations.
-Keep Roslyn types inside Sharpview.Roslyn.
+Keep Roslyn types inside Sharpdrill.Roslyn.
 Keep CLI code thin; put analysis in libraries.
 Never modify projects being analysed.
 Every derived relationship must state its assumptions.
