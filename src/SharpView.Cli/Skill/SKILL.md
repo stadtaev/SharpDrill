@@ -1,6 +1,6 @@
 ---
 name: sharpview
-description: Analyse an ASP.NET Core Web API with the sharpview CLI. Finds exceptions that may escape controller actions, catches that miss, third-party calls with no catch, call diagrams of an endpoint and the project reference map. Use for questions about exception handling, error paths or the structure of a .NET Web API, and for SV0001-SV0004 build warnings.
+description: Analyse an ASP.NET Core Web API with the sharpview CLI. Finds exceptions that may escape controller actions, catches that miss, third-party calls with no catch, call diagrams of an endpoint and the project reference map. Use for questions about exception handling, error paths or the structure of a .NET Web API, and for SV0001-SV0005 build warnings.
 ---
 <!-- Written by `sharpview skill` {{version}}. Rerun it after `dotnet tool update -g SharpView.Cli` to refresh this file. -->
 
@@ -39,6 +39,7 @@ Useful options: `--root "<exact signature or ID>"` limits a run to one controlle
 - A path that repeats most of an earlier finding's path refers to it by number: `same as 2`, or `as in 2 up to <method>, then -> ...` followed by the rest. A finding with several throws of one type in one method lists their lines together (`File.cs:10, 11`).
 - `Handled` names the exception middleware or global MVC exception filter that still receives the exception; those findings come last. They are lower priority, but the client still gets whatever that handler returns, often a 500.
 - The `--strict` section lists third-party calls (NuGet packages and referenced DLLs, not .NET itself) that no catch meets anywhere on the way from the action. Any catch type around the call or a caller counts as wrapping it. A catch that only rethrows does not.
+- `Crashes` marks an exception that leaves an `async void` method. No `try` around the call and no global handler sees it: it ends the process. These come first in `--uncaught`; the fix is a catch inside that method or making it return `Task`.
 - `--miscaught` entries say which `try` missed (`Missed by`, with its catch clauses on the next line) and what happens next (`Then`, naming the actions it may escape). `--caught` entries name the method with the catch (`Caught by`) and what it does (`Handler`).
 - Library and framework code is a boundary: the exceptions it throws are not modelled, and neither are implicit exceptions such as a null dereference. No finding does not prove that nothing is thrown.
 
@@ -54,6 +55,7 @@ A project that references the `SharpView` NuGet package gets the findings as bui
 | SV0002 | The same, but a global exception handler receives it. | the throw |
 | SV0003 | A `try` whose catch clauses do not match the exception. | the `try` |
 | SV0004 | A third-party call with no catch on the way (`--strict`). | the call |
+| SV0005 | An exception leaves an `async void` method: no caller can catch it, so the process ends. | the throw |
 | SV0000 | The analysis itself failed (build with `-v:n` to see why). | |
 
 `sharpview exceptions --format msbuild` prints the same warnings without building.

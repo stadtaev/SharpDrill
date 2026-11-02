@@ -79,7 +79,7 @@ public sealed class CliContractTests
             Assert.Matches("^---\nname: sharpview\ndescription: [^\n]+\n---\n<!-- Written by `sharpview skill` ", text);
             // The skill must keep up with the CLI: every command, view and warning code is named.
             foreach (var term in new[] { "sharpview projects", "sharpview exceptions --uncaught", "--strict", "--caught", "--miscaught", 
-                "sharpview diagram", "--format msbuild", "SV0000", "SV0001", "SV0002", "SV0003", "SV0004" })
+                "sharpview diagram", "--format msbuild", "SV0000", "SV0001", "SV0002", "SV0003", "SV0004", "SV0005" })
                 Assert.Contains(term, text);
             Assert.Equal(0, (await RunIn(nested, "skill")).Exit);
             File.WriteAllText(skill, "my own skill");
@@ -264,7 +264,7 @@ public sealed class CliContractTests
         Assert.Contains("Handler:    handles it (only if the filter accepts it)", text);
         Assert.DoesNotContain("Service.Incompatible()", text);
         // Findings follow an overview by exception type, each numbered and separated by a blank line.
-        Assert.StartsWith("Overview: 7 caught exceptions\n  7  Research.Infrastructure.StorageException\n\n1. Research.Infrastructure.StorageException\n", text);
+        Assert.StartsWith("Overview: 8 caught exceptions\n  8  Research.Infrastructure.StorageException\n\n1. Research.Infrastructure.StorageException\n", text);
     }
     [Fact]
     public async Task Miscaught_reports_the_try_whose_clauses_do_not_match_and_what_happens_next()
@@ -276,8 +276,11 @@ public sealed class CliContractTests
         Assert.Contains("   Missed by:  Service.Incompatible  Research.Application/Service.cs:8\n               try { ... } catch (System.ArgumentException)\n", text);
         Assert.Contains("   Then:       may escape OrdersController.Incompatible\n   Handled:    by the global exception handler UseExceptionHandler  Research.Api/Program.cs:5\n", text);
         Assert.Contains("OrdersController.Incompatible -> Service.Incompatible -> Repository.Read\n", text);
-        Assert.StartsWith("1. ", text);
-        Assert.Contains("12 actions analysed: 1 miscaught (1 handled by a global exception handler).", result.Error);
+        // A miss inside an async void method cannot be caught further up: the process ends.
+        Assert.Contains("   Missed by:  Service.Fire  Research.Application/Service.cs:19\n               try { ... } catch (System.ArgumentException)\n"
+            + "   Then:       leaves an async void method, where no caller can catch it; the process ends\n", text);
+        Assert.StartsWith("Overview: 2 miscaught exceptions (1 handled by a global exception handler)\n", text);
+        Assert.Contains("13 actions analysed: 2 miscaught (1 handled by a global exception handler).", result.Error);
     }
     [Fact]
     public async Task Msbuild_format_prints_one_canonical_warning_per_finding()
@@ -285,19 +288,22 @@ public sealed class CliContractTests
         var result = await Run("exceptions", ResearchFixture.Input, "--format", "msbuild", "--strict");
         Assert.Equal(1, result.Exit);
         var lines = result.Out.Replace("\r\n", "\n").TrimEnd('\n').Split('\n');
-        // Without a view: the uncaught findings (all reach the fixture's exception middleware), then the miscaught one.
-        Assert.Equal(["SV0002", "SV0002", "SV0002", "SV0003"], lines.Select(x => x.Split(": warning ")[1][..6]));
+        // Without a view: the async void crash, the uncaught findings (all reach the fixture's exception middleware), then the miscaught ones.
+        Assert.Equal(["SV0005", "SV0002", "SV0002", "SV0002", "SV0003", "SV0003"], lines.Select(x => x.Split(": warning ")[1][..6]));
+        var repository = Path.Combine(Path.GetDirectoryName(ResearchFixture.Input)!, "Research.Infrastructure", "Repository.cs");
+        Assert.Equal($"{repository}(8,64): warning SV0005: Research.Infrastructure.StorageException escapes async void Service.Fire, where no caller can catch it, "
+            + "and ends the process; reached from OrdersController.Fire; path: OrdersController.Fire -> Service.Fire -> Repository.ReadAsync", lines[0]);
         var service = Path.Combine(Path.GetDirectoryName(ResearchFixture.Input)!, "Research.Application", "Service.cs");
         Assert.Equal($"{service}(8,45): warning SV0003: Research.Infrastructure.StorageException thrown in Repository.Read (Repository.cs:6) passes through this try, "
-            + "which catches only System.ArgumentException; then may escape OrdersController.Incompatible to the global exception handler UseExceptionHandler; path: OrdersController.Incompatible -> Service.Incompatible -> Repository.Read", lines[3]);
+            + "which catches only System.ArgumentException; then may escape OrdersController.Incompatible to the global exception handler UseExceptionHandler; path: OrdersController.Incompatible -> Service.Incompatible -> Repository.Read", lines[5]);
         Assert.Contains(lines, x => x.EndsWith("warning SV0002: Research.Infrastructure.StorageException may escape OrdersController.Rethrow to the global exception handler UseExceptionHandler, "
             + "rethrown in Service.Rethrow (Service.cs:9); path: OrdersController.Rethrow -> Service.Rethrow -> Repository.Read", StringComparison.Ordinal));
         // Both views print one summary line between them.
-        Assert.Single(result.Error.Split('\n'), x => x.StartsWith("12 actions analysed: ", StringComparison.Ordinal));
-        Assert.Contains("12 actions analysed: 3 uncaught exceptions (3 handled by a global exception handler); every third-party call has a catch on the way; "
-            + "1 miscaught (1 handled by a global exception handler).", result.Error);
+        Assert.Single(result.Error.Split('\n'), x => x.StartsWith("13 actions analysed: ", StringComparison.Ordinal));
+        Assert.Contains("13 actions analysed: 3 uncaught exceptions (3 handled by a global exception handler); 1 crash from async void; every third-party call has a catch on the way; "
+            + "2 miscaught (1 handled by a global exception handler).", result.Error);
         // A view narrows the warnings to that view.
-        Assert.Equal([lines[3]], (await Run("exceptions", ResearchFixture.Input, "--miscaught", "--format", "msbuild")).Out.Replace("\r\n", "\n").TrimEnd('\n').Split('\n'));
+        Assert.Equal([lines[4], lines[5]], (await Run("exceptions", ResearchFixture.Input, "--miscaught", "--format", "msbuild")).Out.Replace("\r\n", "\n").TrimEnd('\n').Split('\n'));
     }
     [Fact]
     public async Task Projects_print_the_reference_tree_with_build_settings()
@@ -329,7 +335,7 @@ public sealed class CliContractTests
         Assert.Equal(plain.Out, strict.Out);
         // The skill tip is for a person at a terminal; redirected stderr (agents, CI) never gets it.
         Assert.DoesNotContain("Tip:", strict.Error);
-        Assert.Contains("12 actions analysed: 3 uncaught exceptions (3 handled by a global exception handler); every third-party call has a catch on the way.", strict.Error);
+        Assert.Contains("13 actions analysed: 3 uncaught exceptions (3 handled by a global exception handler); 1 crash from async void; every third-party call has a catch on the way.", strict.Error);
     }
     [Theory]
     [InlineData(false)]

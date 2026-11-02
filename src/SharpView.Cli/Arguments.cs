@@ -64,7 +64,8 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
           --format msbuild       exceptions: one build warning per finding, "file(line,col): warning SV000N: ...", for MSBuild,
                                  Visual Studio and VS Code (what the SharpView package runs after each build). Without a view:
                                  uncaught and miscaught. SV0001 may escape an action, SV0002 may escape to a global exception
-                                 handler, SV0003 miscaught, SV0004 third-party call with no catch on the way (--strict).
+                                 handler, SV0003 miscaught, SV0004 third-party call with no catch on the way (--strict),
+                                 SV0005 leaves an async void method (no caller can catch it; the process ends).
           --mermaid              projects: also save the tree as a Mermaid diagram in Markdown.
           --output F             New file for diagram or projects --mermaid; existing files are never overwritten.
                                  Diagrams default to ./diagrams_exports in the current directory.

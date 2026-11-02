@@ -29,7 +29,7 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
         Assert.True(call.Evidence.StartLine > 0);
         Assert.True(File.Exists(call.Evidence.Path));
         Assert.Contains(S.BoundaryHandling, x => x.Registration == "UseExceptionHandler");
-        Assert.Equal(12, Actions.Length);
+        Assert.Equal(13, Actions.Length);
         Assert.DoesNotContain(Actions, x => x.Method == Method("Research.Api.OrdersController.Helper()").Id);
     }
     [Theory]

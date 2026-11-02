@@ -1,7 +1,8 @@
 using System.Collections.Immutable;
 namespace SharpView.Core;
 
-public enum ExceptionStatus { Intercepted, RethrownOrReplaced, MayEscape, Unknown }
+// EscapesAsyncVoid: it leaves an async void method, where no caller can catch it and the process ends.
+public enum ExceptionStatus { Intercepted, RethrownOrReplaced, MayEscape, Unknown, EscapesAsyncVoid }
 // Machine-readable counterpart of ExceptionWitness.Reason and ExceptionUncertainty: one code per distinct reason the
 // analysis emits. After a rethrow/replacement the code explains the subsequent status (SubsequentStatus ?? Status).
 public enum ExceptionReason
@@ -9,7 +10,7 @@ public enum ExceptionReason
     Unspecified, InterceptedByHandler, MayEscape, ChangedMayEscape,
     MissingBody, UnresolvedTarget, DispatchBoundary, ExtractionGap,
     AsyncUnsupported, UnobservedTask, FinallyUnsupported, HandlerFlowUnsupported, UnboundExceptionType,
-    WorkLimit, FactLimit
+    WorkLimit, FactLimit, AsyncVoidEscape
 }
 
 // One origin's story along one example path from an action (Path[0]) down to the throw, re-walked with evidence:

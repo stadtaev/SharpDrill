@@ -69,12 +69,9 @@ internal sealed partial class ExceptionsCommand : ReportCommand
     {
         var (arguments, display) = (context.Arguments, context.Display);
         var (count, handled, report) = (0, 0, new Report(context.Output));
-        // A path that reaches a fake or test class only through an assumed implementation is a guess about what DI picks.
-        bool Hidden(ThrowSiteFact origin, ExceptionWitness witness) =>
-            witness.ViaCandidate && (display.IsTestDouble(origin.Owner) || witness.Path.Any(display.IsTestDouble));
         if (caught)
         {
-            var items = ExceptionHandlingQuery.Caught(context.Index, summaries, token).Where(x => !Hidden(context.Index.ThrowSite(x.Origin), x.Example)).ToArray();
+            var items = ExceptionHandlingQuery.Caught(context.Index, summaries, token).Where(x => !Hidden(display, context.Index.ThrowSite(x.Origin), x.Example)).ToArray();
             report.Overview(Display.Plural(items.Length, "caught exception"), [.. items.Select(x => Thrown(context.Index.ThrowSite(x.Origin)))]);
             foreach (var item in items)
             {
@@ -86,7 +83,7 @@ internal sealed partial class ExceptionsCommand : ReportCommand
         {
             var handlers = new GlobalHandlers(context.Index);
             // Stable: findings keep their order within each section.
-            var items = ExceptionHandlingQuery.Miscaught(context.Index, summaries, token).Where(x => !Hidden(context.Index.ThrowSite(x.Origin), x.Example))
+            var items = ExceptionHandlingQuery.Miscaught(context.Index, summaries, token).Where(x => !Hidden(display, context.Index.ThrowSite(x.Origin), x.Example))
                 .Select(x => (Item: x, Handled: handlers.Covers(x.EscapesFrom, x.Outcomes.Contains(ExceptionStatus.MayEscape)))).OrderBy(x => x.Handled).ToArray();
             if (!arguments.MSBuild)
                 report.Overview(Display.Plural(items.Length, "miscaught exception") + HandledCount(items.Count(x => x.Handled)),
@@ -110,7 +107,8 @@ internal sealed partial class ExceptionsCommand : ReportCommand
         var (index, display, output) = (context.Index, context.Display, context.Output);
         var handlers = new GlobalHandlers(index);
         var ordered = roots.OrderBy(x => index.Callable(x).DisplaySignature, StringComparer.Ordinal).ThenBy(x => x.Value, StringComparer.Ordinal).ToArray();
-        var escapes = ordered.SelectMany(root => summaries.Roots[root].Escapes.Select(escape => (Root: root, Escape: escape)))
+        // What leaves an async void action is a crash, listed with the others below.
+        var escapes = ordered.Where(x => !index.Callable(x).IsAsyncVoid).SelectMany(root => summaries.Roots[root].Escapes.Select(escape => (Root: root, Escape: escape)))
             .Where(x => x.Escape.ExceptionType is not null && !summaries.ThirdPartyCalls.ContainsKey(x.Escape.Origin))
             .GroupBy(x => (Thrower: context.Arguments.MSBuild ? x.Escape.Origin.Value : index.ThrowSite(x.Escape.Origin).Owner.Value, x.Escape.SubsequentOrigin, x.Escape.ExceptionType, Handled: handlers.Covers([x.Root], true)))
             .Select(x => (x.Key, Origins: x.Select(e => index.ThrowSite(e.Escape.Origin)).Distinct().OrderBy(e => e.Evidence.Path, StringComparer.Ordinal).ThenBy(e => e.Evidence.SpanStart).ToArray(), Items: x.ToArray()))
@@ -119,10 +117,12 @@ internal sealed partial class ExceptionsCommand : ReportCommand
             .ThenBy(x => x.Key.SubsequentOrigin?.Value, StringComparer.Ordinal).ToArray();
         var (handled, report) = (0, new Report(output));
         var unwrapped = context.Arguments.Strict ? UnwrappedCalls(index, summaries, ordered) : [];
+        var crashes = ExceptionHandlingQuery.Crashing(index, summaries, token).Where(x => !Hidden(display, index.ThrowSite(x.Origin), x.Example)).ToArray();
         if (!context.Arguments.MSBuild)
-            report.Overview(Display.Plural(escapes.Length, "uncaught exception") + HandledCount(escapes.Count(x => x.Key.Handled))
+            report.Overview(Display.Plural(escapes.Length, "uncaught exception") + HandledCount(escapes.Count(x => x.Key.Handled)) + CrashCount(crashes.Length)
                 + (unwrapped.Length > 0 ? $"; {Display.Plural(unwrapped.Length, "third-party call")} with no catch on the way (--strict)" : ""),
-                [.. escapes.Select(x => x.Key.ExceptionType!)], unwrapped.Length);
+                [.. crashes.Select(x => x.ExceptionType ?? "exception of unknown type"), .. escapes.Select(x => x.Key.ExceptionType!)], unwrapped.Length);
+        foreach (var crash in crashes) { token.ThrowIfCancellationRequested(); WriteCrash(context, report, crash); }
         foreach (var group in escapes)
         {
             token.ThrowIfCancellationRequested();
@@ -148,9 +148,38 @@ internal sealed partial class ExceptionsCommand : ReportCommand
             WritePath(context, report, witness.Path, witness.Sites, []);
         }
         if (context.Arguments.Strict) WriteUnwrapped(context, report, summaries, unwrapped, token);
-        return Display.Plural(escapes.Length, "uncaught exception") + HandledCount(handled)
+        return Display.Plural(escapes.Length, "uncaught exception") + HandledCount(handled) + CrashCount(crashes.Length)
             + (!context.Arguments.Strict ? "" : unwrapped.Length == 0 ? "; every third-party call has a catch on the way"
                 : $"; {Display.Plural(unwrapped.Length, "third-party call")} with no catch on the way");
+    }
+
+    // A path that reaches a fake or test class only through an assumed implementation is a guess about what DI picks.
+    private static bool Hidden(Display display, ThrowSiteFact origin, ExceptionWitness witness) =>
+        witness.ViaCandidate && (display.IsTestDouble(origin.Owner) || witness.Path.Any(display.IsTestDouble));
+
+    private static string CrashCount(int crashes) => crashes == 0 ? "" : $"; {Display.Plural(crashes, "crash", "crashes")} from async void";
+
+    // An exception leaving an async void method: no try around the call sees it, and global handlers do not either, so the
+    // block names the method it leaves and the actions that reach it.
+    private static void WriteCrash(ReportContext context, Report report, CrashingException crash)
+    {
+        var (index, display) = (context.Index, context.Display);
+        var origin = index.ThrowSite(crash.Origin);
+        var type = crash.ExceptionType ?? "exception of unknown type";
+        var rethrow = crash.SubsequentOrigin is { } at && index.TryGetThrowSite(at, out var again) ? again : null;
+        if (context.Arguments.MSBuild)
+        {
+            Warn(context, "SV0005", origin.Evidence, $"{type} escapes async void {display.Short(crash.Method)}, where no caller can catch it, and ends the process"
+                + (rethrow is null ? "" : $"; rethrown in {display.Short(rethrow.Owner)} ({FileLine(rethrow.Evidence)})")
+                + $"; reached from {Actions(display, crash.Roots)}; {Chain(context, crash.Example.Path, crash.ViaCandidate)}");
+            return;
+        }
+        report.Begin(type);
+        WriteOrigin(context, report, "Thrown", [origin], crash.Example.Path);
+        if (rethrow is not null) WriteOrigin(context, report, "Rethrown", [rethrow], []);
+        report.Line("Crashes", $"leaves async void {display.Short(crash.Method)}, where no caller can catch it; the process ends");
+        if (crash.Roots is not [var only] || crash.Example.Path.FirstOrDefault() != only) report.List("Escapes", crash.Roots.Select(display.Short));
+        WriteExample(context, report, crash.Example);
     }
 
     // --strict: one block per third-party call site that no catch meets on the way from an action. Global handlers do not
@@ -234,7 +263,7 @@ internal sealed partial class ExceptionsCommand : ReportCommand
     private static (string One, string Many)? Cause(ExceptionReason reason) => reason switch
     {
         ExceptionReason.UnobservedTask => ("task that is never awaited", "tasks that are never awaited"),
-        ExceptionReason.AsyncUnsupported => ("async void method", "async void methods"),
+        ExceptionReason.AsyncUnsupported => ("async iterator or custom awaitable", "async iterators or custom awaitables"),
         ExceptionReason.FinallyUnsupported => ("finally block that may throw", "finally blocks that may throw"),
         ExceptionReason.MissingBody => ("method without a body", "methods without a body"),
         ExceptionReason.DispatchBoundary => ("interface or virtual call without a source implementation", "interface or virtual calls without a source implementation"),
@@ -306,6 +335,7 @@ internal sealed partial class ExceptionsCommand : ReportCommand
     {
         ExceptionStatus.Intercepted => "caught further up",
         ExceptionStatus.RethrownOrReplaced => "rethrown further up",
+        ExceptionStatus.EscapesAsyncVoid => "leaves an async void method, where no caller can catch it; the process ends",
         ExceptionStatus.MayEscape => "may escape " + (msbuild ? Actions(context.Display, miscaught.EscapesFrom) : string.Join(", ", miscaught.EscapesFrom.Select(context.Display.Short)))
             + (handler is null ? "" : $" to the global exception handler {handler}"),
         _ => "not determined" + (miscaught.Undetermined is { } undetermined && Cause(undetermined.ReasonCode) is { } cause

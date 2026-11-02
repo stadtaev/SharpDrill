@@ -34,8 +34,8 @@ internal static class ExceptionTransfer
             origin.IsExactType || origin.ExactExceptionType is not null, false,
             collectEvidence ? ImmutableList<SourceEvidence>.Empty.Add(origin.Evidence) : ImmutableList<SourceEvidence>.Empty,
             ImmutableList<CatchId>.Empty);
-        if (index.Callable(origin.Owner).IsAsync && !index.Callable(origin.Owner).ReturnsTask)
-            return Unknown(flow, ExceptionReason.AsyncUnsupported, "Async void or custom awaitable propagation is outside the supported model.");
+        if (AsyncUnsupported(index.Callable(origin.Owner)))
+            return Unknown(flow, ExceptionReason.AsyncUnsupported, AsyncMessage);
         return ApplyRegions(index, flow, origin.ProtectedRegions, token, collectEvidence);
     }
 
@@ -46,18 +46,22 @@ internal static class ExceptionTransfer
         return ApplyRegions(index, flow, site.ProtectedRegions, token, collectEvidence: false);
     }
 
-    internal static ExceptionTransferResult Cross(ProgramIndex index, ExceptionFlow flow, CallSiteFact site, CancellationToken token,
+    // From is the method the exception leaves: the declared target, or the implementation candidate followed.
+    internal static ExceptionTransferResult Cross(ProgramIndex index, ExceptionFlow flow, CallSiteFact site, CallableId from, CancellationToken token,
         bool collectEvidence = true)
     {
+        // The caller's try never sees it: async void rethrows on the thread pool, not at the call.
+        if (index.Callable(from).IsAsyncVoid)
+            return new(flow, ExceptionStatus.EscapesAsyncVoid, ExceptionReason.AsyncVoidEscape,
+                "Escapes an async void method: no caller can catch it; it is rethrown on the thread pool and ends the process.");
         if (collectEvidence) flow = flow with { Evidence = flow.Evidence.Add(site.Evidence) };
-        var caller = index.Callable(site.Caller);
-        if (caller.IsAsync && !caller.ReturnsTask)
-            return Unknown(flow, ExceptionReason.AsyncUnsupported, "Async void or custom awaitable propagation is outside the supported model.");
+        if (AsyncUnsupported(index.Callable(site.Caller)))
+            return Unknown(flow, ExceptionReason.AsyncUnsupported, AsyncMessage);
         if (site.BoundTarget is { } target && index.ContainsCallable(target))
         {
             var callee = index.Callable(target);
-            if ((callee.IsAsync || site.IsAwaited) && !callee.ReturnsTask)
-                return Unknown(flow, ExceptionReason.AsyncUnsupported, "Async void or custom awaitable propagation is outside the supported model.");
+            if ((callee.IsAsync || site.IsAwaited) && !callee.ReturnsTask && !callee.IsAsyncVoid)
+                return Unknown(flow, ExceptionReason.AsyncUnsupported, AsyncMessage);
             if (callee.ReturnsTask && !site.IsAwaited)
                 return Unknown(flow, ExceptionReason.UnobservedTask, "Task-producing call is not directly awaited; exception observation/propagation unsupported.");
         }
@@ -123,7 +127,7 @@ internal static class ExceptionTransfer
         for (var i = sites.Length - 1; current.Status is null && i >= 0; i--)
         {
             token.ThrowIfCancellationRequested();
-            current = ExceptionTransfer.Cross(index, current.Flow, sites[i], token);
+            current = ExceptionTransfer.Cross(index, current.Flow, sites[i], path[i + 1], token);
         }
         var flow = current.Flow;
         var status = current.Status ?? (flow.Type is null ? ExceptionStatus.Unknown : ExceptionStatus.MayEscape);
@@ -140,6 +144,11 @@ internal static class ExceptionTransfer
             flow.Changed ? status : null, flow.StaticType?.DisplayName, flow.ExactType?.DisplayName, reason)
         { MissedRegions = [.. flow.Missed], PossibleHandlers = [.. flow.Possible], Sites = [.. sites.Select(x => x.Id)], ViaCandidate = via };
     }
+
+    // An async method returning neither Task, ValueTask nor void (an async iterator, a custom task type): its exceptions
+    // surface where it is enumerated or awaited, which is not modelled.
+    private static bool AsyncUnsupported(CallableFact method) => method.IsAsync && !method.ReturnsTask && !method.ReturnsVoid;
+    private const string AsyncMessage = "Async iterator or custom awaitable: where its exceptions surface is outside the supported model.";
 
     private static ExceptionTransferResult Unknown(ExceptionFlow flow, ExceptionReason reason, string message) =>
         new(flow, ExceptionStatus.Unknown, reason, message);
