@@ -381,13 +381,11 @@ public sealed class CoreTests
         Assert.Equal(new ThrowSiteId("origin"), witness.Origin);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Async_iterator_and_custom_awaitable_propagation_are_unknown(bool awaited)
+    [Fact]
+    public void Async_iterator_and_custom_awaitable_propagation_are_unknown()
     {
-        var snapshot = Snapshot([Method("Action"), Method("Operation") with { IsAsync = !awaited }],
-            [Call("Action", "Operation", "operation", awaited: awaited)], [Throw("Operation")]);
+        var snapshot = Snapshot([Method("Action"), Method("Operation") with { IsAsync = true }],
+            [Call("Action", "Operation", "operation", awaited: true)], [Throw("Operation")]);
         Assert.Equal(ExceptionStatus.Unknown, AnalyzeOrigin(snapshot).Status);
     }
 
@@ -425,6 +423,17 @@ public sealed class CoreTests
         Assert.True(result.IsComplete);
         Assert.Empty(ExceptionHandlingQuery.Crashing(index, result));
         Assert.Equal(ExceptionStatus.Intercepted, AnalyzeOrigin(snapshot).Status);
+    }
+
+    [Fact]
+    public void Awaiting_a_method_declared_to_return_a_type_parameter_propagates_its_throws()
+    {
+        // `T Get<T>(Func<T>)` awaited as a Task: not a custom awaitable, the throw surfaces at the call.
+        var snapshot = Snapshot([Method("Action") with { IsAsync = true, ReturnsTask = true }, Method("Get")],
+            [Call("Action", "Get", "ag", awaited: true)], [Throw("Get")]);
+        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        Assert.Empty(result.Roots[new CallableId("Action")].Unknowns);
+        Assert.Equal(ExceptionStatus.MayEscape, AnalyzeOrigin(snapshot).Status);
     }
 
     [Fact]
