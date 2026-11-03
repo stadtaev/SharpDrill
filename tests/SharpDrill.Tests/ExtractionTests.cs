@@ -200,7 +200,9 @@ public sealed class ExtractionTests
             using System.Threading.Tasks;
             public static class Sample {
                 public static Task Produce() => Task.CompletedTask;
-                public static async Task Consume() { await Produce(); var task = Produce(); await task; var a = Produce(); var b = Produce(); await Task.WhenAll(a, b); var lost = Produce(); }
+                public static async Task Consume() { await Produce(); var task = Produce(); await task; var a = Produce(); var b = Produce(); await Task.WhenAll(a, b); var lost = Produce(); var key = Key(); await Use(key); }
+                public static string Key() => "k";
+                public static Task Use(string key) => Task.CompletedTask;
                 static Task held = Produce();
                 public static async Task Field() => await held;
             }
@@ -208,6 +210,8 @@ public sealed class ExtractionTests
         var consume = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Sample.Consume()");
         var calls = snapshot.CallSites.Where(x => x.Caller == consume.Id && x.TargetDisplay == "Sample.Produce()").OrderBy(x => x.Evidence.SpanStart).ToArray();
         Assert.Equal([true, true, true, true, false], calls.Select(x => x.IsAwaited));
+        // A non-task result used as an argument inside an await is not itself awaited.
+        Assert.False(Assert.Single(snapshot.CallSites, x => x.Caller == consume.Id && x.TargetDisplay == "Sample.Key()").IsAwaited);
         Assert.DoesNotContain(snapshot.Gaps, x => x.Owner == consume.Id);
         var field = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Sample.Field()");
         Assert.Contains(snapshot.Gaps, x => x.Owner == field.Id && x.Message.Contains("field, property or parameter", StringComparison.Ordinal));

@@ -42,7 +42,10 @@ internal sealed partial class FactExtractor
             var parent = operation.Parent;
             // `await call.ConfigureAwait(false)` observes the call's task; `return call;` hands it to the caller, which observes it.
             while (parent is IConversionOperation or IParenthesizedOperation or IInvocationOperation { TargetMethod.Name: "ConfigureAwait" }) parent = parent.Parent;
-            if (parent is IAwaitOperation || parent is IReturnOperation && operation.Type is { Name: "Task" or "ValueTask" }) return true;
+            if (parent is IAwaitOperation) return true;
+            // Only a task can be observed later: a string local passed as an argument inside an await is not awaited.
+            if (operation.Type is not { Name: "Task" or "ValueTask" }) return false;
+            if (parent is IReturnOperation) return true;
             // `var t = CallAsync(); ... await t;` or `await Task.WhenAll(t, u)`: the task is observed where the local is awaited.
             var local = parent switch
             {
