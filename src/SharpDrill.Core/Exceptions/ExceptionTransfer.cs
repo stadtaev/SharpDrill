@@ -57,14 +57,11 @@ internal static class ExceptionTransfer
         if (collectEvidence) flow = flow with { Evidence = flow.Evidence.Add(site.Evidence) };
         if (AsyncUnsupported(index.Callable(site.Caller)))
             return Unknown(flow, ExceptionReason.AsyncUnsupported, AsyncMessage);
-        if (site.BoundTarget is { } target && index.ContainsCallable(target))
-        {
-            var callee = index.Callable(target);
-            if ((callee.IsAsync || site.IsAwaited) && !callee.ReturnsTask && !callee.IsAsyncVoid)
-                return Unknown(flow, ExceptionReason.AsyncUnsupported, AsyncMessage);
-            if (callee.ReturnsTask && !site.IsAwaited)
-                return Unknown(flow, ExceptionReason.UnobservedTask, "Task-producing call is not directly awaited; exception observation/propagation unsupported.");
-        }
+        // No check on the callee's return type: an async iterator or custom awaitable stopped its own flows (Start, and the
+        // caller check above), and any other method throws synchronously at the call, whatever it returns (e.g. a generic T
+        // awaited as a Task).
+        if (site.BoundTarget is { } target && index.ContainsCallable(target) && index.Callable(target).ReturnsTask && !site.IsAwaited)
+            return Unknown(flow, ExceptionReason.UnobservedTask, "Task-producing call is not directly awaited; exception observation/propagation unsupported.");
         return ApplyRegions(index, flow, site.ProtectedRegions, token, collectEvidence);
     }
 
