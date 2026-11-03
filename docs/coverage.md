@@ -46,7 +46,8 @@ Implementation candidates come from source types' interface maps and overrides; 
 - **`finally`** is transparent unless it can throw itself (a `throw` or a call into source code); only then is the result Unknown.
 - **Unknown, with a reason:**
   - a `finally` that may throw;
-  - async iterators, custom awaitables, and tasks that are never awaited (`var t = CallAsync(); ... await t;` and `await Task.WhenAll(t, u)` count as awaited);
+  - throws inside an `async` method returning neither `Task`, `ValueTask` nor `void` (an async iterator or custom task type). Awaiting a non-`async` method is not this case, whatever its declared return type (e.g. a generic `T` used as a `Task`): its throws surface at the call and propagate;
+  - tasks that are never awaited (`var t = CallAsync(); ... await t;`, `await Task.WhenAll(t, u)` and `return CallAsync();` count as awaited; only a `Task`/`ValueTask` result can be observed later, so a string local passed as an argument inside an `await` does not make its call awaited);
   - dispatch through an interface or virtual member that source implements or overrides, when `--declared-only` is given (the default follows it);
   - iterator bodies.
 - **async void:** its own `try/catch` applies as in any method. What still leaves it never reaches a caller (it is rethrown on the thread pool and ends the process), so it is a finding (`Crashes`, SD0005), not Unknown, and a `try` around the call does not catch it.
