@@ -390,6 +390,32 @@ public sealed class CoreTests
     }
 
     [Fact]
+    public void An_iterator_is_uncertain_only_when_an_exception_leaves_it()
+    {
+        var iterator = Method("Items") with { IsIterator = true };
+        ExceptionMethodSummary Root(ProgramSnapshot snapshot) => ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]).Roots[new CallableId("Action")];
+        // Nothing can leave it: no finding and nothing uncertain, even when it recurses.
+        var quiet = Root(Snapshot([Method("Action"), iterator], [Call("Action", "Items", "ai"), Call("Items", "Items", "ii")], []));
+        Assert.Empty(quiet.Escapes); Assert.True(quiet.IsComplete);
+        // Its own catch applies wherever it runs.
+        var handled = Root(Snapshot([Method("Action"), iterator], [Call("Action", "Items", "ai")], [Throw("Items", regions: ["inner"])],
+            [Handler("catch", "Items", HandlerOutcome.Intercepts)], [Region("inner", "Items", "catch")]));
+        Assert.Empty(handled.Escapes); Assert.True(handled.IsComplete);
+        // What leaves it, thrown there or by a callee, surfaces at enumeration, so the caller's try does not decide it.
+        foreach (var snapshot in new[]
+        {
+            Snapshot([Method("Action"), iterator], [Call("Action", "Items", "ai", regions: ["outer"])], [Throw("Items")],
+                [Handler("catch", "Action", HandlerOutcome.Intercepts)], [Region("outer", "Action", "catch")]),
+            Snapshot([Method("Action"), iterator, Method("Leaf")], [Call("Action", "Items", "ai"), Call("Items", "Leaf", "il")], [Throw("Leaf")]),
+        })
+        {
+            var root = Root(snapshot);
+            Assert.Empty(root.Escapes); Assert.False(root.IsComplete);
+            Assert.Equal(ExceptionReason.IteratorDeferred, AnalyzeOrigin(snapshot).ReasonCode);
+        }
+    }
+
+    [Fact]
     public void Async_void_applies_its_own_catches_and_what_leaves_it_ends_there_past_the_callers_catch()
     {
         // Fire misses its own catch; the action's catch around the call would match, but cannot see it.

@@ -78,7 +78,7 @@ Snippets below are from the sample Web API, with names and paths shortened; the 
 
 - *Default, every throw:* each explicit `throw` with its type, method and location. A map of what the code can raise, independent of any endpoint.
 - *`--uncaught`:* which exceptions may leave a controller action because no catch is on the way, each with the shortest example path. Scales to a whole API, for example to find domain exceptions that reach middleware.
-- *`--uncaught --strict`:* also every call into a third-party library (NuGet package or referenced DLL, not .NET itself) that no catch meets on the way from the action, in a section of its own. Any catch around the call or a caller counts, whatever its type.
+- *`--uncaught --strict`:* also every call into a third-party library (NuGet package or referenced DLL, not .NET itself) that no catch meets on the way from the action, in a section of its own. Any catch around the call or a caller counts, whatever its type. Logging and `Microsoft.Extensions.*` calls (except `Microsoft.Extensions.Caching.*`) are left out unless `--verbose` is given.
 - *`--caught`:* each place an exception meets a matching catch: where it is thrown, where it is caught, and what the handler does (handles, rethrows, replaces). Catches with filters or runtime-dependent matches are marked as possible.
 - *`--miscaught`:* exceptions that pass through a `try` whose catch clauses don't match their type, a common sign of catching the wrong exception. Shows the clauses, and whether something further up catches it.
 
@@ -97,7 +97,7 @@ Research.Api [net10.0 | Nullable: enable | Nullable warnings as errors: no | All
     └── Research.Infrastructure [net10.0 | Nullable: enable | Nullable warnings as errors: yes | ...]
 ```
 
-A project referenced from several places is described once; later occurrences say `(described above)`. Warning counts are compiler diagnostics; analyzer and NuGet warnings are not included.
+Each project gets one line, nested under the first project to reach it. Its other referrers name it after `->` on their own line, without the dotted prefix all projects share. Warning counts are compiler diagnostics; analyzer and NuGet warnings are not included.
 
 ### `exceptions` — four views
 

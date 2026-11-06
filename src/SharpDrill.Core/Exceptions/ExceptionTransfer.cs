@@ -34,16 +34,14 @@ internal static class ExceptionTransfer
             origin.IsExactType || origin.ExactExceptionType is not null, false,
             collectEvidence ? ImmutableList<SourceEvidence>.Empty.Add(origin.Evidence) : ImmutableList<SourceEvidence>.Empty,
             ImmutableList<CatchId>.Empty);
-        if (AsyncUnsupported(index.Callable(origin.Owner)))
-            return Unknown(flow, ExceptionReason.AsyncUnsupported, AsyncMessage);
-        return ApplyRegions(index, flow, origin.ProtectedRegions, token, collectEvidence);
+        return Leaving(index.Callable(origin.Owner), ApplyRegions(index, flow, origin.ProtectedRegions, token, collectEvidence));
     }
 
     internal static ExceptionTransferResult StartAtCall(ProgramIndex index, ThrowSiteId origin, CallSiteFact site, CancellationToken token)
     {
         var flow = new ExceptionFlow(origin, null, new TypeUse(null, "System.Exception", NullabilityKind.Oblivious, []), null, false, false,
             ImmutableList<SourceEvidence>.Empty, ImmutableList<CatchId>.Empty) { AnyType = true };
-        return ApplyRegions(index, flow, site.ProtectedRegions, token, collectEvidence: false);
+        return Leaving(index.Callable(site.Caller), ApplyRegions(index, flow, site.ProtectedRegions, token, collectEvidence: false));
     }
 
     // From is the method the exception leaves: the declared target, or the implementation candidate followed.
@@ -55,14 +53,11 @@ internal static class ExceptionTransfer
             return new(flow, ExceptionStatus.EscapesAsyncVoid, ExceptionReason.AsyncVoidEscape,
                 "Escapes an async void method: no caller can catch it; it is rethrown on the thread pool and ends the process.");
         if (collectEvidence) flow = flow with { Evidence = flow.Evidence.Add(site.Evidence) };
-        if (AsyncUnsupported(index.Callable(site.Caller)))
-            return Unknown(flow, ExceptionReason.AsyncUnsupported, AsyncMessage);
-        // No check on the callee's return type: an async iterator or custom awaitable stopped its own flows (Start, and the
-        // caller check above), and any other method throws synchronously at the call, whatever it returns (e.g. a generic T
-        // awaited as a Task).
+        // No check on the callee's return type: an iterator or custom awaitable stopped its own flows (Leaving), and any other
+        // method throws synchronously at the call, whatever it returns (e.g. a generic T awaited as a Task).
         if (site.BoundTarget is { } target && index.ContainsCallable(target) && index.Callable(target).ReturnsTask && !site.IsAwaited)
             return Unknown(flow, ExceptionReason.UnobservedTask, "Task-producing call is not directly awaited; exception observation/propagation unsupported.");
-        return ApplyRegions(index, flow, site.ProtectedRegions, token, collectEvidence);
+        return Leaving(index.Callable(site.Caller), ApplyRegions(index, flow, site.ProtectedRegions, token, collectEvidence));
     }
 
     internal static ExceptionTransferResult ApplyRegions(ProgramIndex index, ExceptionFlow flow,
@@ -142,10 +137,13 @@ internal static class ExceptionTransfer
         { MissedRegions = [.. flow.Missed], PossibleHandlers = [.. flow.Possible], Sites = [.. sites.Select(x => x.Id)], ViaCandidate = via };
     }
 
-    // An async method returning neither Task, ValueTask nor void (an async iterator, a custom task type): its exceptions
-    // surface where it is enumerated or awaited, which is not modelled.
-    private static bool AsyncUnsupported(CallableFact method) => method.IsAsync && !method.ReturnsTask && !method.ReturnsVoid;
-    private const string AsyncMessage = "Async iterator or custom awaitable: where its exceptions surface is outside the supported model.";
+    // An iterator or an async method returning neither Task, ValueTask nor void (a custom task type): its own try blocks apply
+    // wherever it runs, but what leaves it surfaces where it is enumerated or awaited, not at the call, which is not modelled.
+    private static ExceptionTransferResult Leaving(CallableFact method, ExceptionTransferResult result) =>
+        result.Status is not null ? result
+        : method.IsAsync && !method.ReturnsTask && !method.ReturnsVoid ? Unknown(result.Flow, ExceptionReason.AsyncUnsupported, "Async iterator or custom awaitable: where its exceptions surface is outside the supported model.")
+        : method.IsIterator ? Unknown(result.Flow, ExceptionReason.IteratorDeferred, "Leaves an iterator: it surfaces where the sequence is enumerated, not at the call, which is outside the supported model.")
+        : result;
 
     private static ExceptionTransferResult Unknown(ExceptionFlow flow, ExceptionReason reason, string message) =>
         new(flow, ExceptionStatus.Unknown, reason, message);
