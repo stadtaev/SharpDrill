@@ -91,12 +91,19 @@ public sealed class LoaderTests
                   <ItemGroup><ProjectReference Include="Api.Pact.csproj" /></ItemGroup>
                 </Project>
                 """);
+            // No test package at all (a stub host for contract tests): only the declared marker says it is a test project.
+            var stub = Path.Combine(directory, "Api.Stub.csproj");
+            await File.WriteAllTextAsync(stub, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFramework>net10.0</TargetFramework><SonarQubeTestProject>true</SonarQubeTestProject></PropertyGroup>
+                </Project>
+                """);
             var fixture = Path.Combine(ResearchFixture.Root, "tests/Fixtures/ResearchSolution");
-            var projects = new[] { "Research.Api", "Research.Application", "Research.Infrastructure" }.Select(x => Path.Combine(fixture, x, x + ".csproj")).Append(tests).Append(pact).Append(consumer);
+            var projects = new[] { "Research.Api", "Research.Application", "Research.Infrastructure" }.Select(x => Path.Combine(fixture, x, x + ".csproj")).Append(tests).Append(pact).Append(consumer).Append(stub);
             await File.WriteAllTextAsync(input, $"<Solution>{string.Concat(projects.Select(x => $"<Project Path=\"{x}\" />"))}</Solution>");
             var snapshot = await RoslynProgramLoader.LoadAsync(new(input));
             Assert.Equal(3, snapshot.Compilations.Length);
-            Assert.Equal(new[] { consumer, pact, tests }.Order(StringComparer.Ordinal), snapshot.ExcludedTestProjects);
+            Assert.Equal(new[] { consumer, pact, stub, tests }.Order(StringComparer.Ordinal), snapshot.ExcludedTestProjects);
             await Assert.ThrowsAsync<ArgumentException>(() => RoslynProgramLoader.LoadAsync(new(input, IncludeTests: true)));
         }
         finally { Directory.Delete(directory, true); }

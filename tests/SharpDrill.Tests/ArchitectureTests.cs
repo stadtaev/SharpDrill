@@ -195,4 +195,26 @@ public sealed class ArchitectureTests
         Assert.Equal("disable", map.Projects[App].Nullable);
         Assert.Equal((WarningsAsErrorsLevel.All, 1), (map.Projects[Infra].WarningsAsErrors, map.Projects[Infra].Errors));
     }
+
+    [Fact]
+    public void Project_tree_gives_each_project_one_line_and_names_other_references_inline()
+    {
+        const string settings = "[net10.0, nullable disable, 0 warnings]";
+        static CompilationFact Node(string name, params string[] references) =>
+            Project(new(name), name) with { ProjectReferences = [.. references.Select(x => $"/repo/{x}/{x}.csproj")] };
+        static string[] Tree(params CompilationFact[] nodes) => [.. SharpDrill.Cli.ProjectsCommand.Tree(ProjectMap.Build(new ProgramSnapshot { Compilations = [.. nodes] }))];
+
+        // Cube's subtree claims Domain and Trino before Api reaches them, yet Api's line is written first.
+        Assert.Equal([
+            $"Acme.Api {settings} -> Domain, Trino",
+            $"└── Acme.Cube {settings}",
+            $"    ├── Acme.Domain {settings}",
+            $"    └── Acme.Trino {settings} -> Domain"],
+            Tree(Node("Acme.Api", "Acme.Cube", "Acme.Domain", "Acme.Trino"), Node("Acme.Cube", "Acme.Domain", "Acme.Trino"), Node("Acme.Domain"), Node("Acme.Trino", "Acme.Domain")));
+        Assert.Equal([$"Acme.Root {settings}", $"└── Acme.A {settings}", $"    └── Acme.B {settings} -> A (reference cycle)"],
+            Tree(Node("Acme.Root", "Acme.A"), Node("Acme.A", "Acme.B"), Node("Acme.B", "Acme.A")));
+        // A name that is itself the shared prefix stops the trimming, so a reference never loses its whole name.
+        Assert.Equal([$"Acme.Other {settings}", $"└── Acme {settings}", $"Acme.Web {settings} -> Acme"],
+            Tree(Node("Acme.Other", "Acme"), Node("Acme.Web", "Acme"), Node("Acme")));
+    }
 }

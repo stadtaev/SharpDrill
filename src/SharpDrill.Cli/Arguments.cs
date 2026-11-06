@@ -23,6 +23,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
     internal bool Locations { get; init; }
     internal bool DeclaredOnly { get; init; }
     internal bool Strict { get; init; }
+    internal bool Verbose { get; init; }
     internal ExceptionView View { get; init; }
     internal bool Mermaid { get; init; }
     internal bool MSBuild { get; init; }
@@ -42,7 +43,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                         --caught     reaches a matching catch: where it is thrown and where it is caught
                         --miscaught  passes through a try whose catch clauses do not match its type
                       Findings covered by exception middleware or a global exception filter are listed last.
-                      [--uncaught [--strict] | --caught | --miscaught] [--root R] [--budget N] [--declared-only] [--locations]
+                      [--uncaught [--strict [--verbose]] | --caught | --miscaught] [--root R] [--budget N] [--declared-only] [--locations]
                       [--format msbuild]
           diagram     Mermaid call graph of one controller action, saved as Markdown (prompts for an action without --root).
                       [--root R] [--declared-only] [--max-depth N] [--max-nodes N] [--max-edges N] [--budget N] [--output F]
@@ -61,6 +62,8 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
           --budget N             Examined call sites (default 100000). Raise it when the output says a limit was reached.
           --max-nodes N          diagram nodes, including boundaries (default 200).   --max-edges N  diagram edges (default 1000).
           --locations            exceptions: print call-site evidence for witnesses.
+          --verbose              exceptions --strict: also list logging (Serilog, NLog, log4net) and Microsoft.Extensions calls;
+                                 Microsoft.Extensions.Caching is always listed.
           --format msbuild       exceptions: one build warning per finding, "file(line,col): warning SD000N: ...", for MSBuild,
                                  Visual Studio and VS Code (what the SharpDrill.MSBuild package runs after each build). Without a view:
                                  uncaught and miscaught. SD0001 may escape an action, SD0002 may escape to a global exception
@@ -105,6 +108,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
                 "--root" => parsed with { Root = Value() },
                 "--declared-only" => parsed with { DeclaredOnly = true },
                 "--strict" => parsed with { Strict = true },
+                "--verbose" => parsed with { Verbose = true },
                 "--max-depth" => parsed with { MaxDepth = Number() },
                 "--budget" => parsed with { Budget = Number() },
                 "--max-nodes" => parsed with { MaxNodes = Number() },
@@ -147,6 +151,6 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
         };
     }
 
-    private static readonly ImmutableHashSet<string> KnownOptions = ["--root", "--declared-only", "--strict", "--max-depth",
+    private static readonly ImmutableHashSet<string> KnownOptions = ["--root", "--declared-only", "--strict", "--verbose", "--max-depth",
         "--budget", "--max-nodes", "--max-edges", "--locations", "--uncaught", "--caught", "--miscaught", "--mermaid", "--format", "--output"];
 }

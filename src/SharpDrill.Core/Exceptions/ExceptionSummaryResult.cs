@@ -5,9 +5,18 @@ namespace SharpDrill.Core;
 
 // FollowCandidates continues through interface/virtual calls into source implementation candidates; effects that
 // pass through one are marked ViaCandidate. ThirdPartyCallOrigins also makes every call into a third-party assembly an
-// origin (of any type, which every catch takes); its escapes are the calls with no catch on the way from the root.
-public sealed record ExceptionSummaryOptions(int MaxWork = 1_000_000, int MaxFacts = 100_000, bool FollowCandidates = false, bool ThirdPartyCallOrigins = false)
+// origin (of any type, which every catch takes); its escapes are the calls with no catch on the way from the root. Routine assemblies are left out unless AllThirdPartyCalls.
+public sealed record ExceptionSummaryOptions(int MaxWork = 1_000_000, int MaxFacts = 100_000, bool FollowCandidates = false, bool ThirdPartyCallOrigins = false, bool AllThirdPartyCalls = false)
 {
+    // Logging and the Microsoft.Extensions plumbing are called everywhere and are not a failure anyone wraps. Caching stays:
+    // IDistributedCache can be a remote store, which is what strict mode is for.
+    public static bool IsRoutineThirdParty(CompilationId assembly)
+    {
+        var name = assembly.Value.Split('|', 2)[^1].Split(',')[0];
+        return name is "Serilog" or "NLog" or "log4net" || name.StartsWith("Serilog.", StringComparison.Ordinal) || name.StartsWith("NLog.", StringComparison.Ordinal) || name.StartsWith("log4net.", StringComparison.Ordinal)
+            || name.StartsWith("Microsoft.Extensions.", StringComparison.Ordinal) && !name.StartsWith("Microsoft.Extensions.Caching.", StringComparison.Ordinal);
+    }
+
     public void Validate()
     {
         if (MaxWork <= 0 || MaxFacts <= 0) throw new ArgumentException("Summary budgets must be positive.");

@@ -18,8 +18,11 @@ internal sealed class ProjectsCommand : ICliCommand
     {
         var map = ProjectMap.Build(index.Snapshot);
         var output = Console.Out;
-        var printed = new HashSet<CompilationId>();
-        foreach (var root in map.Roots) await Write(root, "", "", []);
+        foreach (var line in Tree(map))
+        {
+            token.ThrowIfCancellationRequested();
+            await output.WriteLineAsync(line);
+        }
         foreach (var (source, path) in map.Unloaded)
             await output.WriteLineAsync($"Not loaded: {map.Projects[source].Name} references {path}, which is not in the solution");
         if (arguments.Mermaid)
@@ -31,22 +34,43 @@ internal sealed class ProjectsCommand : ICliCommand
         foreach (var gap in loadGaps) Console.Error.WriteLine($"Not loaded: {gap.Message}");
         token.ThrowIfCancellationRequested();
         return map.Unloaded.IsEmpty && loadGaps.Length == 0 ? 0 : 1;
+    }
 
-        // A project referenced from several places is described in full once; later occurrences point back to it.
-        async Task Write(CompilationId id, string lead, string indent, ImmutableHashSet<CompilationId> ancestors)
+    // Each project gets one line, nested under the first project to reach it; its other referrers name it after "->".
+    internal static IEnumerable<string> Tree(ProjectMap map)
+    {
+        var prefix = SharedPrefix(map.Projects.Values.Select(x => x.Name));
+        // Placed before writing: a sibling's subtree can claim a reference after the parent's own line would already be out.
+        var parents = new Dictionary<CompilationId, CompilationId>();
+        foreach (var root in map.Roots) Place(root);
+        return map.Roots.SelectMany(x => Write(x, "", "", []));
+
+        CompilationId[] References(CompilationId id) => [.. map.Graph.OutEdges(id).Select(x => x.Target).Distinct().OrderBy(x => map.Projects[x].Name, StringComparer.Ordinal)];
+        void Place(CompilationId id) { foreach (var child in References(id)) if (parents.TryAdd(child, id)) Place(child); }
+
+        IEnumerable<string> Write(CompilationId id, string lead, string indent, ImmutableHashSet<CompilationId> ancestors)
         {
-            token.ThrowIfCancellationRequested();
-            var project = map.Projects[id];
-            if (ancestors.Contains(id)) { await output.WriteLineAsync($"{lead}{project.Name} (reference cycle)"); return; }
-            if (!printed.Add(id)) { await output.WriteLineAsync($"{lead}{project.Name} (described above)"); return; }
-            await output.WriteLineAsync($"{lead}{project.Name} [{Settings(project)}]");
-            var children = map.Graph.OutEdges(id).Select(x => x.Target).Distinct().OrderBy(x => map.Projects[x].Name, StringComparer.Ordinal).ToArray();
+            var path = ancestors.Add(id);
+            var references = References(id);
+            var children = references.Where(x => parents[x] == id).ToArray();
+            var inline = references.Except(children).Select(x => map.Projects[x].Name[prefix.Length..] + (path.Contains(x) ? " (reference cycle)" : "")).ToArray();
+            yield return $"{lead}{map.Projects[id].Name} [{Settings(map.Projects[id])}]" + (inline.Length > 0 ? " -> " + string.Join(", ", inline) : "");
             for (var i = 0; i < children.Length; i++)
             {
                 var last = i == children.Length - 1;
-                await Write(children[i], indent + (last ? "└── " : "├── "), indent + (last ? "    " : "│   "), ancestors.Add(id));
+                foreach (var line in Write(children[i], indent + (last ? "└── " : "├── "), indent + (last ? "    " : "│   "), path)) yield return line;
             }
         }
+    }
+
+    // The dotted prefix every project shares says nothing in a reference list; a project's own line keeps its full name.
+    private static string SharedPrefix(IEnumerable<string> names)
+    {
+        var segments = names.Select(x => x.Split('.')).ToArray();
+        var first = segments.FirstOrDefault() ?? [];
+        var length = 0;
+        while (length < first.Length - 1 && segments.All(x => length < x.Length - 1 && x[length] == first[length])) length++;
+        return string.Concat(first.Take(length).Select(x => x + "."));
     }
 
     // Framework, nullable context and warning count always; the rest only when it is set.
