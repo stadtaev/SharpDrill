@@ -66,7 +66,9 @@ public sealed record CallableFact(CallableId Id, CompilationId Compilation, Type
 }
 public sealed record CallSiteFact(CallSiteId Id, CallableId Caller, CallableId? BoundTarget, string TargetDisplay,
     DispatchKind Dispatch, ImmutableArray<TypeUse> TypeArguments, SourceEvidence Evidence, bool IsImplicit,
-    ImmutableArray<ExceptionRegionId> ProtectedRegions, bool IsAwaited = false);
+    ImmutableArray<ExceptionRegionId> ProtectedRegions, bool IsAwaited = false,
+    // The task is kept in a field and awaited elsewhere: what the call throws surfaces at those awaits, not here.
+    bool IsStoredTask = false);
 public sealed record DependencyFact(TypeId? OwningType, CallableId? OwningCallable, TypeUse ReferencedType,
     DependencyKind Kind, SourceEvidence? Evidence);
 public sealed record ThrowSiteFact(ThrowSiteId Id, CallableId Owner, ThrowKind Kind, TypeUse? StaticExceptionType,

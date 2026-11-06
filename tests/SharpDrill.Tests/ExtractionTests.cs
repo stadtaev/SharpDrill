@@ -236,6 +236,167 @@ public sealed class ExtractionTests
         Assert.Contains(snapshot.Gaps, x => x.Owner == field.Id && x.Message.Contains("field, property or parameter", StringComparison.Ordinal));
     }
 
+    private const string StoredTaskSource = """
+        using System;
+        using System.Threading;
+        using System.Threading.Tasks;
+        public class Stored {
+            private readonly Task<int> task;
+            public Stored() { task = Build(); }
+            private async Task<int> Build() { await Task.Yield(); throw new InvalidOperationException(); }
+            public async Task<int> Plain() => await task;
+            public async Task<int> Configured() => await task.ConfigureAwait(false);
+            public async Task<int> Guarded() { try { return await task; } catch (InvalidOperationException) { return 0; } }
+        }
+        public static class Use { public static Stored Create() => new Stored(); }
+        public class Hidden {
+            private Task<int> viaRef;
+            private Task<int> fromParameter;
+            private Task<int> fromSync = Sync();
+            public Task<int> open = Build();
+            public Hidden(Task<int> given) { fromParameter = given; Interlocked.Exchange(ref viaRef, Build()); }
+            private static Task<int> Sync() => throw new InvalidOperationException();
+            private static async Task<int> Build() { await Task.Yield(); throw new InvalidOperationException(); }
+            public async Task<int> ViaRef() => await viaRef;
+            public async Task<int> FromParameter() => await fromParameter.ConfigureAwait(false);
+            public async Task<int> FromSync() => await fromSync;
+            public async Task<int> Open() => await open;
+        }
+        public class Dispatched {
+            public interface ILoad { Task<int> Load(); }
+            public class Load : ILoad { async Task<int> ILoad.Load() { await Task.Yield(); throw new InvalidOperationException(); } }
+            private readonly Task<int> loading;
+            public Dispatched(ILoad load) => loading = load.Load();
+            public async Task<int> Get() => await loading;
+        }
+        """;
+
+    private static IEnumerable<string> Escaping(ProgramSnapshot snapshot, string root)
+    {
+        var id = Assert.Single(snapshot.Callables, x => x.DisplaySignature == root).Id;
+        return ExceptionSummaryQuery.Analyze(snapshot, [id], new(FollowCandidates: true)).Roots[id].Escapes.Select(x => x.ExceptionType!);
+    }
+
+    [Fact]
+    public async Task An_awaited_field_surfaces_its_stored_call_at_the_await_and_only_there()
+    {
+        var snapshot = await Extract(StoredTaskSource);
+        foreach (var root in new[] { "Stored.Plain()", "Stored.Configured()", "Stored.Guarded()" })
+        {
+            var owner = Assert.Single(snapshot.Callables, x => x.DisplaySignature == root).Id;
+            Assert.DoesNotContain(snapshot.Gaps, x => x.Owner == owner);
+            var site = Assert.Single(snapshot.CallSites, x => x.Caller == owner && x.TargetDisplay == "Stored.Build()");
+            Assert.True(site.IsImplicit && site.IsAwaited && !site.IsStoredTask);
+        }
+        Assert.Equal(["System.InvalidOperationException"], Escaping(snapshot, "Stored.Plain()"));
+        Assert.Equal(["System.InvalidOperationException"], Escaping(snapshot, "Stored.Configured()"));
+        // The try around the await catches it, not anything around the assignment.
+        Assert.Empty(Escaping(snapshot, "Stored.Guarded()"));
+        Assert.Equal(["System.InvalidOperationException"], Escaping(snapshot, "Dispatched.Get()"));
+        // Constructing does not throw it, and it is not a task "never awaited".
+        var create = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Use.Create()").Id;
+        var created = ExceptionSummaryQuery.Analyze(snapshot, [create], new(FollowCandidates: true)).Roots[create];
+        Assert.Empty(created.Escapes);
+        Assert.Empty(created.Unknowns);
+    }
+
+    [Theory]
+    [InlineData("ViaRef")]          // written through a ref
+    [InlineData("FromParameter")]   // the value is not a call (and ConfigureAwait does not hide the field)
+    [InlineData("FromSync")]        // a non-async method throws at the assignment, not at the await
+    [InlineData("Open")]            // writable from outside the type
+    public async Task An_awaited_field_with_unprovable_producers_stays_a_gap(string method)
+    {
+        var snapshot = await Extract(StoredTaskSource);
+        var owner = Assert.Single(snapshot.Callables, x => x.DisplaySignature == $"Hidden.{method}()").Id;
+        Assert.Contains(snapshot.Gaps, x => x.Owner == owner && x.Message.StartsWith("Await of a task", StringComparison.Ordinal));
+        Assert.DoesNotContain(snapshot.CallSites, x => x.Caller == owner && x.IsImplicit && x.IsAwaited);
+    }
+
+    private const string TaskApiSource = """
+        using System;
+        using System.Collections.Generic;
+        using System.Threading.Tasks;
+        public class Api {
+            private readonly Task<int> a;
+            private readonly Task<int> b;
+            private readonly Task<int> never;
+            public Api() { a = A(); b = B(); never = A(); }
+            private static async Task<int> A() { await Task.Yield(); throw new InvalidOperationException(); }
+            private static async Task<int> B() { await Task.Yield(); throw new ArgumentException(); }
+            private static void Sync() => throw new FormatException();
+            public async Task AllFields() => await Task.WhenAll(a, b);
+            public async Task AllConfigured() => await Task.WhenAll(a, b).ConfigureAwait(false);
+            public async Task AllCaught() { try { await Task.WhenAll(a, b); } catch (Exception) { } }
+            public Task AllNotAwaited() { Task.WhenAll(a, b); return Task.CompletedTask; }
+            public async Task AllCalls() => await Task.WhenAll(A(), B());
+            public async Task AllCollection(List<Task> tasks) => await Task.WhenAll(tasks);
+            public async Task AnyFields() => await Task.WhenAny(a, b);
+            public async Task AnyLocals() { var t = A(); await Task.WhenAny(t); }
+            public void GetResult() => a.GetAwaiter().GetResult();
+            public void GetResultConfigured() => a.ConfigureAwait(false).GetAwaiter().GetResult();
+            public void GetResultCall() => A().GetAwaiter().GetResult();
+            public int ResultField() => a.Result;
+            public void WaitField() => a.Wait();
+            public void WaitAllFields() => Task.WaitAll(a, b);
+            private Task<int> Get() => a;
+            public async Task Handed() => await Get();
+            public async Task RunLambda() => await Task.Run(() => Sync());
+            public async Task RunAsyncLambda() => await Task.Run(async () => await A());
+            public async Task RunMethodGroup() => await Task.Run(Sync);
+            public void RunForgotten() { _ = Task.Run(() => Sync()); }
+            private readonly Task kept = Task.Run(() => Sync());
+            public async Task RunKept() => await kept;
+        }
+        """;
+
+    [Theory]
+    [InlineData("AllFields", "System.ArgumentException,System.InvalidOperationException")]
+    [InlineData("AllConfigured", "System.ArgumentException,System.InvalidOperationException")]
+    [InlineData("AllCalls", "System.ArgumentException,System.InvalidOperationException")]
+    [InlineData("AllCaught", "")]       // the try around the await
+    [InlineData("AllNotAwaited", "")]   // WhenAll alone throws nothing
+    [InlineData("AnyFields", "")]       // WhenAny completes normally
+    [InlineData("GetResult", "System.InvalidOperationException")]
+    [InlineData("GetResultConfigured", "System.InvalidOperationException")]
+    [InlineData("GetResultCall", "System.InvalidOperationException")]
+    [InlineData("Handed", "System.InvalidOperationException")]
+    [InlineData("RunLambda", "System.FormatException")]
+    [InlineData("RunAsyncLambda", "System.InvalidOperationException")]
+    [InlineData("RunMethodGroup", "System.FormatException")]
+    [InlineData("RunForgotten", "")]    // nobody observes it
+    [InlineData("RunKept", "System.FormatException")]
+    public async Task The_task_api_decides_where_exceptions_surface(string method, string expected)
+    {
+        var snapshot = await Extract(TaskApiSource);
+        var id = Assert.Single(snapshot.Callables, x => x.DisplaySignature == $"Api.{method}()").Id;
+        var summary = ExceptionSummaryQuery.Analyze(snapshot, [id], new(FollowCandidates: true)).Roots[id];
+        Assert.Equal(expected, string.Join(",", summary.Escapes.Select(x => x.ExceptionType).Distinct().Order(StringComparer.Ordinal)));
+        Assert.Empty(summary.Unknowns);
+    }
+
+    [Theory]
+    [InlineData("AllCollection(System.Collections.Generic.List<System.Threading.Tasks.Task>)", "Task.WhenAll of a collection")]
+    [InlineData("ResultField()", "Blocking on a stored task")]
+    [InlineData("WaitField()", "Blocking on a stored task")]
+    [InlineData("WaitAllFields()", "Blocking on a stored task")]
+    public async Task The_task_api_says_what_it_cannot_follow(string method, string gap)
+    {
+        var snapshot = await Extract(TaskApiSource);
+        var id = Assert.Single(snapshot.Callables, x => x.DisplaySignature == $"Api.{method}").Id;
+        Assert.Contains(snapshot.Gaps, x => x.Owner == id && x.Message.StartsWith(gap, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Awaiting_when_any_does_not_observe_a_local_task()
+    {
+        var snapshot = await Extract(TaskApiSource);
+        var id = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Api.AnyLocals()").Id;
+        var summary = ExceptionSummaryQuery.Analyze(snapshot, [id]).Roots[id];
+        Assert.Empty(summary.Escapes);
+        Assert.Equal(ExceptionReason.UnobservedTask, Assert.Single(summary.Unknowns).ReasonCode);
+    }
+
     [Fact]
     public async Task Generated_exclusion_has_explicit_evidence()
     {
