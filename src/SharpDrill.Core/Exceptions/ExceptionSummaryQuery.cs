@@ -222,13 +222,14 @@ public static class ExceptionSummaryQuery
             }
         }
 
-        // Direct callers, then (when candidates are followed) callers through an interface/virtual declaration.
+        // Direct callers, then (when candidates are followed) callers through an interface/virtual declaration. A call that
+        // stores its task is not crossed: the exception reaches callers through the implicit call at each await of the field.
         private IEnumerable<(CallSiteFact Site, bool Candidate)> IncomingSites(CallableId method)
         {
             foreach (var site in index.Incoming(method))
-                if (site.Dispatch == DispatchKind.Direct && reachable.Contains(site.Caller)) yield return (site, false);
+                if (site.Dispatch == DispatchKind.Direct && !site.IsStoredTask && reachable.Contains(site.Caller)) yield return (site, false);
             if (candidateIncoming.TryGetValue(method, out var list))
-                foreach (var site in list) yield return (site, true);
+                foreach (var site in list.Where(x => !x.IsStoredTask)) yield return (site, true);
         }
 
         private static FlowKey Key(ExceptionFlow flow) => new(flow.Origin, flow.SubsequentOrigin,

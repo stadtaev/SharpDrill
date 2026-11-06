@@ -10,7 +10,7 @@ namespace SharpDrill.Roslyn;
 // Walks one callable body's operation tree and records its call sites, throws, catches, regions and gaps.
 internal sealed partial class FactExtractor
 {
-    private sealed class BodyWalker(FactExtractor facts, SemanticModel model, CompilationFact compilation, CallableId owner, CancellationToken token) : OperationWalker
+    private sealed partial class BodyWalker(FactExtractor facts, SemanticModel model, CompilationFact compilation, CallableId owner, CancellationToken token) : OperationWalker
     {
         private int ordinal;
         private string NodeId(string kind, SyntaxNode n) => $"{owner.Value}|{kind}|{n.SyntaxTree.FilePath}:{n.SpanStart}";
@@ -23,11 +23,11 @@ internal sealed partial class FactExtractor
         public override void Visit(IOperation? operation) { token.ThrowIfCancellationRequested(); base.Visit(operation); }
         public override void VisitAnonymousFunction(IAnonymousFunctionOperation operation) { }
         public override void VisitLocalFunction(ILocalFunctionOperation operation) { }
-        private void Call(IMethodSymbol? target, SyntaxNode syntax, DispatchKind dispatch, bool implicitCall = false, bool awaited = false)
+        private void Call(IMethodSymbol? target, SyntaxNode syntax, DispatchKind dispatch, bool implicitCall = false, bool awaited = false, bool storedTask = false)
         {
             var id = target is null ? (CallableId?)null : facts.RegisterMethod(target);
             facts.calls.Add(new(new(NodeId("call", syntax) + ":" + ordinal++), owner, id, target is null ? "<unresolved>" : Signature(target), dispatch,
-                target?.TypeArguments.Select(facts.Use).ToImmutableArray() ?? [], facts.Evidence(syntax), implicitCall, Protected(syntax), awaited));
+                target?.TypeArguments.Select(facts.Use).ToImmutableArray() ?? [], facts.Evidence(syntax), implicitCall, Protected(syntax), awaited, storedTask));
         }
         private static DispatchKind Dispatch(IMethodSymbol target, SyntaxNode syntax)
         {
@@ -37,31 +37,10 @@ internal sealed partial class FactExtractor
             if (target.IsVirtual || target.IsOverride || target.IsAbstract) return DispatchKind.Virtual;
             return DispatchKind.Direct;
         }
-        private bool Awaited(IOperation operation)
-        {
-            var parent = operation.Parent;
-            // `await call.ConfigureAwait(false)` observes the call's task; `return call;` hands it to the caller, which observes it.
-            while (parent is IConversionOperation or IParenthesizedOperation or IInvocationOperation { TargetMethod.Name: "ConfigureAwait" }) parent = parent.Parent;
-            if (parent is IAwaitOperation) return true;
-            // Only a task can be observed later: a string local passed as an argument inside an await is not awaited.
-            if (operation.Type is not { Name: "Task" or "ValueTask" }) return false;
-            if (parent is IReturnOperation) return true;
-            // `var t = CallAsync(); ... await t;` or `await Task.WhenAll(t, u)`: the task is observed where the local is awaited.
-            var local = parent switch
-            {
-                IVariableInitializerOperation { Parent: IVariableDeclaratorOperation declarator } => declarator.Symbol,
-                ISimpleAssignmentOperation { Target: ILocalReferenceOperation reference } => reference.Local,
-                _ => null,
-            };
-            return local is not null && AwaitsLocal(local, operation.Syntax);
-        }
-        private bool AwaitsLocal(ILocalSymbol local, SyntaxNode within) =>
-            within.Ancestors().FirstOrDefault(IsDeclaration) is { } body && body.DescendantNodes().OfType<AwaitExpressionSyntax>()
-                .Any(x => x.Expression.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>()
-                    .Any(n => n.Identifier.ValueText == local.Name && SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(n, token).Symbol, local)));
         public override void VisitInvocation(IInvocationOperation operation)
         {
-            Call(operation.TargetMethod, operation.Syntax, Dispatch(operation.TargetMethod, operation.Syntax), operation.IsImplicit, Awaited(operation));
+            Call(operation.TargetMethod, operation.Syntax, Dispatch(operation.TargetMethod, operation.Syntax), operation.IsImplicit, Awaited(operation), StoresObservedTask(operation));
+            TaskCall(operation);
             if (operation.Type is { } type) facts.AddDependency(facts.methods[owner], facts.Use(type), DependencyKind.BodyUse, facts.Evidence(operation.Syntax));
             base.VisitInvocation(operation);
         }
@@ -107,6 +86,7 @@ internal sealed partial class FactExtractor
             var reads = !writes || p is ICompoundAssignmentOperation or IIncrementOrDecrementOperation;
             if (reads && operation.Property.GetMethod is { } get) Call(get, operation.Syntax, Dispatch(get, operation.Syntax), true);
             if (writes && operation.Property.SetMethod is { } set) Call(set, operation.Syntax, Dispatch(set, operation.Syntax), true);
+            if (operation.Property.Name == "Result" && TaskApi.IsTaskType(operation.Property.ContainingType)) Blocks(operation.Instance, operation.Syntax);
             if (p is ICoalesceAssignmentOperation) Gap("Coalescing property assignment accessor semantics unsupported.", operation.Syntax);
             base.VisitPropertyReference(operation);
         }
@@ -137,14 +117,6 @@ internal sealed partial class FactExtractor
                 staticType is null ? null : facts.Use(staticType), facts.Evidence(operation.Syntax), Protected(operation.Syntax), exactType is not null,
                 CatchOwner(operation.Syntax), exactType is null ? null : facts.Use(exactType)));
             base.VisitThrow(operation);
-        }
-        public override void VisitAwait(IAwaitOperation operation)
-        {
-            IOperation operand = operation.Operation;
-            while (operand is IConversionOperation or IParenthesizedOperation) operand = operand.ChildOperations.First();
-            // An awaited local was observed at the call that produced it (see Awaited).
-            if (operand is not (IInvocationOperation or ILocalReferenceOperation)) Gap("Await of a task held in a field, property or parameter: its producing call is not known.", operation.Syntax);
-            base.VisitAwait(operation);
         }
         // foreach and using call GetEnumerator/MoveNext/Dispose implicitly. They are recorded as implicit call sites, so
         // library enumerators are library calls and a Dispose written in source is analysed like any other callee.
