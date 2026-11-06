@@ -56,7 +56,10 @@ public sealed class ExtractionTests
         Assert.Contains(snapshot.CallSites, x => x.Caller == active.Id && x.TargetDisplay == "Active.Build()");
         Assert.Contains(snapshot.ThrowSites, x => x.Owner == active.Id);
         Assert.DoesNotContain(snapshot.Gaps, x => x.Message.Contains("Implicit base constructor", StringComparison.Ordinal) || x.Message.Contains("lock", StringComparison.Ordinal));
-        Assert.Single(snapshot.Gaps, x => x.Message.StartsWith("Iterator bodies", StringComparison.Ordinal));
+        // An iterator is a fact, not a gap: only an exception actually leaving it is uncertain.
+        Assert.DoesNotContain(snapshot.Gaps, x => x.Message.Contains("Iterator", StringComparison.Ordinal));
+        Assert.True(Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Iter.It()").IsIterator);
+        Assert.False(active.IsIterator);
         var derived = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Derived..ctor()");
         Assert.Contains(snapshot.CallSites, x => x.Caller == derived.Id && x.TargetDisplay == "Base..ctor()" && x.IsImplicit);
     }
@@ -173,6 +176,22 @@ public sealed class ExtractionTests
         var nullMethod = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Sample.Null()");
         Assert.False(Assert.Single(snapshot.ThrowSites, x => x.Owner == nullMethod.Id).IsExactType);
         Assert.Contains(snapshot.Gaps, x => x.Owner == nullMethod.Id && x.Message.Contains("implicit NullReferenceException", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task An_interface_call_reaches_an_implementation_inherited_from_a_generic_base()
+    {
+        var snapshot = await Extract("""
+            using System; using System.Collections.Generic; using System.Threading.Tasks;
+            public interface IRepo<T, in TId> { Task<List<T>> Search(); }
+            public class AsyncRepo<T, TId> : IRepo<T, TId> { public virtual async Task<List<T>> Search() { await Task.Yield(); throw new InvalidOperationException(); } }
+            public interface IBench : IRepo<int, Guid> { }
+            public class Bench : AsyncRepo<int, Guid>, IBench { }
+            public class Svc(IBench bench) { public async Task<int> Run() => (await bench.Search()).Count; }
+            """);
+        var root = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Svc.Run()").Id;
+        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [root], new(FollowCandidates: true));
+        Assert.Equal("System.InvalidOperationException", Assert.Single(result.Roots[root].Escapes).ExceptionType);
     }
 
     [Fact]

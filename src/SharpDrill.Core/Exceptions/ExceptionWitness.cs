@@ -10,7 +10,7 @@ public enum ExceptionReason
     Unspecified, InterceptedByHandler, MayEscape, ChangedMayEscape,
     MissingBody, UnresolvedTarget, DispatchBoundary, ExtractionGap,
     AsyncUnsupported, UnobservedTask, FinallyUnsupported, HandlerFlowUnsupported, UnboundExceptionType,
-    WorkLimit, FactLimit, AsyncVoidEscape
+    WorkLimit, FactLimit, AsyncVoidEscape, IteratorDeferred
 }
 
 // One origin's story along one example path from an action (Path[0]) down to the throw, re-walked with evidence:

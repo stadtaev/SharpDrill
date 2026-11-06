@@ -66,6 +66,35 @@ public sealed class ExceptionScopeTests
         Assert.Empty(ExceptionSummaryQuery.Analyze(snapshot, [Action]).Roots[Action].Escapes);
     }
 
+    [Theory]
+    [InlineData("Serilog, Version=4.0.0.0, Culture=neutral", true)]
+    [InlineData("Serilog.Sinks.Console, Version=6.0.0.0", true)]
+    [InlineData("NLog", true)]
+    [InlineData("log4net", true)]
+    [InlineData("Microsoft.Extensions.Logging.Abstractions, Version=10.0.0.0", true)]
+    [InlineData("Microsoft.Extensions.Options", true)]
+    [InlineData("Microsoft.Extensions.Caching.Abstractions, Version=10.0.0.0", false)]
+    [InlineData("Microsoft.Extensions.Caching.StackExchangeRedis", false)]
+    [InlineData("Microsoft.EntityFrameworkCore, Version=10.0.0.0", false)]
+    [InlineData("SerilogLike", false)]
+    public void Routine_third_party_assemblies_are_logging_and_extensions_but_not_caching(string assembly, bool routine) =>
+        Assert.Equal(routine, ExceptionSummaryOptions.IsRoutineThirdParty(new("metadata|" + assembly)));
+
+    [Fact]
+    public void Strict_leaves_out_routine_third_party_calls_unless_asked_for_all()
+    {
+        var (vendor, log) = (new CompilationId("metadata|Vendor"), new CompilationId("metadata|Serilog"));
+        var snapshot = Snapshot([Method("Action"), Method("Send", BodyStatus.MetadataOnly) with { Compilation = vendor }, Method("Write", BodyStatus.MetadataOnly) with { Compilation = log }],
+            [Call("Action", "Send", "send"), Call("Action", "Write", "write")]) with { ThirdPartyAssemblies = [vendor, log] };
+        string[] Sites(bool all)
+        {
+            var result = ExceptionSummaryQuery.Analyze(snapshot, [Action], new(ThirdPartyCallOrigins: true, AllThirdPartyCalls: all));
+            return [.. result.Roots[Action].Escapes.Select(x => result.ThirdPartyCalls[x.Origin].Value).Distinct().Order()];
+        }
+        Assert.Equal(["send"], Sites(all: false));
+        Assert.Equal(["send", "write"], Sites(all: true));
+    }
+
     [Fact]
     public void A_root_without_a_body_is_still_unknown()
     {

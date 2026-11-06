@@ -56,9 +56,11 @@ internal static class ProjectSelection
             yield return collection.LoadProject(path, new Dictionary<string, string> { ["TargetFramework"] = framework }, null);
     }
 
-    // Microsoft.NET.Test.Sdk, MSTest and TUnit set IsTestProject; package families catch the rest (xunit.v3, NUnit3TestAdapter, Reqnroll.xUnit...).
+    // Microsoft.NET.Test.Sdk, MSTest and TUnit set IsTestProject; SonarQubeTestProject marks helpers no framework can reveal (a stub host for
+    // contract tests); package families catch the rest (xunit.v3, NUnit3TestAdapter, Reqnroll.xUnit...).
     private static readonly string[] TestPackages = ["Microsoft.NET.Test.Sdk", "xunit", "NUnit", "TUnit", "MSTest", "SpecFlow", "Reqnroll", "LightBDD", "Cucumber", "PactNet"];
     private static bool LooksLikeTest(Project project) =>
-        string.Equals(project.GetPropertyValue("IsTestProject"), "true", StringComparison.OrdinalIgnoreCase)
+        IsTrue(project, "IsTestProject") || IsTrue(project, "SonarQubeTestProject")
         || project.GetItems("PackageReference").Any(x => TestPackages.Any(p => x.EvaluatedInclude.StartsWith(p, StringComparison.OrdinalIgnoreCase)));
+    private static bool IsTrue(Project project, string property) => string.Equals(project.GetPropertyValue(property), "true", StringComparison.OrdinalIgnoreCase);
 }
