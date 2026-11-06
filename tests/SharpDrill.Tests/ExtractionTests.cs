@@ -851,7 +851,7 @@ public sealed class ExtractionTests
             Assert.Equal([Path.GetFullPath(Path.Combine(directory, "..", "Other", "Other.csproj"))], settings.ProjectReferences);
             Assert.Contains("choices: net9.0, net10.0", Assert.Throws<ArgumentException>(() => ProjectSelection.Read(path, new(path))).Message);
             Assert.Contains("not declared", Assert.Throws<ArgumentException>(() => ProjectSelection.Read(path, new(path, TargetFramework: "net8.0"))).Message);
-            Assert.Contains("not restored", Assert.Throws<ArgumentException>(() => ProjectSelection.Read(path, new(path, TargetFramework: "net9.0"))).Message);
+            Assert.Contains("not restored", Assert.Throws<NotRestoredException>(() => ProjectSelection.Read(path, new(path, TargetFramework: "net9.0"))).Message);
             Assert.False(Directory.Exists(Path.Combine(directory, "obj")));
         }
         finally { Directory.Delete(directory, true); }

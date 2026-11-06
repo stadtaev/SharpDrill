@@ -126,4 +126,13 @@ public sealed record ProgramSnapshot
     public string SourceRoot { get; init; } = "";
     // Project files skipped at load because they are test projects (not a gap: excluding them is the default scope).
     public ImmutableArray<string> ExcludedTestProjects { get; init; } = [];
+    public LoadInputs Inputs { get; init; } = new();
+}
+// What a load read, so a kept snapshot can tell whether it is still valid. Files: code and project files, compared by content.
+// Stamped: referenced assemblies, compared by size and time. Folders: project folders, where a new file also counts.
+public sealed record LoadInputs
+{
+    public ImmutableArray<string> Files { get; init; } = [];
+    public ImmutableArray<string> Stamped { get; init; } = [];
+    public ImmutableArray<string> Folders { get; init; } = [];
 }

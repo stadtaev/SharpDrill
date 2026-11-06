@@ -6,8 +6,9 @@ What SharpDrill models today, and what it deliberately does not. "Boundary" and 
 
 - Restored SDK-style C# projects and solutions (`.csproj`, `.sln`, `.slnx`), hosted on .NET 10, loaded through the SDK's MSBuild workspace (no Visual Studio).
 - One configuration/target-framework variant per project. An explicit `--framework` applies to the whole input and must be declared by every selected project.
-- Missing restore assets in any selected project abort loading. Workspace or compiler failures that still produce a compilation become visible gaps.
-- Project evaluation happens before the assets check, so project tooling and source generators may execute. SharpDrill never builds, restores or edits the analysed source.
+- Missing restore assets in a selected project make the CLI run `dotnet restore` on the input and load again (`--no-restore` aborts instead; the `SharpDrill.Roslyn` library always aborts). No build is needed unless compile errors are reported: code generated during a build is then missing. Workspace or compiler failures that still produce a compilation become visible gaps.
+- Project evaluation happens before the assets check, so project tooling and source generators may execute. SharpDrill never builds or edits the analysed source.
+- The CLI keeps the last analysis per input and load options in the user's local application data folder (`SHARPDRILL_CACHE_DIR` overrides it) and reuses it while nothing the load read has changed: this exact tool build, code and project files by content (documents, MSBuild imports, restore assets, `.cs`, `.cshtml`, `.razor`, project and config files anywhere under a project folder, config files in folders above it), and referenced assemblies by size and time. Results with compile errors or load failures are never kept. Not tracked: environment variables, and a new non-source file that a project's own glob turns into an additional file; `--no-cache` covers both.
 - Generated documents are included by default; `--exclude-generated` records each exclusion as evidence.
 
 ## Controller actions

@@ -12,7 +12,7 @@ Results carry source evidence (file:line:column), and anything the analysis cann
 
 ## Install
 
-SharpDrill is a .NET tool: it analyses a whole solution at once, from each controller action through every project it calls into. It needs a .NET 10 (or newer) SDK; restore the analysed solution first, or pass `--restore` (otherwise SharpDrill never restores or builds it).
+SharpDrill is a .NET tool: it analyses a whole solution at once, from each controller action through every project it calls into. It needs a .NET 10 (or newer) SDK; missing packages are restored automatically (`--no-restore` turns that off), and SharpDrill never builds the solution.
 
 ```sh
 dotnet tool install -g SharpDrill   # once per machine
@@ -131,7 +131,7 @@ dotnet run --project src/SharpDrill.Cli -- exceptions $F --miscaught
 dotnet run --project src/SharpDrill.Cli -- diagram $F
 ```
 
-Analysing your own solution: restore it first or pass `--restore` (otherwise SharpDrill never restores, builds or edits analysed code). Loading evaluates MSBuild projects and may run project tooling and source generators, so it is not a sandbox.
+Analysing your own solution: packages are restored automatically when missing (`--no-restore` turns that off, `--restore` forces it); a build is needed only if stderr reports compile errors, for example from code generated during a build. SharpDrill never builds or edits your code. The last analysis of each input is kept in your local application data folder (`~/.local/share/sharpdrill/cache` on Linux, or `SHARPDRILL_CACHE_DIR`), holding your code's symbol names and paths, and reused while nothing it read has changed; results with compile errors or load failures are not kept, and `--no-cache` analyses again. Loading evaluates MSBuild projects and may run project tooling and source generators, so it is not a sandbox.
 
 ## Commands
 
