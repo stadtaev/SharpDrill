@@ -36,13 +36,21 @@ public static class RoslynProgramLoader
             : await workspace.OpenSolutionAsync(input, cancellationToken: cancellationToken);
         var contexts = new List<(Project Project, Compilation Compilation, CompilationFact Fact)>();
         var excludedTests = new List<string>();
+        var files = new HashSet<string>(StringComparer.Ordinal) { input };
+        var stamped = new HashSet<string>(StringComparer.Ordinal);
+        var folders = new HashSet<string>(StringComparer.Ordinal);
         foreach (var project in solution.Projects.OrderBy(x => x.FilePath, StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (project.Language != LanguageNames.CSharp) { loadGaps.Add(new(GapKind.Unsupported, null, null, $"Non-C# project excluded: {project.FilePath}", null)); continue; }
             var settings = ProjectSelection.Read(project.FilePath!, request);
-            if (settings.ExcludedTest) { excludedTests.Add(project.FilePath!); continue; }
+            if (settings.ExcludedTest) { excludedTests.Add(project.FilePath!); files.Add(project.FilePath!); continue; }
             var selection = settings.Framework;
+            files.UnionWith(settings.Inputs);
+            files.UnionWith(project.Documents.Cast<TextDocument>().Concat(project.AdditionalDocuments).Concat(project.AnalyzerConfigDocuments).Select(x => x.FilePath).OfType<string>());
+            stamped.UnionWith(project.MetadataReferences.OfType<PortableExecutableReference>().Select(x => x.FilePath).OfType<string>());
+            stamped.UnionWith(project.AnalyzerReferences.Select(x => x.FullPath).OfType<string>());
+            folders.Add(Path.GetDirectoryName(project.FilePath!)!);
             var compilation = await project.GetCompilationAsync(cancellationToken);
             if (compilation is null) { loadGaps.Add(new(GapKind.ProjectLoad, null, null, $"No compilation: {project.FilePath}", null)); continue; }
             var id = new CompilationId($"{Path.GetFullPath(project.FilePath!)}|{request.Configuration}|{selection}");
@@ -68,6 +76,7 @@ public static class RoslynProgramLoader
         var extractor = new FactExtractor(contexts.Select(x => x.Fact).ToImmutableArray(), loadGaps);
         foreach (var context in contexts) await extractor.RegisterAsync(context.Project, context.Compilation, context.Fact, request.IncludeGenerated, cancellationToken);
         extractor.Extract(cancellationToken);
-        return extractor.Snapshot() with { SourceRoot = Path.GetDirectoryName(input)!, ExcludedTestProjects = [.. excludedTests.Distinct().Order(StringComparer.Ordinal)] };
+        return extractor.Snapshot() with { SourceRoot = Path.GetDirectoryName(input)!, ExcludedTestProjects = [.. excludedTests.Distinct().Order(StringComparer.Ordinal)],
+            Inputs = new() { Files = [.. files.Order(StringComparer.Ordinal)], Stamped = [.. stamped.Order(StringComparer.Ordinal)], Folders = [.. folders.Order(StringComparer.Ordinal)] } };
     }
 }
