@@ -240,9 +240,6 @@ internal sealed partial class FactExtractor
                 facts.regions.Add(new(new(NodeId("try", region)), owner, facts.Evidence(region.Block), ids.ToImmutable(),
                     region.Finally is { } final && RunsSourceOrThrows(final.Block, model, token)));
             }
-            // `lock` only adds Monitor calls that cannot raise a modelled exception. An iterator defers its body, so one gap per iterator.
-            if (declaration.DescendantNodes(x => x == declaration || !IsDeclaration(x)).FirstOrDefault(x => x is YieldStatementSyntax) is { } yield)
-                Gap("Iterator bodies run deferred; exception timing is outside the supported model.", yield);
         }
     }
 }

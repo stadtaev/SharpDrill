@@ -105,7 +105,7 @@ public static class ExceptionSummaryQuery
         // In ordinal method order, so the queue (and with it the first recorded link of each fact) is deterministic.
         public void Seed()
         {
-            var thirdParty = options.ThirdPartyCallOrigins ? index.Snapshot.ThirdPartyAssemblies.ToHashSet() : [];
+            var thirdParty = options.ThirdPartyCallOrigins ? index.Snapshot.ThirdPartyAssemblies.Where(x => options.AllThirdPartyCalls || !ExceptionSummaryOptions.IsRoutineThirdParty(x)).ToHashSet() : [];
             foreach (var method in reachable.OrderBy(x => x.Value, StringComparer.Ordinal))
             {
                 token.ThrowIfCancellationRequested();

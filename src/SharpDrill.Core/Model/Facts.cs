@@ -59,6 +59,8 @@ public sealed record CallableFact(CallableId Id, CompilationId Compilation, Type
     // True when the callable's code is fully known: written in source, or compiler-provided and free of explicit code.
     public bool HasBody => Body is BodyStatus.Source or BodyStatus.Synthesized;
     public bool ReturnsVoid { get; init; }
+    // Contains yield: the body runs when the sequence is enumerated, not at the call.
+    public bool IsIterator { get; init; }
     // An exception leaving it never reaches a caller: it is rethrown on the thread pool and ends the process.
     public bool IsAsyncVoid => IsAsync && ReturnsVoid;
 }

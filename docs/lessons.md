@@ -121,7 +121,7 @@ After the changes the command has one limit, `--budget`, which scales the others
 
 ## Open items
 
-- **Iterators.** `yield return` bodies run inside a generated `MoveNext`, when the caller enumerates; they are still a gap.
+- **Iterators.** `yield return` bodies run inside a generated `MoveNext`, when the caller enumerates. An exception leaving one is Unknown because the enumeration site is not traced; tracing it would turn those into findings.
 - **Library exceptions.** Library calls end the trace, so a `catch (JsonException)` around `JsonSerializer.Deserialize` has nothing to explain it. The `<exception cref>` tags in the referenced assemblies' XML docs could supply those origins.
 
 Resolved since the first run: global caveats no longer set exit 1 (only gaps that affect a result do); initializers are attributed to the constructors that run them; `await foreach`/`await using` and awaited locals are modelled; handler outcomes come from control flow, filters are possible catches and a `finally` matters only when it can throw.

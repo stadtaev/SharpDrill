@@ -46,7 +46,7 @@ public sealed class CliTests
         // Each finding names its registration, so a block copied out of a CI log reads on its own.
         Assert.Equal("1. Research.Infrastructure.StorageException\n   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6\n"
             + "   Handled:    by the global exception handler UseExceptionHandler  Research.Api/Program.cs:5\n   Path:       OrdersController.Get -> Service.Load -> Repository.Read\n", result.Out.ReplaceLineEndings("\n"));
-        Assert.Equal("1 action analysed: 1 uncaught exception (1 handled by a global exception handler).\n", result.Error.ReplaceLineEndings("\n"));
+        Assert.Equal("1 uncaught exception (1 handled by a global exception handler).\n", result.Error.ReplaceLineEndings("\n"));
     }
     [Fact]
     public async Task Absent_root_is_an_invalid_request()

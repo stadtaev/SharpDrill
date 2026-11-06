@@ -10,11 +10,12 @@ internal sealed partial class ExceptionsCommand : ReportCommand
     private static readonly string[] Views = ["--uncaught", "--caught", "--miscaught"];
     private static readonly string[] TracedOptions = ["--root", "--budget", "--locations", "--declared-only"];
 
-    public override ImmutableHashSet<string> Options { get; } = [.. TracedOptions, .. Views, "--strict", "--format"];
+    public override ImmutableHashSet<string> Options { get; } = [.. TracedOptions, .. Views, "--strict", "--verbose", "--format"];
 
     public override void Validate(Arguments arguments)
     {
         if (arguments.Given.Count(Views.Contains) > 1) throw new ArgumentException("Choose one of --uncaught, --caught or --miscaught.");
+        if (arguments.Verbose && !arguments.Strict) throw new ArgumentException("--verbose requires --strict.");
         if (arguments.MSBuild && arguments.View == ExceptionView.Caught) throw new ArgumentException("--format msbuild reports uncaught and miscaught exceptions; caught ones are not warnings.");
         if (arguments.MSBuild && arguments.Locations) throw new ArgumentException("--format msbuild prints one line per finding; --locations does not apply.");
         if (arguments.Strict && arguments.View != ExceptionView.Uncaught && !(arguments.MSBuild && arguments.View == ExceptionView.Throws)) throw new ArgumentException("--strict requires --uncaught.");
@@ -24,7 +25,7 @@ internal sealed partial class ExceptionsCommand : ReportCommand
     }
 
     // Every view reads one propagation. The same budget bounds both transfer work and retained facts.
-    private static ExceptionSummaryOptions AnalysisOptions(Arguments arguments) => new(arguments.Budget, arguments.Budget, !arguments.DeclaredOnly, arguments.Strict);
+    private static ExceptionSummaryOptions AnalysisOptions(Arguments arguments) => new(arguments.Budget, arguments.Budget, !arguments.DeclaredOnly, arguments.Strict, arguments.Verbose);
 
     protected override ValueTask<bool> ExecuteAsync(ReportContext context, CancellationToken token)
     {
@@ -40,7 +41,8 @@ internal sealed partial class ExceptionsCommand : ReportCommand
             _ => [Handled(context, summaries, caught: false, token)],
         };
         // One summary for the run, however many views it printed, so a CI log has one line to read.
-        Console.Error.WriteLine($"{Display.Plural(roots.Length, "action")} analysed: {string.Join("; ", counts)}.");
+        // Without actions a zero count would read as a clean result, so that case says nothing was traced.
+        Console.Error.WriteLine(roots.IsEmpty ? "No controller actions found." : string.Join("; ", counts) + ".");
         WriteNotFollowed(context, roots.SelectMany(x => summaries.Roots[x].Unknowns)
             .Where(x => x.ReasonCode is not (ExceptionReason.WorkLimit or ExceptionReason.FactLimit))
             .Select(x => (x.ReasonCode, x.Site is { } s ? context.Index.CallSite(s).Evidence : x.Evidence)));
@@ -148,9 +150,12 @@ internal sealed partial class ExceptionsCommand : ReportCommand
             WritePath(context, report, witness.Path, witness.Sites, []);
         }
         if (context.Arguments.Strict) WriteUnwrapped(context, report, summaries, unwrapped, token);
+        // The claim is narrower when calls were left out, so it says so; a program without such assemblies has nothing to add.
+        var leftOut = !context.Arguments.Verbose && index.Snapshot.ThirdPartyAssemblies.Any(ExceptionSummaryOptions.IsRoutineThirdParty)
+            ? ", not counting logging and Microsoft.Extensions (--verbose includes them)" : "";
         return Display.Plural(escapes.Length, "uncaught exception") + HandledCount(handled) + CrashCount(crashes.Length)
-            + (!context.Arguments.Strict ? "" : unwrapped.Length == 0 ? "; every third-party call has a catch on the way"
-                : $"; {Display.Plural(unwrapped.Length, "third-party call")} with no catch on the way");
+            + (!context.Arguments.Strict ? "" : (unwrapped.Length == 0 ? "; every third-party call has a catch on the way"
+                : $"; {Display.Plural(unwrapped.Length, "third-party call")} with no catch on the way") + leftOut);
     }
 
     // A path that reaches a fake or test class only through an assumed implementation is a guess about what DI picks.
@@ -262,6 +267,7 @@ internal sealed partial class ExceptionsCommand : ReportCommand
     // Plain-words causes; limits are reported separately and the rest cannot occur after the handler rules above.
     private static (string One, string Many)? Cause(ExceptionReason reason) => reason switch
     {
+        ExceptionReason.IteratorDeferred => ("exception raised inside an iterator, which surfaces when it is enumerated", "exceptions raised inside iterators, which surface when they are enumerated"),
         ExceptionReason.UnobservedTask => ("task that is never awaited", "tasks that are never awaited"),
         ExceptionReason.AsyncUnsupported => ("async iterator or custom awaitable", "async iterators or custom awaitables"),
         ExceptionReason.FinallyUnsupported => ("finally block that may throw", "finally blocks that may throw"),

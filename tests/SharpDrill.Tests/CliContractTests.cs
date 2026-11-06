@@ -280,7 +280,7 @@ public sealed class CliContractTests
         Assert.Contains("   Missed by:  Service.Fire  Research.Application/Service.cs:19\n               try { ... } catch (System.ArgumentException)\n"
             + "   Then:       leaves an async void method, where no caller can catch it; the process ends\n", text);
         Assert.StartsWith("Overview: 2 miscaught exceptions (1 handled by a global exception handler)\n", text);
-        Assert.Contains("13 actions analysed: 2 miscaught (1 handled by a global exception handler).", result.Error);
+        Assert.Contains("2 miscaught (1 handled by a global exception handler).", result.Error);
     }
     [Fact]
     public async Task Msbuild_format_prints_one_canonical_warning_per_finding()
@@ -299,12 +299,30 @@ public sealed class CliContractTests
         Assert.Contains(lines, x => x.EndsWith("warning SD0002: Research.Infrastructure.StorageException may escape OrdersController.Rethrow to the global exception handler UseExceptionHandler, "
             + "rethrown in Service.Rethrow (Service.cs:9); path: OrdersController.Rethrow -> Service.Rethrow -> Repository.Read", StringComparison.Ordinal));
         // Both views print one summary line between them.
-        Assert.Single(result.Error.Split('\n'), x => x.StartsWith("13 actions analysed: ", StringComparison.Ordinal));
-        Assert.Contains("13 actions analysed: 3 uncaught exceptions (3 handled by a global exception handler); 1 crash from async void; every third-party call has a catch on the way; "
+        Assert.Single(result.Error.Split('\n'), x => x.StartsWith("3 uncaught exceptions", StringComparison.Ordinal));
+        Assert.Contains("3 uncaught exceptions (3 handled by a global exception handler); 1 crash from async void; every third-party call has a catch on the way; "
             + "2 miscaught (1 handled by a global exception handler).", result.Error);
         // A view narrows the warnings to that view.
         Assert.Equal([lines[4], lines[5]], (await Run("exceptions", ResearchFixture.Input, "--miscaught", "--format", "msbuild")).Out.Replace("\r\n", "\n").TrimEnd('\n').Split('\n'));
     }
+    [Fact]
+    public async Task Verbose_requires_strict_and_only_exceptions_accepts_it()
+    {
+        var alone = await Run("exceptions", "missing.slnx", "--uncaught", "--verbose");
+        Assert.Equal(2, alone.Exit); Assert.Contains("--verbose requires --strict.", alone.Error);
+        var other = await Run("projects", "missing.slnx", "--verbose");
+        Assert.Equal(2, other.Exit); Assert.Contains("projects does not accept --verbose", other.Error);
+        var result = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--strict", "--verbose");
+        Assert.Contains("every third-party call has a catch on the way.", result.Error);
+    }
+
+    [Fact]
+    public async Task A_project_without_controller_actions_does_not_read_as_a_clean_result()
+    {
+        var result = await Run("exceptions", Path.Combine(Path.GetDirectoryName(ResearchFixture.Input)!, "Research.Infrastructure", "Research.Infrastructure.csproj"), "--uncaught");
+        Assert.Equal("No controller actions found.\n", result.Error.ReplaceLineEndings("\n"));
+    }
+
     [Fact]
     public async Task Projects_print_the_reference_tree_with_build_settings()
     {
@@ -335,7 +353,7 @@ public sealed class CliContractTests
         Assert.Equal(plain.Out, strict.Out);
         // The skill tip is for a person at a terminal; redirected stderr (agents, CI) never gets it.
         Assert.DoesNotContain("Tip:", strict.Error);
-        Assert.Contains("13 actions analysed: 3 uncaught exceptions (3 handled by a global exception handler); 1 crash from async void; every third-party call has a catch on the way.", strict.Error);
+        Assert.Contains("3 uncaught exceptions (3 handled by a global exception handler); 1 crash from async void; every third-party call has a catch on the way.", strict.Error);
     }
     [Theory]
     [InlineData(false)]
