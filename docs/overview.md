@@ -23,7 +23,7 @@ flowchart LR
 
 | Stage | Project | What it does |
 | --- | --- | --- |
-| Load | `SharpDrill.Roslyn` | Opens the solution with the .NET SDK. Never restores, builds or edits your code. |
+| Load | `SharpDrill.Roslyn` | Opens the solution with the .NET SDK. Never builds or edits your code; the CLI restores missing packages first and reuses the last load while its inputs are unchanged. |
 | Extract facts | `SharpDrill.Roslyn` | Turns compiler symbols into small immutable records: types, callables, call sites, dependencies, throws, catches, implementation candidates, gaps. |
 | Index | `SharpDrill.Core` | `ProgramIndex` builds lookups once (callers, callees, members, ancestors, candidates…) and, on first use, the whole-program `CallGraph` and type `DependencyGraph`. |
 | Analyses & models | `SharpDrill.Core` | Queries over the index: project map, exception propagation and handling, call diagram, layer graph (library only). |

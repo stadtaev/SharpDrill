@@ -6,8 +6,9 @@ What SharpDrill models today, and what it deliberately does not. "Boundary" and 
 
 - Restored SDK-style C# projects and solutions (`.csproj`, `.sln`, `.slnx`), hosted on .NET 10, loaded through the SDK's MSBuild workspace (no Visual Studio).
 - One configuration/target-framework variant per project. An explicit `--framework` applies to the whole input and must be declared by every selected project.
-- Missing restore assets in any selected project abort loading. Workspace or compiler failures that still produce a compilation become visible gaps.
-- Project evaluation happens before the assets check, so project tooling and source generators may execute. SharpDrill never builds, restores or edits the analysed source.
+- Missing restore assets in a selected project make the CLI run `dotnet restore` on the input and load again (`--no-restore` aborts instead; the `SharpDrill.Roslyn` library always aborts). No build is needed unless compile errors are reported: code generated during a build is then missing. Workspace or compiler failures that still produce a compilation become visible gaps.
+- Project evaluation happens before the assets check, so project tooling and source generators may execute. SharpDrill never builds or edits the analysed source.
+- The CLI keeps the last analysis per input and load options in the user's local application data folder (`SHARPDRILL_CACHE_DIR` overrides it) and reuses it while nothing the load read has changed: this exact tool build, code and project files by content (documents, MSBuild imports, restore assets, `.cs`, `.cshtml`, `.razor`, project and config files anywhere under a project folder, config files in folders above it), and referenced assemblies by size and time. Results with compile errors or load failures are never kept. Not tracked: environment variables, and a new non-source file that a project's own glob turns into an additional file; `--no-cache` covers both.
 - Generated documents are included by default; `--exclude-generated` records each exclusion as evidence.
 
 ## Controller actions
@@ -29,7 +30,7 @@ Recognised by convention, classified in Core from extracted facts:
 | --- | --- | --- |
 | Normal invocations, explicit construction, source constructors | Interface and virtual calls at their declared target, including virtual members with bodies | Top-level statements (one gap per file) |
 | Property/event accessors, user-defined operators and conversions | Delegates, `dynamic`, function pointers, invalid operations | |
-| Reduced extension methods; local functions and lambdas as separately owned bodies | Metadata-only (library) bodies | `await` of a task held in a field, property or parameter |
+| Reduced extension methods; local functions and lambdas as separately owned bodies | Metadata-only (library) bodies | `await` of a task held in a property or parameter, or in a field whose producing calls are not provable (below) |
 | Field/property initialisers, as code of the constructors that run them (static ones in the static constructor, which no call path reaches) | | |
 
 Implementation candidates come from source types' interface maps and overrides; dependency-injection registrations are not read. `exceptions` and `diagram` follow them by default, marked as possibilities; `--declared-only` stops at the declared target.
@@ -48,8 +49,11 @@ Implementation candidates come from source types' interface maps and overrides; 
   - a `finally` that may throw;
   - throws inside an `async` method returning neither `Task`, `ValueTask` nor `void` (an async iterator or custom task type). Awaiting a non-`async` method is not this case, whatever its declared return type (e.g. a generic `T` used as a `Task`): its throws surface at the call and propagate;
   - tasks that are never awaited (`var t = CallAsync(); ... await t;`, `await Task.WhenAll(t, u)` and `return CallAsync();` count as awaited; only a `Task`/`ValueTask` result can be observed later, so a string local passed as an argument inside an `await` does not make its call awaited);
+  - `await` of a task in a field, unless its producing calls are provable: the field is private or readonly, every write is a call, and no such call can throw at the assignment (a non-`async` source method does). Then what those calls throw surfaces at the `await`, inside that body's `try` blocks, and not at the assignment. Returning such a field (`Task Get() => _task`) hands it to whoever observes the result. This is one implicit call site per producing call, so a call diagram also draws that edge;
+  - `Task.WhenAll` of a collection (its tasks are not known); `.Result`, `.Wait()` and `Task.WaitAll` on a stored task (they throw `AggregateException`, not modelled).
   - dispatch through an interface or virtual member that source implements or overrides, when `--declared-only` is given (the default follows it);
   - an exception leaving an iterator: it surfaces where the sequence is enumerated, not at the call, so a caller's `try` does not decide it. The iterator's own `try` blocks apply, and an iterator nothing can leave is not uncertain.
+- **The BCL `Task` API is modelled, not treated as an opaque library:** `await` and `GetAwaiter().GetResult()` observe a task, through `ConfigureAwait`. `Task.WhenAll(a, b)` observes each task where the `WhenAll` is observed. `await Task.WhenAny(a, b)` completes normally whatever they hold, so it observes neither. `Task.Run` runs its delegate: when its task is observed the delegate's exceptions surface there, and when it is not they reach nobody. Not modelled: `Task.Factory.StartNew`, `ContinueWith`.
 - **async void:** its own `try/catch` applies as in any method. What still leaves it never reaches a caller (it is rethrown on the thread pool and ends the process), so it is a finding (`Crashes`, SD0005), not Unknown, and a `try` around the call does not catch it.
 - **Recursion is not uncertainty.** All views share one fixed-point propagation, so a recursive call is followed like any other.
 - **Library calls are not uncertainty.** A call to a method with no source body (framework or NuGet code) ends the trace there: its exceptions are not modelled, so it never makes a result Unknown. Exception views report how many library methods were called, and `--uncaught` lists a few per action. This applies to direct calls and to interface/virtual calls to library members that no source type overrides.
