@@ -39,7 +39,7 @@ Pipeline: **Load → Extract facts → Index → Queries → (Rules) → CLI rep
   Roslyn or Mermaid dependency**: it depends only on `SharpDrill.Graph` and works on a `ProgramSnapshot`.
 - `SharpDrill.Graph` — generic immutable directed multigraph (SCC, quotient); knows nothing about C#.
 - `SharpDrill.Export.Mermaid` — Mermaid/Markdown formatting; the only project with the Mermaid NuGet dependency.
-- `SharpDrill.Cli` — argument parsing (`Arguments.cs`, strict per-command option sets), one `ICliCommand` per command
+- `SharpDrill.Cli` — `Commands.cs` gets the snapshot: `SnapshotCache` (reused while `ProgramSnapshot.Inputs` are unchanged), else the loader, with `Restore` when it finds packages missing. Argument parsing (`Arguments.cs`, strict per-command option sets), one `ICliCommand` per command
   under `Commands/`, shared naming in `Display.cs`. Formatting only; no analysis logic. `ReportCommand` prints grouped
   gaps to stderr after each report; results go to stdout, diagnostics to stderr. Packed as the `SharpDrill` tool.
   `skill` (like `--version`) is handled before argument parsing and loads nothing: it writes the embedded

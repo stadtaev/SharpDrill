@@ -382,15 +382,16 @@ public sealed class CliContractTests
         {
             await File.WriteAllTextAsync(input, project);
             await File.WriteAllTextAsync(source, code);
-            var result = await Run("projects", input);
+            var result = await Run("projects", input, "--no-restore");
             Assert.Equal(2, result.Exit);
             Assert.Contains("not restored", result.Error);
             Assert.False(File.Exists(Path.Combine(directory, "obj", "project.assets.json")));
             Assert.Equal(project, await File.ReadAllTextAsync(input));
             Assert.Equal(code, await File.ReadAllTextAsync(source));
-            var restored = await Run("projects", input, "--restore");
+            var restored = await Run("projects", input);
             Assert.Equal(0, restored.Exit);
             Assert.StartsWith("Unrestored [net10.0", restored.Out);
+            Assert.Equal("Restoring Unrestored.csproj...", restored.Error.Trim());
             Assert.True(File.Exists(Path.Combine(directory, "obj", "project.assets.json")));
             Assert.Equal(code, await File.ReadAllTextAsync(source));
         }

@@ -3,7 +3,14 @@ namespace SharpDrill.Roslyn;
 
 // Evaluated MSBuild values for the selected framework; these are the project's real settings, not inferred ones.
 internal sealed record ProjectSettings(string Framework, string Nullable, bool TreatWarningsAsErrors,
-    IReadOnlyList<string> WarningsAsErrors, IReadOnlyList<string> ProjectReferences, bool ExcludedTest = false);
+    IReadOnlyList<string> WarningsAsErrors, IReadOnlyList<string> ProjectReferences, bool ExcludedTest = false)
+{
+    // The project's evaluation inputs: its imports (Directory.Build.props, the SDK, restored nuget.g.props) and restore assets.
+    public IReadOnlyList<string> Inputs { get; init; } = [];
+}
+
+/// <summary>The input has projects without restore assets; running <c>dotnet restore</c> on it is what fixes this.</summary>
+public sealed class NotRestoredException(string message) : ArgumentException(message);
 
 internal static class ProjectSelection
 {
@@ -31,12 +38,13 @@ internal static class ProjectSelection
         var assets = project.GetPropertyValue("ProjectAssetsFile");
         if (string.IsNullOrEmpty(assets)) assets = Path.Combine(Path.GetDirectoryName(path)!, "obj", "project.assets.json");
         if (!Path.IsPathRooted(assets)) assets = Path.Combine(Path.GetDirectoryName(path)!, assets);
-        if (!File.Exists(assets)) throw new ArgumentException($"Dependencies are not restored for {path}. Run dotnet restore first, or pass --restore.");
+        if (!File.Exists(assets)) throw new NotRestoredException($"Dependencies are not restored for {path}. Run dotnet restore first, or drop --no-restore.");
         var directory = Path.GetDirectoryName(path)!;
         return new(selected, project.GetPropertyValue("Nullable"),
             string.Equals(project.GetPropertyValue("TreatWarningsAsErrors"), "true", StringComparison.OrdinalIgnoreCase),
             [.. project.GetPropertyValue("WarningsAsErrors").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)],
-            [.. project.GetItems("ProjectReference").Select(x => Resolve(directory, x.EvaluatedInclude)).Order(StringComparer.Ordinal)]);
+            [.. project.GetItems("ProjectReference").Select(x => Resolve(directory, x.EvaluatedInclude)).Order(StringComparer.Ordinal)])
+        { Inputs = [path, assets, .. project.Imports.Select(x => x.ImportedProject.FullPath)] };
     }
 
     private static string Resolve(string directory, string include) => Path.GetFullPath(Path.Combine(directory, include.Replace('\\', Path.DirectorySeparatorChar)));

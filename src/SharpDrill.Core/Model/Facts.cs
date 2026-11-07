@@ -66,7 +66,9 @@ public sealed record CallableFact(CallableId Id, CompilationId Compilation, Type
 }
 public sealed record CallSiteFact(CallSiteId Id, CallableId Caller, CallableId? BoundTarget, string TargetDisplay,
     DispatchKind Dispatch, ImmutableArray<TypeUse> TypeArguments, SourceEvidence Evidence, bool IsImplicit,
-    ImmutableArray<ExceptionRegionId> ProtectedRegions, bool IsAwaited = false);
+    ImmutableArray<ExceptionRegionId> ProtectedRegions, bool IsAwaited = false,
+    // The task is kept in a field and awaited elsewhere: what the call throws surfaces at those awaits, not here.
+    bool IsStoredTask = false);
 public sealed record DependencyFact(TypeId? OwningType, CallableId? OwningCallable, TypeUse ReferencedType,
     DependencyKind Kind, SourceEvidence? Evidence);
 public sealed record ThrowSiteFact(ThrowSiteId Id, CallableId Owner, ThrowKind Kind, TypeUse? StaticExceptionType,
@@ -124,4 +126,13 @@ public sealed record ProgramSnapshot
     public string SourceRoot { get; init; } = "";
     // Project files skipped at load because they are test projects (not a gap: excluding them is the default scope).
     public ImmutableArray<string> ExcludedTestProjects { get; init; } = [];
+    public LoadInputs Inputs { get; init; } = new();
+}
+// What a load read, so a kept snapshot can tell whether it is still valid. Files: code and project files, compared by content.
+// Stamped: referenced assemblies, compared by size and time. Folders: project folders, where a new file also counts.
+public sealed record LoadInputs
+{
+    public ImmutableArray<string> Files { get; init; } = [];
+    public ImmutableArray<string> Stamped { get; init; } = [];
+    public ImmutableArray<string> Folders { get; init; } = [];
 }

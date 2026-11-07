@@ -11,7 +11,8 @@ description: Analyse an ASP.NET Core Web API with the sharpdrill CLI. Finds exce
 ## Before running
 
 - Install it with `dotnet tool install -g SharpDrill`. It needs a .NET 10 or newer SDK.
-- Restore the solution first (`dotnet restore`), or add `--restore` to the command; a "not restored" error means neither was done. Build it too: code that does not compile gives incomplete results, and stderr says so.
+- Missing packages are restored automatically (`--no-restore` turns that off, and a "not restored" error then means it was needed). No build is needed, unless stderr reports compile errors: code generated during a build is then missing, and results around it are incomplete.
+- Repeat runs reuse the last analysis while nothing it read has changed, so running several commands in a row is cheap. `--no-cache` analyses again.
 - Run it in the folder that holds the `.sln`/`.slnx` (or the only `.csproj`), or pass the path right after the command: `sharpdrill exceptions path/to/App.slnx --uncaught`.
 - Each run loads the whole solution, which takes seconds to minutes. Pick the right view instead of running everything.
 

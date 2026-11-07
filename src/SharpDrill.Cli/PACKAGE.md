@@ -7,7 +7,7 @@ dotnet tool install -g SharpDrill
 cd MyApi && sharpdrill projects   # the .sln/.slnx (or single .csproj) in the current directory; or pass a path
 ```
 
-Requires a .NET 10 (or newer) SDK. Restore the solution first, or pass `--restore` to run `dotnet restore` on it; otherwise SharpDrill never restores, builds or edits the analysed code. Loading evaluates MSBuild projects and may run project tooling and source generators, so it is not a sandbox.
+Requires a .NET 10 (or newer) SDK. Missing packages are restored automatically (`--no-restore` turns that off); SharpDrill never builds or edits the analysed code. Repeat runs reuse the last analysis while nothing it read has changed (`--no-cache` analyses again). Loading evaluates MSBuild projects and may run project tooling and source generators, so it is not a sandbox.
 
 ## Commands
 
