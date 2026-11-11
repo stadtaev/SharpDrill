@@ -13,6 +13,8 @@ internal abstract class ReportCommand : ICliCommand
 {
     public abstract ImmutableHashSet<string> Options { get; }
 
+    public virtual ImmutableDictionary<string, ExceptionView> Views => ImmutableDictionary<string, ExceptionView>.Empty;
+
     public virtual void Validate(Arguments arguments) { }
 
     public async Task<int> RunAsync(ProgramIndex index, Arguments arguments, CancellationToken token)

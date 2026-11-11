@@ -51,13 +51,13 @@ public sealed class SnapshotCacheTests : IDisposable
         catch { process.Kill(true); await process.WaitForExitAsync(); throw; }
         return (process.ExitCode, await stdout, await stderr, watch.ElapsedMilliseconds);
     }
-    private Task<(int Exit, string Out, string Error, long Ms)> Uncaught(params string[] more) => Run(["exceptions", Input, "--uncaught", .. more]);
+    private Task<(int Exit, string Out, string Error, long Ms)> Uncaught(params string[] more) => Run(["exceptions", Input, "uncaught", .. more]);
     private string Entry => Assert.Single(Directory.GetFiles(Cache));
 
     [Theory]
-    [InlineData("exceptions", "--uncaught")]
-    [InlineData("exceptions", "--caught")]
-    [InlineData("exceptions", "--miscaught")]
+    [InlineData("exceptions", "uncaught")]
+    [InlineData("exceptions", "caught")]
+    [InlineData("exceptions", "miscaught")]
     [InlineData("exceptions", "--format", "msbuild")]
     [InlineData("projects")]
     public async Task A_cached_result_prints_exactly_what_a_fresh_analysis_prints(params string[] command)

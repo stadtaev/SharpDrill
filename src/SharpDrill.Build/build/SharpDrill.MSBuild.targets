@@ -1,8 +1,8 @@
 <Project>
 
   <!-- SharpDrill: exception findings as build warnings after each build of the referencing project.
-       SD0001 may escape a controller action; SD0002 may escape to a global exception handler; SD0003 passes through a try
-       whose catches do not match; SD0004 third-party call with no catch on the way (only in strict mode, see below); SD0005 leaves an async void
+       SD0001 may escape an entry point; SD0002 may escape to a global exception handler; SD0003 passes through a try
+       whose catches do not match; SD0004 third-party call with no catch on the way (only with third-party, see below); SD0005 leaves an async void
        method, where no caller can catch it;
        SD0000 the analysis itself failed. Silence a rule with NoWarn, fail on one with WarningsAsErrors. -->
   <PropertyGroup>
@@ -10,7 +10,7 @@
     <SharpDrillEnabled Condition="'$(SharpDrillEnabled)' == ''">true</SharpDrillEnabled>
     <!-- What to analyse: this project and the projects it references, or a .sln/.slnx. -->
     <SharpDrillInput Condition="'$(SharpDrillInput)' == ''">$(MSBuildProjectFullPath)</SharpDrillInput>
-    <!-- Extra options for sharpdrill exceptions: strict (adds SD0004), declared-only, budget N; see sharpdrill help. -->
+    <!-- Extra options for sharpdrill exceptions: third-party (adds SD0004), declared-only, budget N; see sharpdrill help. -->
     <SharpDrillArguments Condition="'$(SharpDrillArguments)' == ''"></SharpDrillArguments>
   </PropertyGroup>
 

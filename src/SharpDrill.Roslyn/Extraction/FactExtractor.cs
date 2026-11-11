@@ -77,7 +77,7 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
             var root = await tree.GetRootAsync(token);
             if (isGenerated && !includeGenerated) { gaps.Add(new(GapKind.ExcludedSource, fact.Id, null, "Generated source excluded.", Evidence(root))); continue; }
             var model = compilation.GetSemanticModel(tree);
-            foreach (var node in root.DescendantNodes())
+            foreach (var node in root.DescendantNodesAndSelf())
             {
                 token.ThrowIfCancellationRequested();
                 if (node is BaseTypeDeclarationSyntax or DelegateDeclarationSyntax && model.GetDeclaredSymbol(node, token) is INamedTypeSymbol declaredType)
@@ -87,6 +87,8 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
                     BaseMethodDeclarationSyntax or AccessorDeclarationSyntax or LocalFunctionStatementSyntax => model.GetDeclaredSymbol(node, token) as IMethodSymbol,
                     PropertyDeclarationSyntax { ExpressionBody: not null } or IndexerDeclarationSyntax { ExpressionBody: not null } => (model.GetDeclaredSymbol(node, token) as IPropertySymbol)?.GetMethod,
                     AnonymousFunctionExpressionSyntax => (model.GetOperation(node, token) as IAnonymousFunctionOperation)?.Symbol,
+                    // Top-level statements are the body of the compiler's entry point, Program.<Main>$.
+                    CompilationUnitSyntax unit when unit.Members.Any(x => x is GlobalStatementSyntax) => model.GetDeclaredSymbol(unit, token) as IMethodSymbol,
                     _ => null
                 };
                 if (method is null) continue;
@@ -113,10 +115,8 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
                     gaps.Add(new(GapKind.Unsupported, fact.Id, null, "Minimal API endpoint is outside controller-action analysis.", Evidence(invocation)));
             }
             ExtractSuppressions(root, model, token);
-            // Top-level statements are one gap per file. Initializers matter only when they can run source code or throw;
-            // literals, constants and library constructors/calls (`= 5`, `= new()`, `= string.Empty`) have nothing to model.
-            if (root.DescendantNodes().OfType<GlobalStatementSyntax>().FirstOrDefault() is { } topLevel)
-                gaps.Add(new(GapKind.Unsupported, fact.Id, null, "Top-level statements have no owning callable; boundary registrations are extracted separately.", Evidence(topLevel)));
+            // Initializers matter only when they can run source code or throw; literals, constants and library
+            // constructors/calls (`= 5`, `= new()`, `= string.Empty`) have nothing to model.
             foreach (var node in root.DescendantNodes().OfType<EqualsValueClauseSyntax>().Where(x => x.Parent is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Parent: FieldDeclarationSyntax } } or PropertyDeclarationSyntax))
                 if (RunsSourceOrThrows(node.Value, model, token)) initializers.Add((node, model, fact));
         }
@@ -187,7 +187,7 @@ internal sealed partial class FactExtractor(ImmutableArray<CompilationFact> comp
         BaseMethodDeclarationSyntax x => x.Body is not null || x.ExpressionBody is not null,
         AccessorDeclarationSyntax x => x.Body is not null || x.ExpressionBody is not null,
         LocalFunctionStatementSyntax x => x.Body is not null || x.ExpressionBody is not null,
-        AnonymousFunctionExpressionSyntax => true,
+        AnonymousFunctionExpressionSyntax or CompilationUnitSyntax => true,
         PropertyDeclarationSyntax x => x.ExpressionBody is not null,
         IndexerDeclarationSyntax x => x.ExpressionBody is not null,
         _ => false

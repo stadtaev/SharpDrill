@@ -5,7 +5,7 @@ Reports [SharpDrill](https://github.com/stadtaev/SharpDrill)'s exception finding
 The usual way to run SharpDrill is the `SharpDrill` tool, in CI or on demand: `dotnet sharpdrill exceptions MyApi.slnx --format msbuild` prints the same warnings without adding seconds to every build. Use this package when you want them in every build without anyone running the tool.
 
 ```xml
-<!-- the Web API project -->
+<!-- the app or Web API project -->
 <ItemGroup>
   <PackageReference Include="SharpDrill.MSBuild" Version="x.y.z" />
 </ItemGroup>
@@ -13,14 +13,14 @@ The usual way to run SharpDrill is the `SharpDrill` tool, in CI or on demand: `d
 
 | Code | Finding |
 | --- | --- |
-| `SD0001` | An exception may escape a controller action: no catch on the way. |
+| `SD0001` | An exception may escape an entry point (controller action, `Main`, a library's public method): no catch on the way. |
 | `SD0002` | The same, but a global exception handler (exception middleware or filter) receives it. |
 | `SD0003` | A throw passes through a `try` whose catch clauses do not match its type. |
-| `SD0004` | A third-party call with no catch on the way from the action (only with `--strict`). |
-| `SD0005` | An exception leaves an `async void` method reached from an action: no caller can catch it, so the process ends. |
+| `SD0004` | A third-party call with no catch on the way from the entry point (only with `--third-party`). |
+| `SD0005` | An exception leaves an `async void` method: no caller can catch it, so the process ends. |
 | `SD0000` | The analysis itself failed; build with `-v:n` to see why. |
 
-Each warning points at the throw (SD0001/2/5), the `try` (SD0003) or the call (SD0004), and names the actions and one example path. Interface and virtual calls are followed into their source implementations; such paths say "possible, not proven".
+Each warning points at the throw (SD0001/2/5), the `try` (SD0003) or the call (SD0004), and names the entry points and one example path. Interface and virtual calls are followed into their source implementations; such paths say "possible, not proven".
 
 ## Suppressing one finding
 
@@ -49,8 +49,8 @@ A pragma covers the code up to its `restore` (or the end of the file); an attrib
   <SharpDrillEnabled Condition="'$(CI)' != 'true'">false</SharpDrillEnabled>
   <!-- default: this project and the projects it references -->
   <SharpDrillInput>$(MSBuildThisFileDirectory)../MyApi.slnx</SharpDrillInput>
-  <!-- extra `sharpdrill exceptions` options; strict adds SD0004 -->
-  <SharpDrillArguments>--strict</SharpDrillArguments>
+  <!-- extra `sharpdrill exceptions` options; --third-party adds SD0004 -->
+  <SharpDrillArguments>--third-party</SharpDrillArguments>
 </PropertyGroup>
 ```
 

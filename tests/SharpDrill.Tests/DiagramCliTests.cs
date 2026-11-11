@@ -54,13 +54,13 @@ public sealed class DiagramCliTests(ResearchFixture fixture) : IClassFixture<Res
         try
         {
             // Implementation candidates are followed by default, as in exceptions; IRepository has none in source.
-            var result = await Run("", "diagram", ResearchFixture.Input, "--root", id, "--output", path);
+            var result = await Run("", "diagram", ResearchFixture.Input, "--from", id, "--output", path);
             Assert.Equal(1, result.Exit); Assert.DoesNotContain("Choose an action", result.Out);
             Assert.Contains("Saved diagram: " + Path.GetFullPath(path), result.Out);
             var document = await File.ReadAllTextAsync(path);
             Assert.DoesNotContain(": possible candidate", document); Assert.Contains("declared dispatch", document);
             Assert.Contains("Implementation candidates followed: True", document);
-            Assert.Equal(1, (await Run("", "diagram", ResearchFixture.Input, "--root", id, "--declared-only", "--output", declared)).Exit);
+            Assert.Equal(1, (await Run("", "diagram", ResearchFixture.Input, "--from", id, "--declared-only", "--output", declared)).Exit);
             Assert.Contains("Implementation candidates followed: False", await File.ReadAllTextAsync(declared));
         }
         finally { File.Delete(path); File.Delete(declared); }
@@ -82,7 +82,7 @@ public sealed class DiagramCliTests(ResearchFixture fixture) : IClassFixture<Res
     public async Task Explicit_root_exports_project_groups_evidence_and_limits_without_prompt_and_refuses_overwrite()
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
-        string[] args = ["diagram", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--max-nodes", "2", "--output", path];
+        string[] args = ["diagram", ResearchFixture.Input, "--from", "Research.Api.OrdersController.Get()", "--max-nodes", "2", "--output", path];
         try
         {
             var result = await Run("", args);
@@ -104,17 +104,17 @@ public sealed class DiagramCliTests(ResearchFixture fixture) : IClassFixture<Res
     [Fact]
     public async Task Uncaught_reports_known_escapes_alongside_unknowns_and_limits()
     {
-        var result = await Run("", "exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Get()");
+        var result = await Run("", "exceptions", ResearchFixture.Input, "uncaught", "--from", "Research.Api.OrdersController.Get()");
         Assert.Equal(0, result.Exit);
         Assert.Contains("1. Research.Infrastructure.StorageException", result.Out);
         Assert.Contains("   Path:       OrdersController.Get -> Service.Load -> Repository.Read\n", result.Out.ReplaceLineEndings("\n"));
         // The exception type's compiler-provided constructor is not "missing code": the action itself is fully known.
         Assert.DoesNotContain("Not followed", result.Error);
-        var unobserved = await Run("", "exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Unobserved()");
+        var unobserved = await Run("", "exceptions", ResearchFixture.Input, "uncaught", "--from", "Research.Api.OrdersController.Unobserved()");
         Assert.Contains("Not followed: 1 task that is never awaited (e.g. Research.Application/Service.cs:15).", unobserved.Error);
-        var limited = await Run("", "exceptions", ResearchFixture.Input, "--uncaught", "--root", "Research.Api.OrdersController.Get()", "--budget", "1");
+        var limited = await Run("", "exceptions", ResearchFixture.Input, "uncaught", "--from", "Research.Api.OrdersController.Get()", "--budget", "1");
         Assert.Equal(1, limited.Exit); Assert.Contains("Stopped early: the analysis budget ran out", limited.Error);
-        var invalid = await Run("", "projects", "missing.slnx", "--uncaught");
+        var invalid = await Run("", "projects", "missing.slnx", "uncaught");
         Assert.Equal(2, invalid.Exit); Assert.DoesNotContain("Input not found", invalid.Error);
     }
 
@@ -123,7 +123,7 @@ public sealed class DiagramCliTests(ResearchFixture fixture) : IClassFixture<Res
     [InlineData("--budget", "0")]
     public async Task Invalid_summary_options_fail_before_loading(string option, string value)
     {
-        var result = await Run("", "exceptions", "missing.slnx", "--uncaught", option, value);
+        var result = await Run("", "exceptions", "missing.slnx", "uncaught", option, value);
         Assert.Equal(2, result.Exit); Assert.DoesNotContain("Input not found", result.Error);
     }
 
@@ -142,10 +142,10 @@ public sealed class DiagramCliTests(ResearchFixture fixture) : IClassFixture<Res
     }
 
     [Fact]
-    public async Task Diagram_requires_controller_action_and_size_options_are_diagram_only()
+    public async Task Diagram_requires_an_entry_point_and_size_options_are_diagram_only()
     {
-        var root = await Run("", "diagram", ResearchFixture.Input, "--root", "Research.Application.Service.Load()");
-        Assert.Equal(2, root.Exit); Assert.Contains("--root Research.Application.Service.Load() is not a recognised controller action", root.Error);
+        var root = await Run("", "diagram", ResearchFixture.Input, "--from", "Research.Application.Service.Load()");
+        Assert.Equal(2, root.Exit); Assert.Contains("Research.Application.Service.Load() is not an entry point", root.Error);
         var wrongCommand = await Run("", "projects", "missing.slnx", "--max-nodes", "20");
         Assert.Equal(2, wrongCommand.Exit); Assert.DoesNotContain("Input not found", wrongCommand.Error);
     }
