@@ -128,8 +128,8 @@ internal static class ExceptionTransfer
             : flow.Changed ? ExceptionReason.ChangedMayEscape : ExceptionReason.MayEscape;
         var message = current.Status is not null ? current.Message
             : flow.Type is null ? "Exception type could not be bound."
-            : flow.Changed ? "Rethrown or replaced; subsequent exception may escape the controller action under the supported model."
-            : "May escape the controller action under the supported analysis model.";
+            : flow.Changed ? "Rethrown or replaced; subsequent exception may escape the entry point under the supported model."
+            : "May escape the entry point under the supported analysis model.";
         return new(root, flow.Origin, flow.SubsequentOrigin, flow.Type?.DisplayName, flow.Exact, path,
             flow.Changed ? ExceptionStatus.RethrownOrReplaced : status, message,
             flow.Evidence.ToImmutableArray(), flow.Handlers.ToImmutableArray(),

@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 
 namespace SharpDrill.Core;
 
-public sealed record DiagramOptions(bool FollowCandidates = false, int MaxDepth = 20, int MaxNodes = 200,
+public sealed record DiagramOptions(bool FollowCandidates = true, int MaxDepth = 20, int MaxNodes = 200,
     int MaxEdges = 1000, int MaxExpansions = 100000)
 {
     public void Validate()

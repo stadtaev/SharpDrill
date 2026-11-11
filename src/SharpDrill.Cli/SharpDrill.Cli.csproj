@@ -24,7 +24,7 @@
     <ToolCommandName>sharpdrill</ToolCommandName>
     <PackageId>SharpDrill</PackageId>
     <HasOwnReadme>true</HasOwnReadme>
-    <Description>Source-backed analysis of ASP.NET Core Web APIs for people and agents: the MSBuild project reference map with build settings, where exceptions are thrown, caught, miscaught or may escape an action, and Mermaid call diagrams of controller actions. Uses Roslyn and your installed .NET SDK; never builds or edits the analysed code.</Description>
+    <Description>Source-backed analysis of .NET code (Web APIs, console apps, libraries) for people and agents: which exceptions may escape an entry point, where they are caught or miscaught, Mermaid call diagrams and the MSBuild project map. Uses Roslyn and your installed .NET SDK; never builds or edits the analysed code.</Description>
     <PackageTags>roslyn;static-analysis;aspnetcore;exceptions;call-graph;mermaid;dotnet-tool;architecture</PackageTags>
   </PropertyGroup>
 

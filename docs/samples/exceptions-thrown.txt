@@ -1,0 +1,5 @@
+System.InvalidOperationException  Service.Replace  Research.Application/Service.cs:10
+Research.Infrastructure.StorageException  Repository.Read  Research.Infrastructure/Repository.cs:6
+Research.Infrastructure.StorageException  Repository.ReadAsync  Research.Infrastructure/Repository.cs:8
+Research.Infrastructure.StorageException  Repository.Expression  Research.Infrastructure/Repository.cs:9
+System.Exception (or a subclass)  Repository.StaticType  Research.Infrastructure/Repository.cs:10

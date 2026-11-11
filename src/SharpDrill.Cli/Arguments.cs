@@ -4,8 +4,8 @@ using SharpDrill.Roslyn;
 
 namespace SharpDrill.Cli;
 
-/// <summary>Which exceptions to list: every throw (default), or by fate along the call chains from roots.</summary>
-internal enum ExceptionView { Throws, Uncaught, Caught, Miscaught }
+/// <summary>Which exceptions to list: by fate along the call chains from entry points, or every throw in source.</summary>
+internal enum ExceptionView { Uncaught, Caught, Miscaught, Thrown }
 
 internal sealed record Arguments(string Command, ICliCommand Handler, string Input)
 {
@@ -17,72 +17,61 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
     internal bool NoRestore { get; init; }
     internal bool NoCache { get; init; }
     internal AnalysisRequest Request => new(Input, Configuration, Framework, IncludeGenerated, IncludeTests);
-    internal string? Root { get; init; }
+    internal string? From { get; init; }
     internal int MaxDepth { get; init; } = 20;
     internal int Budget { get; init; } = 100000;
     internal int MaxNodes { get; init; } = 200;
     internal int MaxEdges { get; init; } = 1000;
     internal bool Locations { get; init; }
     internal bool DeclaredOnly { get; init; }
-    internal bool Strict { get; init; }
-    internal bool Verbose { get; init; }
-    internal ExceptionView View { get; init; }
+    internal bool ThirdParty { get; init; }
+    // Null: the command's default view (exceptions: uncaught; with --format msbuild, uncaught and miscaught).
+    internal ExceptionView? View { get; init; }
     internal bool Mermaid { get; init; }
     internal bool MSBuild { get; init; }
     internal string? Output { get; init; }
     internal ImmutableHashSet<string> Given { get; init; } = [];
 
     internal const string Help = """
-        SharpDrill — source-backed analysis of ASP.NET Core Web APIs (.NET SDK; restores missing packages)
-        Usage: sharpdrill <command> [input.csproj|input.sln|input.slnx|directory] [options]
-               Without an input, the solution (or else the single project) in the current directory.
+        SharpDrill — source-backed analysis of .NET code: exception flow, call diagrams and the project map.
+        Usage: sharpdrill <command> [view] [input.sln|input.slnx|input.csproj|directory] [options]
+               Without an input, the solution (or else the only project) in the current directory.
 
         Commands:
-          projects    Project reference tree with each project's framework, nullable settings and compiler warning count.
-                      [--mermaid [--output F]]
-          exceptions  Every explicit throw with its type, method and location. Or, along call chains from each action:
-                        --uncaught   may escape the action: no catch on the way (one example path per origin)
-                        --caught     reaches a matching catch: where it is thrown and where it is caught
-                        --miscaught  passes through a try whose catch clauses do not match its type
-                      Findings covered by exception middleware or a global exception filter are listed last.
-                      [--uncaught [--strict [--verbose]] | --caught | --miscaught] [--root R] [--budget N] [--declared-only] [--locations]
-                      [--format msbuild]
-          diagram     Mermaid call graph of one controller action, saved as Markdown (prompts for an action without --root).
-                      [--root R] [--declared-only] [--max-depth N] [--max-nodes N] [--max-edges N] [--budget N] [--output F]
-          skill       Install the agent skill for GitHub Copilot and Claude Code: .github/skills and .claude/skills (sharpdrill/SKILL.md)
-                      at the repository root, or with --user in ~/.copilot/skills and ~/.claude/skills. No project load.
-                      [--user]
+          exceptions [view]  Exceptions along the call chains from each entry point: controller actions, Main or top-level
+                             statements, and the public methods of a library project that nothing loaded references.
+                               uncaught   (default) may leave an entry point: no catch on the way
+                               caught     reaches a matching catch: where, and what the handler does
+                               miscaught  passes through a try whose catch clauses do not match it
+                               thrown     every explicit throw in source
+                             [--from E] [--third-party] [--declared-only] [--locations] [--format msbuild] [--budget N]
+          diagram            Mermaid call graph of one entry point, saved as Markdown (asks which one without --from).
+                             [--from E] [--declared-only] [--max-depth N] [--max-nodes N] [--max-edges N] [--output F]
+          projects           Project reference tree with each project's framework, nullable settings and warning count.
+                             [--mermaid [--output F]]
+          skill              Install the agent skill in .github/skills and .claude/skills at the repository root, or with
+                             --user in ~/.copilot/skills and ~/.claude/skills. No project load.
 
         Options:
-          --root R               One controller action, by its full signature (namespace, type, method, parameter types, e.g.
-                                 Api.OrdersController.Get(int); diagram without --root lists them). Defaults to every action.
-          --declared-only        exceptions/diagram: stop at interface/virtual calls instead of following them into their
-                                 source implementations (followed by default; such steps are possibilities, never runtime facts).
-          --strict               exceptions --uncaught: also list calls into third-party libraries (NuGet packages, referenced
-                                 DLLs; not .NET itself) that no catch meets on the way from the action, in a section of their own.
-          --max-depth N          diagram: call transitions (default 20), never runtime stack depth.
-          --budget N             Examined call sites (default 100000). Raise it when the output says a limit was reached.
-          --max-nodes N          diagram nodes, including boundaries (default 200).   --max-edges N  diagram edges (default 1000).
-          --locations            exceptions: print call-site evidence for witnesses.
-          --verbose              exceptions --strict: also list logging (Serilog, NLog, log4net) and Microsoft.Extensions calls;
-                                 Microsoft.Extensions.Caching is always listed.
-          --format msbuild       exceptions: one build warning per finding, "file(line,col): warning SD000N: ...", for MSBuild,
-                                 Visual Studio and VS Code (what the SharpDrill.MSBuild package runs after each build). Without a view:
-                                 uncaught and miscaught. SD0001 may escape an action, SD0002 may escape to a global exception
-                                 handler, SD0003 miscaught, SD0004 third-party call with no catch on the way (--strict),
-                                 SD0005 leaves an async void method (no caller can catch it; the process ends).
-          --mermaid              projects: also save the tree as a Mermaid diagram in Markdown.
-          --output F             New file for diagram or projects --mermaid; existing files are never overwritten.
-                                 Diagrams default to ./diagrams_exports in the current directory.
-          --configuration NAME   Default Debug.   --framework TFM  Required for ambiguous multi-target inputs.
-          --exclude-generated    Skip generated sources (included by default).
-          --restore              Run dotnet restore on the input first, even if it looks restored. Without it, restore runs only
-                                 when packages are missing; its output goes to stderr only if it fails.
-          --no-restore           Never restore: stop with an error when packages are missing.
-          --no-cache             Analyse again even if nothing changed since the last run (the result still replaces the cached one).
-          --include-tests        Also load test projects (xUnit, NUnit, TUnit, MSTest, SpecFlow/Reqnroll, Pact...); skipped by default.
-          --version              Print the version; no project load.
-          --help                 This text; no project load.
+          --from E           One entry point: its ID, signature or a unique part of it, e.g. OrdersController.Get. Default: all.
+          --third-party      exceptions uncaught: also list calls into NuGet packages and DLLs that no catch meets on the way
+                             (not .NET itself, logging or Microsoft.Extensions).
+          --declared-only    Stop at interface/virtual calls instead of following them into their source implementations
+                             (followed steps are possibilities, never runtime facts).
+          --locations        exceptions: file:line for every step of each path.
+          --format msbuild   exceptions: one build warning per finding, uncaught and miscaught unless a view is given.
+                             SD0001 may escape an entry point, SD0002 may escape to a global exception handler, SD0003 miscaught,
+                             SD0004 third-party call with no catch on the way, SD0005 leaves an async void method.
+          --budget N         Analysis work limit (default 100000); raise it when the output says the run stopped early.
+          --max-depth N      diagram: call steps (default 20).  --max-nodes N (default 200).  --max-edges N (default 1000).
+          --mermaid          projects: also save the tree as a Mermaid diagram in Markdown.
+          --output F         New file for diagram or projects --mermaid; never overwrites. Default: ./diagrams_exports.
+
+        Loading:
+          --configuration NAME (default Debug), --framework TFM (for multi-target inputs), --exclude-generated,
+          --include-tests (test projects are skipped by default), --restore (always restore first; by default only when
+          packages are missing), --no-restore, --no-cache (analyse again even if nothing changed).
+          --version, --help: no project load.
 
         Exit: 0 complete, 1 usable but with gaps/Unknown/limits, 2 invalid request or fatal, 130 cancelled.
         """;
@@ -93,12 +82,20 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
     {
         if (args.Length == 0 || args.Contains("--help") || args is ["-h"]) return null;
         var handler = Commands.Resolve(args[0]);
-        var input = args.Length > 1 && !args[1].StartsWith('-') ? args[1] : null;
-        var parsed = new Arguments(args[0], handler, input ?? "");
+        string? input = null;
+        var parsed = new Arguments(args[0], handler, "");
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        for (var i = input is null ? 1 : 2; i < args.Length; i++)
+        for (var i = 1; i < args.Length; i++)
         {
             var option = args[i];
+            // Words are a view the command knows, else the input; at most one of each.
+            if (!option.StartsWith('-'))
+            {
+                if (handler.Views.TryGetValue(option, out var view))
+                    parsed = parsed.View is null ? parsed with { View = view } : throw new ArgumentException($"Choose one view: {string.Join(", ", handler.Views.Keys.Order(StringComparer.Ordinal))}.");
+                else input = input is null ? option : throw new ArgumentException($"Unexpected argument: {option}. Pass one input.");
+                continue;
+            }
             if (!handler.Options.Contains(option) && !LoadingOptions.Contains(option))
                 throw new ArgumentException(KnownOptions.Contains(option) ? $"{args[0]} does not accept {option}." : $"Unknown option: {option}");
             if (!seen.Add(option)) throw new ArgumentException($"Repeated option: {option}");
@@ -110,18 +107,14 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
             int Number() => int.TryParse(Value(), out var n) ? n : throw new ArgumentException($"Invalid integer for {option}");
             parsed = option switch
             {
-                "--root" => parsed with { Root = Value() },
+                "--from" => parsed with { From = Value() },
                 "--declared-only" => parsed with { DeclaredOnly = true },
-                "--strict" => parsed with { Strict = true },
-                "--verbose" => parsed with { Verbose = true },
+                "--third-party" => parsed with { ThirdParty = true },
                 "--max-depth" => parsed with { MaxDepth = Number() },
                 "--budget" => parsed with { Budget = Number() },
                 "--max-nodes" => parsed with { MaxNodes = Number() },
                 "--max-edges" => parsed with { MaxEdges = Number() },
                 "--locations" => parsed with { Locations = true },
-                "--uncaught" => parsed with { View = ExceptionView.Uncaught },
-                "--caught" => parsed with { View = ExceptionView.Caught },
-                "--miscaught" => parsed with { View = ExceptionView.Miscaught },
                 "--mermaid" => parsed with { Mermaid = true },
                 "--format" => parsed with { MSBuild = Value() == "msbuild" ? true : throw new ArgumentException("--format accepts only msbuild.") },
                 "--output" => parsed with { Output = Value() },
@@ -159,6 +152,6 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
         };
     }
 
-    private static readonly ImmutableHashSet<string> KnownOptions = ["--root", "--declared-only", "--strict", "--verbose", "--max-depth",
-        "--budget", "--max-nodes", "--max-edges", "--locations", "--uncaught", "--caught", "--miscaught", "--mermaid", "--format", "--output"];
+    private static readonly ImmutableHashSet<string> KnownOptions = ["--from", "--declared-only", "--third-party", "--max-depth",
+        "--budget", "--max-nodes", "--max-edges", "--locations", "--mermaid", "--format", "--output"];
 }

@@ -1,1 +1,2 @@
-5 throws in source.
+3 uncaught exceptions (3 handled by a global exception handler); 1 crash from async void.
+Not followed: 1 interface or virtual call without a source implementation (e.g. Research.Application/Service.cs:12); 1 task that is never awaited (e.g. Research.Application/Service.cs:15).

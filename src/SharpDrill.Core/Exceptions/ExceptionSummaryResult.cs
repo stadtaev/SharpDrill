@@ -6,7 +6,7 @@ namespace SharpDrill.Core;
 // FollowCandidates continues through interface/virtual calls into source implementation candidates; effects that
 // pass through one are marked ViaCandidate. ThirdPartyCallOrigins also makes every call into a third-party assembly an
 // origin (of any type, which every catch takes); its escapes are the calls with no catch on the way from the root. Routine assemblies are left out unless AllThirdPartyCalls.
-public sealed record ExceptionSummaryOptions(int MaxWork = 1_000_000, int MaxFacts = 100_000, bool FollowCandidates = false, bool ThirdPartyCallOrigins = false, bool AllThirdPartyCalls = false)
+internal sealed record ExceptionSummaryOptions(int MaxWork = 1_000_000, int MaxFacts = 100_000, bool FollowCandidates = false, bool ThirdPartyCallOrigins = false, bool AllThirdPartyCalls = false)
 {
     // Logging and the Microsoft.Extensions plumbing are called everywhere and are not a failure anyone wraps. Caching stays:
     // IDistributedCache can be a remote store, which is what strict mode is for.
@@ -23,18 +23,18 @@ public sealed record ExceptionSummaryOptions(int MaxWork = 1_000_000, int MaxFac
     }
 }
 
-public sealed record ExceptionEscapeFact(ThrowSiteId Origin, ThrowSiteId? SubsequentOrigin,
+internal sealed record ExceptionEscapeFact(ThrowSiteId Origin, ThrowSiteId? SubsequentOrigin,
     string? ExceptionType, bool IsExactType, ExceptionReason ReasonCode, bool ViaCandidate = false);
-public sealed record ExceptionUncertainty(ExceptionReason ReasonCode, ThrowSiteId? Origin,
+internal sealed record ExceptionUncertainty(ExceptionReason ReasonCode, ThrowSiteId? Origin,
     CallSiteId? Site, string Message, SourceEvidence? Evidence = null);
-public sealed record ExceptionMethodSummary(CallableId Method, ImmutableArray<ExceptionEscapeFact> Escapes,
+internal sealed record ExceptionMethodSummary(CallableId Method, ImmutableArray<ExceptionEscapeFact> Escapes,
     ImmutableArray<ExceptionUncertainty> Unknowns, bool IsComplete);
-public sealed record ExceptionCrossingSummary(CallSiteId Site, ImmutableArray<ExceptionEscapeFact> Escapes,
+internal sealed record ExceptionCrossingSummary(CallSiteId Site, ImmutableArray<ExceptionEscapeFact> Escapes,
     ImmutableArray<ExceptionUncertainty> Unknowns, ImmutableArray<ThrowSiteId> InterceptedOrigins, bool IsComplete);
-public sealed record ExceptionSummaryWitness(ThrowSiteId Origin, ImmutableArray<CallableId> Path,
+internal sealed record ExceptionSummaryWitness(ThrowSiteId Origin, ImmutableArray<CallableId> Path,
     ImmutableArray<CallSiteId> Sites);
 
-public sealed class ExceptionSummaryResult
+internal sealed class ExceptionSummaryResult
 {
     internal readonly record struct FlowKey(ThrowSiteId Origin, ThrowSiteId? SubsequentOrigin,
         TypeUse? StaticType, TypeUse? ExactType, bool Exact, bool Changed, bool ViaCandidate);

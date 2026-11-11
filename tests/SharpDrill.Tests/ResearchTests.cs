@@ -125,10 +125,10 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
     public void Fixture_uncertainty_is_only_what_the_analysis_cannot_decide()
     {
         var summary = ExceptionSummaryQuery.Analyze(S, [.. Actions.Select(x => x.Method)], new(FollowCandidates: true));
-        // Library calls, compiler-provided members and recursion are not uncertainty; ownerless gaps stay global.
+        // Library calls, compiler-provided members and recursion are not uncertainty; top-level statements are a method, not a gap.
         Assert.Equal([ExceptionReason.DispatchBoundary, ExceptionReason.UnobservedTask],
             summary.Roots.Values.SelectMany(x => x.Unknowns).Select(x => x.ReasonCode).Distinct().Order());
-        Assert.Single(summary.GlobalGaps);
+        Assert.Empty(summary.GlobalGaps);
         Assert.False(summary.IsComplete);
     }
 

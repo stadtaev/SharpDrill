@@ -7,7 +7,7 @@ using FactRef = SharpDrill.Core.ExceptionSummaryResult.FactRef;
 
 namespace SharpDrill.Core;
 
-public static class ExceptionSummaryQuery
+internal static class ExceptionSummaryQuery
 {
     public static ExceptionSummaryResult Analyze(ProgramSnapshot snapshot, ImmutableArray<CallableId> roots,
         ExceptionSummaryOptions? options = null, CancellationToken token = default) =>
@@ -203,7 +203,7 @@ public static class ExceptionSummaryQuery
                                 crossed.Flow.Origin, site.Id, "Exception type could not be bound.", site.Evidence));
                             if (AddFlow(site.Caller, crossed.Flow, new(item.Method, item.Key, site.Id))) to = new(site.Caller, Key(crossed.Flow));
                         }
-                        // Third-party call origins answer --strict only; they are not catches or misses of a throw.
+                        // Third-party call origins answer ThirdPartyCalls only; they are not catches or misses of a throw.
                         if (!flow.AnyType) steps.Add(new(new(item.Method, item.Key), site, site.Caller, crossed, to));
                         if (factLimit) break;
                     }

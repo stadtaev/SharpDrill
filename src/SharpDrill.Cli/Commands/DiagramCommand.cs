@@ -7,7 +7,7 @@ namespace SharpDrill.Cli;
 
 internal sealed class DiagramCommand(TextReader input, TextWriter output) : ICliCommand
 {
-    public ImmutableHashSet<string> Options { get; } = ["--root", "--declared-only", "--max-depth", "--max-nodes", "--max-edges", "--budget", "--output"];
+    public ImmutableHashSet<string> Options { get; } = ["--from", "--declared-only", "--max-depth", "--max-nodes", "--max-edges", "--budget", "--output"];
 
     public void Validate(Arguments arguments) => Query(arguments).Validate();
 
@@ -16,26 +16,25 @@ internal sealed class DiagramCommand(TextReader input, TextWriter output) : ICli
 
     public async Task<int> RunAsync(ProgramIndex index, Arguments arguments, CancellationToken token)
     {
-        var actions = AspNetConventions.ControllerActions(index, token).Select(x => index.Callable(x.Method))
-            .OrderBy(x => x.DisplaySignature, StringComparer.Ordinal).ThenBy(x => x.Id.Value, StringComparer.Ordinal).ToArray();
-        CallableFact? selected;
-        if (arguments.Root is { } root) selected = Roots.Match(index, actions, root);
+        CallableFact selected;
+        if (arguments.From is { } from) selected = index.EntryPoint(from, token).Method;
         else
         {
-            if (actions.Length == 0) { await output.WriteLineAsync("No recognised controller actions. No diagram saved."); return 0; }
-            await output.WriteLineAsync("Controller actions:");
-            for (var i = 0; i < actions.Length; i++)
-                await output.WriteLineAsync($"{i + 1}. {actions[i].DisplaySignature} [{index.ProjectName(actions[i].Compilation)}]");
-            await output.WriteLineAsync("Choose an action number (q to cancel):");
+            var entries = index.EntryPoints(token).Select(x => x.Method).ToArray();
+            if (entries.Length == 0) { await output.WriteLineAsync("No entry points found. No diagram saved."); return 0; }
+            await output.WriteLineAsync("Entry points:");
+            for (var i = 0; i < entries.Length; i++)
+                await output.WriteLineAsync($"{i + 1}. {entries[i].DisplaySignature} [{index.ProjectName(entries[i].Compilation)}]");
+            await output.WriteLineAsync("Choose an entry point number (q to cancel):");
             while (true)
             {
                 token.ThrowIfCancellationRequested();
                 var choice = await input.ReadLineAsync(token);
                 if (choice is null || choice.Trim().Equals("q", StringComparison.OrdinalIgnoreCase))
                 { await output.WriteLineAsync("No diagram saved."); return 0; }
-                if (int.TryParse(choice.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var number) && number >= 1 && number <= actions.Length)
-                { selected = actions[number - 1]; break; }
-                await output.WriteLineAsync($"Choose a number from 1 to {actions.Length}, or q to cancel:");
+                if (int.TryParse(choice.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var number) && number >= 1 && number <= entries.Length)
+                { selected = entries[number - 1]; break; }
+                await output.WriteLineAsync($"Choose a number from 1 to {entries.Length}, or q to cancel:");
             }
         }
         var diagram = CallDiagramQuery.Build(index, selected.Id, Query(arguments), token);

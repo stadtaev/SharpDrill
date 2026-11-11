@@ -5,7 +5,7 @@ Research.Api.OrdersController.Get()
 Nodes: 4; edges: 3; examined call sites: 3.
 Solid arrows: direct calls. Dotted arrows: declared dispatch, possible implementation candidates, or unresolved calls.
 Branches show possible static calls, not execution order. Shared methods appear once; cycles represent recursion.
-Implementation candidates followed: True. Completeness: partial (see boundaries, limits and gaps below).
+Implementation candidates followed: True. Completeness: complete within the extracted call model.
 
 ```mermaid
 flowchart TB
@@ -40,5 +40,4 @@ flowchart TB
 ## Coverage
 
 Source-backed call relationships only. No runtime receiver resolution, execution order, implicit framework/database behavior, or proof that exceptions are unhandled. Minimal APIs and inherited action enumeration are outside the current extractor's scope.
-Relevant extraction gaps: 1. Ownerless gaps are included because their affected calls cannot be localized.
-- Unsupported: Top-level statements have no owning callable; boundary registrations are extracted separately. (/home/stan/source/repos/sharpal/tests/Fixtures/ResearchSolution/Research.Api/Program.cs:2:1)
+Relevant extraction gaps: 0. Ownerless gaps are included because their affected calls cannot be localized.

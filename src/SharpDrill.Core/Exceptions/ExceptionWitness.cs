@@ -15,7 +15,7 @@ public enum ExceptionReason
 
 // One origin's story along one example path from an action (Path[0]) down to the throw, re-walked with evidence:
 // the handlers it met, the try regions it passed and where it ended.
-public sealed record ExceptionWitness(CallableId Action, ThrowSiteId? Origin, ThrowSiteId? SubsequentOrigin,
+internal sealed record ExceptionWitness(CallableId Action, ThrowSiteId? Origin, ThrowSiteId? SubsequentOrigin,
     string? ExceptionType, bool IsExactType, ImmutableArray<CallableId> Path,
     ExceptionStatus Status, string Reason, ImmutableArray<SourceEvidence> Evidence,
     ImmutableArray<CatchId> HandlerIds, ExceptionStatus? SubsequentStatus = null,
@@ -34,4 +34,4 @@ public sealed record ExceptionWitness(CallableId Action, ThrowSiteId? Origin, Th
 }
 
 // A protected region with catch clauses, none of which matches ExceptionType (the type at that point of propagation).
-public sealed record MissedRegion(ExceptionRegionId Region, string? ExceptionType);
+internal sealed record MissedRegion(ExceptionRegionId Region, string? ExceptionType);

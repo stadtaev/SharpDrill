@@ -6,19 +6,16 @@ namespace SharpDrill.Cli;
 // Text layout shared by the views: numbered blocks, aligned labels and paths that refer back to earlier ones.
 internal sealed partial class ExceptionsCommand
 {
-    private static void WriteExample(ReportContext context, Report report, ExceptionWitness witness) =>
-        WritePath(context, report, witness.Path, witness.Sites, witness.Evidence);
-
-    // From the action down to the throw, on one line when it fits. A step through an interface/virtual call (~>) assumes
+    // From the entry point down to the throw, on one line when it fits. A step through an interface/virtual call (~>) assumes
     // which implementation runs; when source has several, the step says so, since that is where the path is a guess. A
     // path that repeats most of an earlier finding's path refers to it and spells out only the rest (--locations keeps
     // every step, since each has its own location).
-    private static void WritePath(ReportContext context, Report report, ImmutableArray<CallableId> path, ImmutableArray<CallSiteId> sites, ImmutableArray<SourceEvidence> evidence)
+    private static void WritePath(ReportContext context, Report report, ExceptionPath example)
     {
-        var (index, display) = (context.Index, context.Display);
-        string Choice(int i) => i > 0 && i - 1 < sites.Length && index.CallGraph.Resolve(sites[i - 1]) is { Kind: CallTargetKind.Dispatch, Callees.Length: var n and > 1 }
-            ? $" (1 of {n} implementations)" : "";
-        var steps = path.Select((x, i) => (Arrow: i == 0 ? "" : i - 1 < sites.Length && index.CallSite(sites[i - 1]).Dispatch != DispatchKind.Direct ? "~> " : "-> ", Name: display.Short(x) + Choice(i))).ToArray();
+        var display = context.Display;
+        ImmutableArray<CallableId> path = [.. example.Steps.Select(x => x.Method.Id)];
+        var steps = example.Steps.Select((x, i) => (Arrow: i == 0 ? "" : x.IsAssumed ? "~> " : "-> ",
+            Name: display.Short(x.Method.Id) + (x.Implementations > 1 ? $" (1 of {x.Implementations} implementations)" : ""))).ToArray();
         if (steps.Length > 1)
         {
             var (earlier, shared, same) = context.Arguments.Locations ? default : report.Earlier(path);
@@ -39,7 +36,7 @@ internal sealed partial class ExceptionsCommand
             }
         }
         if (!context.Arguments.Locations) return;
-        var places = (evidence.IsEmpty ? sites.Select(x => index.CallSite(x).Evidence) : evidence).Select(display.Where).ToArray();
+        var places = example.Locations.Select(display.Where).ToArray();
         for (var i = 0; i < places.Length; i++) if (i == 0) report.Line("Locations", places[i]); else report.More(places[i]);
     }
 

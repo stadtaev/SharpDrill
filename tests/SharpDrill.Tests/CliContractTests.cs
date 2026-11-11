@@ -42,18 +42,22 @@ public sealed class CliContractTests
         Assert.DoesNotContain("Input not found", result.Error);
     }
     [Theory]
-    [InlineData("projects", "--root", "X()")]
+    [InlineData("projects", "--from", "X()")]
     [InlineData("projects", "--output", "x.md")]
-    [InlineData("exceptions", "--root", "X()")]
-    [InlineData("exceptions", "--declared-only")]
+    [InlineData("exceptions", "thrown", "--from", "X()")]
+    [InlineData("exceptions", "thrown", "--declared-only")]
     [InlineData("projects", "--declared-only")]
-    [InlineData("exceptions", "--uncaught", "--caught")]
-    [InlineData("exceptions", "--strict")]
-    [InlineData("exceptions", "--miscaught", "--strict")]
-    [InlineData("diagram", "--strict")]
-    [InlineData("exceptions", "--uncaught", "--max-depth", "3")]
+    [InlineData("exceptions", "uncaught", "caught")]
+    [InlineData("exceptions", "other.slnx")]
+    [InlineData("exceptions", "--uncaught")]
+    [InlineData("exceptions", "--verbose")]
+    [InlineData("exceptions", "miscaught", "--third-party")]
+    [InlineData("exceptions", "thrown", "--format", "msbuild")]
+    [InlineData("exceptions", "--budget", "0")]
+    [InlineData("diagram", "--third-party")]
+    [InlineData("exceptions", "uncaught", "--max-depth", "3")]
     [InlineData("exceptions", "--format", "json")]
-    [InlineData("exceptions", "--caught", "--format", "msbuild")]
+    [InlineData("exceptions", "caught", "--format", "msbuild")]
     [InlineData("exceptions", "--format", "msbuild", "--locations")]
     public async Task Invalid_requests_fail_before_loading(string command, params string[] options)
     {
@@ -78,7 +82,7 @@ public sealed class CliContractTests
             // Frontmatter holds only name and description: the version marker follows it, out of every agent's YAML parser.
             Assert.Matches("^---\nname: sharpdrill\ndescription: [^\n]+\n---\n<!-- Written by `sharpdrill skill` ", text);
             // The skill must keep up with the CLI: every command, view and warning code is named.
-            foreach (var term in new[] { "sharpdrill projects", "sharpdrill exceptions --uncaught", "--strict", "--caught", "--miscaught", 
+            foreach (var term in new[] { "sharpdrill projects", "sharpdrill exceptions", "--third-party", "--from", "caught", "miscaught", "thrown", 
                 "sharpdrill diagram", "--format msbuild", "SD0000", "SD0001", "SD0002", "SD0003", "SD0004", "SD0005" })
                 Assert.Contains(term, text);
             Assert.Equal(0, (await RunIn(nested, "skill")).Exit);
@@ -167,7 +171,7 @@ public sealed class CliContractTests
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".md");
         try
         {
-            var result = await Run("diagram", ResearchFixture.Input, "--root", "Research.Api.OrdersController.Get()", "--max-depth", "0", "--output", path);
+            var result = await Run("diagram", ResearchFixture.Input, "--from", "Research.Api.OrdersController.Get()", "--max-depth", "0", "--output", path);
             Assert.Equal(1, result.Exit);
             Assert.Contains("The diagram is cut short (depth); raise --max-depth", result.Out);
             Assert.Contains("Truncated: Depth limit reached", await File.ReadAllTextAsync(path));
@@ -215,21 +219,24 @@ public sealed class CliContractTests
     [Fact]
     public async Task Exception_output_is_byte_identical_across_runs()
     {
-        var first = await Run("exceptions", ResearchFixture.Input, "--caught");
-        var second = await Run("exceptions", ResearchFixture.Input, "--caught");
+        var first = await Run("exceptions", ResearchFixture.Input, "caught");
+        var second = await Run("exceptions", ResearchFixture.Input, "caught");
         Assert.Equal(1, first.Exit); Assert.NotEmpty(first.Out);
         Assert.Equal((first.Out, first.Error), (second.Out, second.Error));
     }
     [Fact]
-    public async Task Unmatched_root_suggests_actions_by_text_then_by_method_name()
+    public async Task From_takes_a_unique_part_of_a_signature_and_suggests_by_method_name()
     {
-        var text = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--root", "orderscontroller.get");
-        Assert.Equal(2, text.Exit);
-        Assert.Contains("No controller action matches --root orderscontroller.get exactly. Did you mean:\n  Research.Api.OrdersController.Get()\n", text.Error.ReplaceLineEndings("\n"));
-        var name = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--root", "Shop.OrdersController.GET(int)");
-        Assert.Contains("Did you mean:\n  Research.Api.OrdersController.Get()\n", name.Error.ReplaceLineEndings("\n"));
-        var none = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--root", "Nothing()");
-        Assert.Contains("No controller action matches --root Nothing(). Pass an action's full signature", none.Error);
+        var part = await Run("exceptions", ResearchFixture.Input, "--from", "orderscontroller.get");
+        Assert.Equal(0, part.Exit);
+        Assert.Contains("Path:       OrdersController.Get -> Service.Load -> Repository.Read", part.Out);
+        var several = await Run("exceptions", ResearchFixture.Input, "--from", "OrdersController");
+        Assert.Equal(2, several.Exit);
+        Assert.Contains("OrdersController matches 13 entry points; pass more of the signature:\n  Research.Api.OrdersController.AwaitCaught()\n", several.Error.ReplaceLineEndings("\n"));
+        var name = await Run("exceptions", ResearchFixture.Input, "--from", "Shop.OrdersController.GET(int)");
+        Assert.Contains("No entry point matches Shop.OrdersController.GET(int). Did you mean:\n  Research.Api.OrdersController.Get()\n", name.Error.ReplaceLineEndings("\n"));
+        var none = await Run("exceptions", ResearchFixture.Input, "--from", "Nothing()");
+        Assert.Contains("No entry point matches Nothing().", none.Error);
     }
     [Fact]
     public async Task Output_refuses_to_overwrite_an_input_file()
@@ -242,7 +249,7 @@ public sealed class CliContractTests
     [Fact]
     public async Task Default_lists_every_throw_with_method_type_and_project()
     {
-        var result = await Run("exceptions", ResearchFixture.Input);
+        var result = await Run("exceptions", ResearchFixture.Input, "thrown");
         Assert.Equal(0, result.Exit);
         Assert.Contains("Research.Infrastructure.StorageException  Repository.Read  Research.Infrastructure/Repository.cs:6\n", result.Out.ReplaceLineEndings("\n"));
         Assert.Contains("System.Exception (or a subclass)  Repository.StaticType", result.Out);
@@ -253,7 +260,7 @@ public sealed class CliContractTests
     [Fact]
     public async Task Caught_reports_where_thrown_and_where_caught_with_the_handler_outcome()
     {
-        var result = await Run("exceptions", ResearchFixture.Input, "--caught");
+        var result = await Run("exceptions", ResearchFixture.Input, "caught");
         Assert.Equal(1, result.Exit);
         var text = result.Out.Replace("\r\n", "\n");
         Assert.Contains("   Caught by:  Service.Caught  Research.Application/Service.cs:6\n               catch (Research.Infrastructure.StorageException)\n", text);
@@ -269,7 +276,7 @@ public sealed class CliContractTests
     [Fact]
     public async Task Miscaught_reports_the_try_whose_clauses_do_not_match_and_what_happens_next()
     {
-        var result = await Run("exceptions", ResearchFixture.Input, "--miscaught");
+        var result = await Run("exceptions", ResearchFixture.Input, "miscaught");
         Assert.Equal(1, result.Exit);
         var text = result.Out.Replace("\r\n", "\n");
         Assert.Contains("1. Research.Infrastructure.StorageException", text);
@@ -285,7 +292,7 @@ public sealed class CliContractTests
     [Fact]
     public async Task Msbuild_format_prints_one_canonical_warning_per_finding()
     {
-        var result = await Run("exceptions", ResearchFixture.Input, "--format", "msbuild", "--strict");
+        var result = await Run("exceptions", ResearchFixture.Input, "--format", "msbuild", "--third-party");
         Assert.Equal(1, result.Exit);
         var lines = result.Out.Replace("\r\n", "\n").TrimEnd('\n').Split('\n');
         // Without a view: the async void crash, the uncaught findings (all reach the fixture's exception middleware), then the miscaught ones.
@@ -303,24 +310,23 @@ public sealed class CliContractTests
         Assert.Contains("3 uncaught exceptions (3 handled by a global exception handler); 1 crash from async void; every third-party call has a catch on the way; "
             + "2 miscaught (1 handled by a global exception handler).", result.Error);
         // A view narrows the warnings to that view.
-        Assert.Equal([lines[4], lines[5]], (await Run("exceptions", ResearchFixture.Input, "--miscaught", "--format", "msbuild")).Out.Replace("\r\n", "\n").TrimEnd('\n').Split('\n'));
+        Assert.Equal([lines[4], lines[5]], (await Run("exceptions", ResearchFixture.Input, "miscaught", "--format", "msbuild")).Out.Replace("\r\n", "\n").TrimEnd('\n').Split('\n'));
     }
     [Fact]
-    public async Task Verbose_requires_strict_and_only_exceptions_accepts_it()
+    public async Task Third_party_belongs_to_exceptions_only()
     {
-        var alone = await Run("exceptions", "missing.slnx", "--uncaught", "--verbose");
-        Assert.Equal(2, alone.Exit); Assert.Contains("--verbose requires --strict.", alone.Error);
-        var other = await Run("projects", "missing.slnx", "--verbose");
-        Assert.Equal(2, other.Exit); Assert.Contains("projects does not accept --verbose", other.Error);
-        var result = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--strict", "--verbose");
+        var other = await Run("projects", "missing.slnx", "--third-party");
+        Assert.Equal(2, other.Exit); Assert.Contains("projects does not accept --third-party", other.Error);
+        var result = await Run("exceptions", ResearchFixture.Input, "--third-party");
         Assert.Contains("every third-party call has a catch on the way.", result.Error);
     }
 
     [Fact]
-    public async Task A_project_without_controller_actions_does_not_read_as_a_clean_result()
+    public async Task A_library_nothing_references_is_entered_through_its_public_methods()
     {
-        var result = await Run("exceptions", Path.Combine(Path.GetDirectoryName(ResearchFixture.Input)!, "Research.Infrastructure", "Research.Infrastructure.csproj"), "--uncaught");
-        Assert.Equal("No controller actions found.\n", result.Error.ReplaceLineEndings("\n"));
+        var result = await Run("exceptions", Path.Combine(Path.GetDirectoryName(ResearchFixture.Input)!, "Research.Infrastructure", "Research.Infrastructure.csproj"));
+        Assert.Equal("4 uncaught exceptions.\n", result.Error.ReplaceLineEndings("\n"));
+        Assert.Contains("1. Research.Infrastructure.StorageException\n   Thrown:     Repository.Read  Repository.cs:6  (in the entry point)\n", result.Out.ReplaceLineEndings("\n"));
     }
 
     [Fact]
@@ -347,8 +353,8 @@ public sealed class CliContractTests
     [Fact]
     public async Task Strict_adds_a_third_party_count_and_leaves_framework_calls_out()
     {
-        var plain = await Run("exceptions", ResearchFixture.Input, "--uncaught");
-        var strict = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--strict");
+        var plain = await Run("exceptions", ResearchFixture.Input, "uncaught");
+        var strict = await Run("exceptions", ResearchFixture.Input, "uncaught", "--third-party");
         // The fixture calls only .NET itself, so strict mode adds no section.
         Assert.Equal(plain.Out, strict.Out);
         // The skill tip is for a person at a terminal; redirected stderr (agents, CI) never gets it.
@@ -360,7 +366,7 @@ public sealed class CliContractTests
     [InlineData(true)]
     public async Task Gaps_off_every_path_stay_out_of_exception_reports(bool summary)
     {
-        var result = await Run(summary ? ["exceptions", ResearchFixture.Input, "--uncaught"] : ["exceptions", ResearchFixture.Input, "--caught"]);
+        var result = await Run(summary ? ["exceptions", ResearchFixture.Input, "uncaught"] : ["exceptions", ResearchFixture.Input, "caught"]);
         // Exit 1 for the fixture's genuine stops (an interface without implementation, a task never awaited), not for Program.cs.
         Assert.Equal(1, result.Exit);
         Assert.DoesNotContain("Top-level", result.Error);
@@ -402,11 +408,11 @@ public sealed class CliContractTests
     {
         const string action = "Research.Api.OrdersController.Interface(Research.Infrastructure.IRepository)";
         // The fixture's interface has no implementation in source, so following has nowhere to go and says so.
-        var followed = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--root", action);
+        var followed = await Run("exceptions", ResearchFixture.Input, "uncaught", "--from", action);
         Assert.Contains("Not followed: 1 interface or virtual call without a source implementation", followed.Error);
-        var declared = await Run("exceptions", ResearchFixture.Input, "--uncaught", "--declared-only", "--root", action);
+        var declared = await Run("exceptions", ResearchFixture.Input, "uncaught", "--declared-only", "--from", action);
         Assert.Contains("Not followed: 1 interface or virtual call not followed (--declared-only)", declared.Error);
-        var caught = await Run("exceptions", ResearchFixture.Input, "--caught", "--declared-only", "--root", action);
+        var caught = await Run("exceptions", ResearchFixture.Input, "caught", "--declared-only", "--from", action);
         Assert.Contains("1 interface or virtual call not followed (--declared-only)", caught.Error);
     }
     [Theory]
@@ -414,7 +420,7 @@ public sealed class CliContractTests
     [InlineData("--max-nodes", "5")]
     public async Task Exception_views_have_no_depth_or_size_limits(string option, params string[] value)
     {
-        var result = await Run(["exceptions", "missing.slnx", "--uncaught", option, .. value]);
+        var result = await Run(["exceptions", "missing.slnx", "uncaught", option, .. value]);
         Assert.Equal(2, result.Exit); Assert.Contains($"exceptions does not accept {option}", result.Error);
     }
     [Fact]
@@ -452,7 +458,7 @@ public sealed class CliContractTests
                 """);
             using (var restore = Process.Start(new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet", ["restore", input]) { RedirectStandardOutput = true })!)
             { await restore.StandardOutput.ReadToEndAsync(); await restore.WaitForExitAsync(); Assert.Equal(0, restore.ExitCode); }
-            var result = await RunIn(directory, "exceptions", input, "--uncaught");
+            var result = await RunIn(directory, "exceptions", input, "uncaught");
             Assert.Equal(0, result.Exit);
             Assert.EndsWith("""
                 1. System.ArgumentException

@@ -8,6 +8,9 @@ internal interface ICliCommand
     /// <summary>Options this command accepts besides the project-loading options; anything else is rejected before loading.</summary>
     ImmutableHashSet<string> Options { get; }
 
+    /// <summary>Words naming a view of the command's results, given without dashes (exceptions caught).</summary>
+    ImmutableDictionary<string, ExceptionView> Views => ImmutableDictionary<string, ExceptionView>.Empty;
+
     /// <summary>Cross-option rules and limit checks, run after parsing and before the project is loaded.</summary>
     void Validate(Arguments arguments) { }
 

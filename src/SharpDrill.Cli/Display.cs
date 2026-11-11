@@ -26,18 +26,6 @@ internal sealed class Display(ProgramIndex index, string? input = null)
         return string.Join('.', parts.Length > 2 ? parts[^2..] : parts);
     }
 
-    /// <summary>True for fakes, mocks, stubs, in-memory doubles and test projects, judged by type, namespace and project names.</summary>
-    internal bool IsTestDouble(CallableId id)
-    {
-        var haystack = (index.DeclaringType(id)?.DisplayName ?? "") + "|" + Project(id);
-        return Markers.Any(x => haystack.Contains(x, StringComparison.OrdinalIgnoreCase));
-    }
-    private static readonly string[] Markers = ["Fake", "Mock", "Stub", "InMemory", "Dummy", ".Tests", "UnitTests", "IntegrationTests"];
-
-    internal string Project(CallableId id) => index.ProjectName(index.Callable(id).Compilation);
-
-    internal string TypeOf(CallableId id) => index.DeclaringType(id)?.DisplayName ?? "<no containing type>";
-
     /// <summary>File and line relative to the analysed solution or project, so lines stay short.</summary>
     internal string Where(SourceEvidence evidence)
     {
