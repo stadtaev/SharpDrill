@@ -42,7 +42,7 @@ public sealed class DiagramTests
         var index = Index([Method("Root"), Method("I", BodyStatus.NoBody), Method("Impl"), Method("External", BodyStatus.MetadataOnly)],
             [Call("i", "Root", "I", DispatchKind.Interface), Call("u", "Root", null), Call("e", "Root", "External")],
             [new(new("I"), new("Impl"), ImplementationKind.Interface)]);
-        var declared = CallDiagramQuery.Build(index, new("Root"), new());
+        var declared = CallDiagramQuery.Build(index, new("Root"), new(FollowCandidates: false));
         Assert.DoesNotContain(declared.Nodes, x => x.Callable == new CallableId("Impl"));
         Assert.Contains(declared.Edges, x => x.Kind == CallEdgeKind.Declared);
         Assert.Contains(declared.Nodes, x => x.Callable is null);

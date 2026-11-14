@@ -9,6 +9,10 @@ namespace SharpDrill.Roslyn;
 
 public static class RoslynProgramLoader
 {
+    /// <summary>Loads a restored .sln, .slnx or .csproj with default options and indexes it: the program every query reads.</summary>
+    public static async Task<ProgramIndex> OpenAsync(string path, CancellationToken cancellationToken = default) =>
+        new(await LoadAsync(new AnalysisRequest(path), cancellationToken));
+
     public static Task<ProgramSnapshot> LoadAsync(AnalysisRequest request, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

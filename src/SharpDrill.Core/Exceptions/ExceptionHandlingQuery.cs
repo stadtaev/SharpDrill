@@ -3,10 +3,10 @@ using System.Collections.Immutable;
 namespace SharpDrill.Core;
 
 // Definite: the catch type matches and no filter applies. Possible: a filter or the runtime type decides.
-public enum CatchCertainty { Definite, Possible }
+internal enum CatchCertainty { Definite, Possible }
 
 /// <summary>An origin reaching a matching catch clause; Example is one witness path from a root.</summary>
-public sealed record CaughtException(ThrowSiteId Origin, CatchId Catch, CatchCertainty Certainty, ExceptionWitness Example)
+internal sealed record CaughtFlow(ThrowSiteId Origin, CatchId Catch, CatchCertainty Certainty, ExceptionWitness Example)
 {
     public bool ViaCandidate => Example.ViaCandidate;
 }
@@ -14,7 +14,7 @@ public sealed record CaughtException(ThrowSiteId Origin, CatchId Catch, CatchCer
 /// <summary>An origin passing through a try/catch whose clauses do not match it; Outcomes are its final statuses
 /// over every witness path (it may still be intercepted further up). Undetermined is a witness whose outcome is Unknown.
 /// EscapesFrom are the roots of the witnesses where it may escape.</summary>
-public sealed record MiscaughtException(ThrowSiteId Origin, MissedRegion Missed, ImmutableArray<ExceptionStatus> Outcomes, ExceptionWitness Example)
+internal sealed record MiscaughtFlow(ThrowSiteId Origin, MissedRegion Missed, ImmutableArray<ExceptionStatus> Outcomes, ExceptionWitness Example)
 {
     public bool ViaCandidate => Example.ViaCandidate;
     public ExceptionWitness? Undetermined { get; init; }
@@ -23,26 +23,26 @@ public sealed record MiscaughtException(ThrowSiteId Origin, MissedRegion Missed,
 
 /// <summary>An exception that leaves an async void method (Method) reached from roots: no caller can catch it, so it ends
 /// the process. Roots are every root whose calls reach Method (Method itself when it is an async void root).</summary>
-public sealed record CrashingException(ThrowSiteId Origin, ThrowSiteId? SubsequentOrigin, string? ExceptionType, CallableId Method,
+internal sealed record CrashingFlow(ThrowSiteId Origin, ThrowSiteId? SubsequentOrigin, string? ExceptionType, CallableId Method,
     ImmutableArray<CallableId> Roots, ExceptionWitness Example)
 {
     public bool ViaCandidate => Example.ViaCandidate;
 }
 
-/// <summary>Catches and misses read from the same propagation as --uncaught (ExceptionSummaryQuery), deduplicated across
+/// <summary>Catches and misses read from the same propagation as uncaught exceptions (ExceptionSummaryQuery), deduplicated across
 /// roots and paths. Each transfer step records the handlers it matched and the try regions it passed; a miss's outcomes
 /// are the fates of the fact it became, which depend only on that fact, not on the path that produced it. The example
 /// is the shortest proven path from a root, else the shortest through an implementation candidate, re-walked with
 /// evidence.</summary>
-public static class ExceptionHandlingQuery
+internal static class ExceptionHandlingQuery
 {
     private static bool Better(ExceptionWitness candidate, ExceptionWitness current) =>
         candidate.ViaCandidate != current.ViaCandidate ? !candidate.ViaCandidate : candidate.Path.Length < current.Path.Length;
 
-    public static ImmutableArray<CaughtException> Caught(ProgramIndex index, ExceptionSummaryResult result, CancellationToken token = default)
+    public static ImmutableArray<CaughtFlow> Caught(ProgramIndex index, ExceptionSummaryResult result, CancellationToken token = default)
     {
         var witnesses = new Witnesses(index, result, token);
-        var found = new Dictionary<(ThrowSiteId, CatchId), CaughtException>();
+        var found = new Dictionary<(ThrowSiteId, CatchId), CaughtFlow>();
         foreach (var step in result.Steps)
             foreach (var handler in step.Result.Flow.Handlers)
             {
@@ -55,7 +55,7 @@ public static class ExceptionHandlingQuery
         return [.. found.Values.OrderBy(x => x.Example, witnesses.Order).ThenBy(x => index.Catch(x.Catch).Evidence.SpanStart)];
     }
 
-    public static ImmutableArray<MiscaughtException> Miscaught(ProgramIndex index, ExceptionSummaryResult result, CancellationToken token = default)
+    public static ImmutableArray<MiscaughtFlow> Miscaught(ProgramIndex index, ExceptionSummaryResult result, CancellationToken token = default)
     {
         var witnesses = new Witnesses(index, result, token);
         var fates = new Dictionary<ExceptionSummaryResult.FactRef, Fate>();
@@ -77,14 +77,14 @@ public static class ExceptionHandlingQuery
                 else found[key] = (existing.Missed, Better(example, existing.Example) ? example : existing.Example, existing.Fate.With(fate));
             }
         return [.. found.Values.OrderBy(x => x.Example, witnesses.Order).ThenBy(x => index.Region(x.Missed.Region).ProtectedBlock.SpanStart)
-            .Select(x => new MiscaughtException(x.Example.Origin!.Value, x.Missed, [.. x.Fate.Outcomes.Order()], x.Example)
+            .Select(x => new MiscaughtFlow(x.Example.Origin!.Value, x.Missed, [.. x.Fate.Outcomes.Order()], x.Example)
             {
                 Undetermined = x.Fate.Undetermined is { } unknown ? witnesses.Of(unknown) : null,
                 EscapesFrom = [.. x.Fate.Roots.Order(StringComparer.Ordinal).Select(r => new CallableId(r))],
             })];
     }
 
-    public static ImmutableArray<CrashingException> Crashing(ProgramIndex index, ExceptionSummaryResult result, CancellationToken token = default)
+    public static ImmutableArray<CrashingFlow> Crashing(ProgramIndex index, ExceptionSummaryResult result, CancellationToken token = default)
     {
         var witnesses = new Witnesses(index, result, token);
         var found = new Dictionary<(ThrowSiteId, ThrowSiteId?, string?, CallableId), ExceptionWitness>();
@@ -108,7 +108,7 @@ public static class ExceptionHandlingQuery
                 Add(result.Flow(new(root, key)), root, ExceptionTransfer.Witness(index, root, path.Path, [.. path.Sites.Select(index.CallSite)], key.ViaCandidate, index.ThrowSite(key.Origin), token));
             }
         return [.. found.OrderBy(x => x.Value, witnesses.Order).ThenBy(x => index.ThrowSite(x.Key.Item1).Evidence.SpanStart)
-            .Select(x => new CrashingException(x.Key.Item1, x.Key.Item2, x.Key.Item3, x.Key.Item4, witnesses.RootsAbove(x.Key.Item4), x.Value))];
+            .Select(x => new CrashingFlow(x.Key.Item1, x.Key.Item2, x.Key.Item3, x.Key.Item4, witnesses.RootsAbove(x.Key.Item4), x.Value))];
     }
 
     /// <summary>Where one throw ends: one example per handler that stops it, per place it becomes Unknown and per root it
