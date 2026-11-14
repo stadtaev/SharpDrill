@@ -1,5 +1,25 @@
-System.InvalidOperationException  Service.Replace  Research.Application/Service.cs:10
-Research.Infrastructure.StorageException  Repository.Read  Research.Infrastructure/Repository.cs:6
-Research.Infrastructure.StorageException  Repository.ReadAsync  Research.Infrastructure/Repository.cs:8
-Research.Infrastructure.StorageException  Repository.Expression  Research.Infrastructure/Repository.cs:9
-System.Exception (or a subclass)  Repository.StaticType  Research.Infrastructure/Repository.cs:10
+Overview: 3 uncaught exceptions (3 handled by a global exception handler); 1 crash from async void
+  3  Research.Infrastructure.StorageException
+  1  System.InvalidOperationException
+
+1. Research.Infrastructure.StorageException
+   Thrown:     Repository.ReadAsync  Research.Infrastructure/Repository.cs:8
+   Crashes:    leaves async void Service.Fire, where no caller can catch it; the process ends
+   Path:       OrdersController.Fire -> Service.Fire -> Repository.ReadAsync
+
+2. System.InvalidOperationException
+   Thrown:     Service.Replace  Research.Application/Service.cs:10
+   Handled:    by the global exception handler UseExceptionHandler  Research.Api/Program.cs:5
+   Path:       OrdersController.Replace -> Service.Replace
+
+3. Research.Infrastructure.StorageException
+   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
+   Escapes:    OrdersController.Filter, OrdersController.Get, OrdersController.Incompatible, OrdersController.Unrelated
+   Handled:    by the global exception handler UseExceptionHandler  Research.Api/Program.cs:5
+   Path:       OrdersController.Filter -> Service.Filter -> Repository.Read
+
+4. Research.Infrastructure.StorageException
+   Thrown:     Repository.Read  Research.Infrastructure/Repository.cs:6
+   Rethrown:   Service.Rethrow  Research.Application/Service.cs:9
+   Handled:    by the global exception handler UseExceptionHandler  Research.Api/Program.cs:5
+   Path:       OrdersController.Rethrow -> Service.Rethrow -> Repository.Read

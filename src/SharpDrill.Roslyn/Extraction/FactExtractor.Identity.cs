@@ -29,7 +29,7 @@ internal sealed partial class FactExtractor
         if (s.TypeParameters.Length > 0) name += "<" + string.Join(", ", s.TypeParameters.Select(x => x.Name)) + ">";
         var prefix = s.ContainingType is null ? "" : TypeName(s.ContainingType) + ".";
         if (s.MethodKind is MethodKind.LocalFunction or MethodKind.AnonymousFunction)
-            prefix = s.ContainingSymbol.ToDisplayString() + ".";
+            prefix = (s.ContainingSymbol is IMethodSymbol { Name: WellKnownMemberNames.TopLevelStatementsEntryPointMethodName } entry ? Signature(entry) : s.ContainingSymbol.ToDisplayString()) + ".";
         return prefix + name + "(" + string.Join(", ", s.Parameters.Select(x => (x.RefKind == RefKind.None ? "" : x.RefKind.ToString().ToLowerInvariant() + " ") + TypeName(x.Type))) + ")";
     }
     // Portable keys: project file name (or assembly simple name for metadata) instead of paths, configuration or versions.

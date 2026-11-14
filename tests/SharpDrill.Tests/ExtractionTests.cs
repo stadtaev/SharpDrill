@@ -10,28 +10,48 @@ namespace SharpDrill.Tests;
 
 public sealed class ExtractionTests
 {
-    private static async Task<ProgramSnapshot> Extract(string source, bool includeGenerated = true, string path = "/fixture/Input.cs", string projectPath = "/fixture/Fixture.csproj")
+    internal static async Task<ProgramSnapshot> Extract(string source, bool includeGenerated = true, string path = "/fixture/Input.cs", string projectPath = "/fixture/Fixture.csproj", OutputKind output = OutputKind.DynamicallyLinkedLibrary)
     {
         using var workspace = new AdhocWorkspace();
-        var (project, compilation) = await Compile(workspace, "ExtractionFixture", source, path);
+        var (project, compilation) = await Compile(workspace, "ExtractionFixture", source, path, output);
         var fact = new CompilationFact(new("fixture"), projectPath, compilation.Assembly.Identity.ToString(), "net10.0", "Debug", "Preview", "Disable", [], []);
         var extractor = new FactExtractor([fact], []);
         await extractor.RegisterAsync(project, compilation, fact, includeGenerated, CancellationToken.None);
         extractor.Extract(CancellationToken.None);
         return extractor.Snapshot();
     }
-    private static async Task<(Project Project, Compilation Compilation)> Compile(AdhocWorkspace workspace, string name, string source, string path)
+    private static async Task<(Project Project, Compilation Compilation)> Compile(AdhocWorkspace workspace, string name, string source, string path, OutputKind output = OutputKind.DynamicallyLinkedLibrary)
     {
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
             .Select(x => MetadataReference.CreateFromFile(x));
         var project = workspace.AddProject(name, LanguageNames.CSharp)
-            .WithCompilationOptions(new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
+            .WithCompilationOptions(new CSharpCompilationOptions(output))
             .WithParseOptions(new CSharpParseOptions(LanguageVersion.Preview))
             .AddMetadataReferences(references)
             .AddDocument("Input.cs", SourceText.From(source), filePath: path).Project;
         var compilation = (await project.GetCompilationAsync())!;
         Assert.DoesNotContain(compilation.GetDiagnostics(), x => x.Severity == DiagnosticSeverity.Error);
         return (project, compilation);
+    }
+
+    [Fact]
+    public async Task Top_level_statements_are_the_body_of_the_entry_point()
+    {
+        var snapshot = await Extract("""
+            try { Work.Run(); } catch (System.ArgumentException) { }
+            Work.Fail();
+            Local();
+            void Local() => throw new System.InvalidOperationException();
+            public static class Work { public static void Run() { } public static void Fail() => throw new System.NotSupportedException(); }
+            """, output: OutputKind.ConsoleApplication);
+        var main = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Program.<Main>$(string[])");
+        Assert.Equal(BodyStatus.Source, main.Body);
+        Assert.Equal(["Program.<Main>$(string[]).Local()", "Work.Fail()", "Work.Run()"], snapshot.CallSites.Where(x => x.Caller == main.Id).Select(x => x.TargetDisplay).Order(StringComparer.Ordinal));
+        var region = Assert.Single(snapshot.ExceptionRegions);
+        Assert.Equal(main.Id, region.Owner);
+        Assert.Equal(region.Id, Assert.Single(Assert.Single(snapshot.CallSites, x => x.Caller == main.Id && x.TargetDisplay == "Work.Run()").ProtectedRegions));
+        Assert.DoesNotContain(snapshot.ThrowSites, x => x.Owner == main.Id);
+        Assert.Empty(snapshot.Gaps);
     }
 
     [Fact]
