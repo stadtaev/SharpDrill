@@ -13,8 +13,8 @@ sharpdrill skill                           # let GitHub Copilot and Claude Code 
 ```
 
 For a team, pin it as a local tool so CI gets the same version: `dotnet new tool-manifest`, `dotnet tool install
-SharpDrill`, commit `dotnet-tools.json`, then `dotnet tool restore` and `dotnet sharpdrill ...` elsewhere. From source:
-`dotnet run --project src/SharpDrill.Cli -- exceptions <input>`.
+SharpDrill`, commit `dotnet-tools.json`, then `dotnet tool restore` and `dotnet sharpdrill ...` elsewhere; [In CI](#in-ci)
+has GitHub Actions, GitLab and Azure Pipelines steps. From source: `dotnet run --project src/SharpDrill.Cli -- exceptions <input>`.
 
 ## Usage
 
@@ -84,15 +84,61 @@ Accept a finding where it points with `#pragma warning disable SD000N` or `[Supp
 the summary counts suppressed warnings. The `SharpDrill.MSBuild` package runs this after every build
 ([settings](../src/SharpDrill.Build/PACKAGE.md)).
 
-A CI job that fails on SD0001 (exit 1 only means some calls could not be followed):
+## In CI
+
+Two ways into an existing .NET pipeline:
+
+- **Every build:** add the `SharpDrill.MSBuild` package to the projects (`dotnet add package SharpDrill.MSBuild`). Findings
+  become SD000N build warnings in the `dotnet build` you already run; nothing else changes.
+- **One step:** run the CLI after restore, as below. Pin it once so CI and your machine use the same version:
+  `dotnet new tool-manifest && dotnet tool install SharpDrill`, then commit `.config/dotnet-tools.json`.
+
+Each example shows the findings as annotations on the code, keeps exit 1 (some calls not followed, normal on real code) a
+success, and fails on exit 2 (the analysis could not run) and on SD0001. Delete the last line to report without failing,
+or match `SD000[13]` to fail on miscaught too. Replace `MyApp.slnx` with your solution.
+
+**GitHub Actions** (`.github/workflows/*.yml`, after `actions/setup-dotnet` with a 10.0 SDK and your restore/build):
 
 ```yaml
-script:
-  - dotnet tool restore     # SharpDrill pinned in dotnet-tools.json
-  - code=0; dotnet sharpdrill exceptions MyApp.slnx --format msbuild > sharpdrill.txt || code=$?
-  - cat sharpdrill.txt; test "$code" -le 1
-  - if grep -q "warning SD0001" sharpdrill.txt; then exit 1; fi
+      - name: SharpDrill
+        shell: bash
+        run: |
+          dotnet tool restore
+          code=0; dotnet sharpdrill exceptions MyApp.slnx --format msbuild > sharpdrill.txt || code=$?
+          test "$code" -le 1
+          sed -E "s|^${GITHUB_WORKSPACE}/||; s|^(.+)\(([0-9]+),([0-9]+)\): warning (SD[0-9]+): (.*)|::warning file=\1,line=\2,col=\3,title=\4::\5|" sharpdrill.txt
+          if grep -q "warning SD0001" sharpdrill.txt; then exit 1; fi
 ```
+
+**GitLab CI** (`.gitlab-ci.yml`; the findings are in the job log and the `sharpdrill.txt` artifact):
+
+```yaml
+sharpdrill:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:10.0
+  script:
+    - dotnet tool restore
+    - code=0; dotnet sharpdrill exceptions MyApp.slnx --format msbuild > sharpdrill.txt || code=$?
+    - cat sharpdrill.txt; test "$code" -le 1
+    - if grep -q "warning SD0001" sharpdrill.txt; then exit 1; fi
+  artifacts:
+    when: always
+    paths: [sharpdrill.txt]
+```
+
+**Azure Pipelines** (`azure-pipelines.yml`, Linux or macOS agent, after `UseDotNet@2` with `version: 10.0.x`):
+
+```yaml
+  - bash: |
+      dotnet tool restore
+      code=0; dotnet sharpdrill exceptions MyApp.slnx --format msbuild > sharpdrill.txt || code=$?
+      test "$code" -le 1 || exit 1
+      sed -E "s|^(.+)\(([0-9]+),([0-9]+)\): warning (SD[0-9]+): (.*)|##vso[task.logissue type=warning;sourcepath=\1;linenumber=\2;columnnumber=\3;code=\4]\5|" sharpdrill.txt
+      if grep -q "warning SD0001" sharpdrill.txt; then exit 1; fi
+    displayName: SharpDrill
+```
+
+The input is restored automatically if your pipeline has not done it yet; SharpDrill never builds it.
 
 ## diagram
 

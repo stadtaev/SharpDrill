@@ -31,14 +31,15 @@ deliberate). 0 = complete, 1 = usable but with gaps/Unknown/limits, 2 = invalid 
 Pipeline: **Load → Extract facts → Index → Queries → CLI report**.
 
 - `SharpDrill.Roslyn` — `RoslynProgramLoader` opens the solution via MSBuild (never restores/builds the target);
-  `OpenAsync(path)` loads and indexes in one call. `Extraction/FactExtractor*.cs` registers source symbols and bodies
+  consumers call `Codebase.OpenAsync(path)`, a C# 14 static extension in the same file. `Extraction/FactExtractor*.cs` registers source symbols and bodies
   (top-level statements are the body of `Program.<Main>$`); `BodyWalker` walks each body's operation tree and records
   call sites, throws, catches, regions and `AnalysisGap`s. All Roslyn knowledge lives here.
-- `SharpDrill.Core` — plain immutable records (`Model/Facts.cs`, the `ProgramSnapshot`), `ProgramIndex` (lookups, lazy
+- `SharpDrill.Core` — plain immutable records (`Model/Facts.cs`, the `ProgramSnapshot`), `Codebase` (lookups, lazy
   call/dependency graphs) and the queries. **Core has no Roslyn or Mermaid dependency.** The consumer API is extension
-  methods on `ProgramIndex`: `EntryPoints()`/`EntryPoint(name)` (`Conventions/EntryPoints.cs`) and `Exceptions(options)`
-  (`Exceptions/ExceptionReport.cs`), whose findings carry resolved facts. The exception engine behind it
-  (`ExceptionSummaryQuery`, `ExceptionHandlingQuery`, `ExceptionTransfer`) is internal.
+  methods on `Codebase`: `EntryPoints()`/`EntryPoint(name)` (`Conventions/EntryPoints.cs`), `Exceptions(options)`
+  (`Exceptions/ExceptionReport.cs`), `Diagram(from)` and `Projects()`; findings carry resolved facts. Everything behind
+  them (exception engine, `CallDiagramQuery`, `ProjectMap.Build`, ASP.NET conventions, dependency graph, layer rules) is
+  internal: a new analysis gets a `Codebase` extension method with defaults, not a public query class.
 - `SharpDrill.Graph` — generic immutable directed multigraph (SCC, quotient); knows nothing about C#.
 - `SharpDrill.Export.Mermaid` — Mermaid/Markdown formatting; the only project with the Mermaid NuGet dependency.
 - `SharpDrill.Cli` — `Commands.cs` gets the snapshot: `SnapshotCache` (reused while `ProgramSnapshot.Inputs` are
@@ -55,7 +56,7 @@ One question per place; change the place that owns the question.
 
 | Question | Place |
 | --- | --- |
-| Where does the program start? | `ProgramEntryPoints` (`Conventions/EntryPoints.cs`) |
+| Where does the program start? | `CodebaseEntryPoints` (`Conventions/EntryPoints.cs`) |
 | What does this call site lead to (source, library, dispatch candidates, unresolved)? | `CallGraph.Resolve` (`Graphs/CallGraph.cs`) |
 | What happens to an exception at one throw or call site (catch match, filter, rethrow, finally, await)? | `ExceptionTransfer` |
 | Which exceptions may leave each method and call site, through which steps? | `ExceptionSummaryQuery`: Reach → Seed → Propagate → Summarize into `ExceptionSummaryResult` |

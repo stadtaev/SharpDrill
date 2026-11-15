@@ -6,13 +6,13 @@ namespace SharpDrill.Core;
 // Source is the owning type (the declaring type when a callable owns the fact); OwnerCallable keeps that callable.
 // Inheritance facts contribute one edge per declared type in the base type, including its type arguments; other
 // dependency kinds are already one fact per type argument.
-public sealed record DependencyEdge(TypeId Source, TypeId Target, DependencyFact Fact, CallableId? OwnerCallable) : IEdge<TypeId>;
+internal sealed record DependencyEdge(TypeId Source, TypeId Target, DependencyFact Fact, CallableId? OwnerCallable) : IEdge<TypeId>;
 
 // Whole-program type dependency graph over every type, edges in dependency-fact order. Facts whose referenced type
 // has no declaration (type parameters) or whose owner is unknown produce no edge.
-public static class DependencyGraph
+internal static class DependencyGraph
 {
-    public static DiGraph<TypeId, DependencyEdge> Build(ProgramIndex index, CancellationToken cancellationToken = default)
+    public static DiGraph<TypeId, DependencyEdge> Build(Codebase index, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var builder = DiGraph<TypeId, DependencyEdge>.CreateBuilder();

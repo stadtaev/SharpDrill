@@ -9,13 +9,13 @@ public enum EntryPointKind { ControllerAction, Main, PublicApi }
 /// <summary>Where control enters the analysed code from outside it; exception paths and diagrams start here.</summary>
 public sealed record EntryPoint(CallableFact Method, EntryPointKind Kind);
 
-public static class ProgramEntryPoints
+public static class CodebaseEntryPoints
 {
     private const string TopLevel = "<Main>$";
 
     /// <summary>Controller actions and program entry points in every project; for a library project that no loaded project
     /// references, its public methods. Ordered by signature, then ID.</summary>
-    public static ImmutableArray<EntryPoint> EntryPoints(this ProgramIndex program, CancellationToken token = default)
+    public static ImmutableArray<EntryPoint> EntryPoints(this Codebase program, CancellationToken token = default)
     {
         var actions = AspNetConventions.ControllerActions(program, token).Select(x => x.Method).ToHashSet();
         var found = program.Snapshot.Callables.Where(x => x.Body == BodyStatus.Source)
@@ -31,7 +31,7 @@ public static class ProgramEntryPoints
 
     /// <summary>The entry point a name stands for: its ID, its exact signature, or a part of one signature (case-insensitive),
     /// such as <c>OrdersController.Get</c>. Throws ArgumentException listing the candidates when none or several match.</summary>
-    public static EntryPoint EntryPoint(this ProgramIndex program, string name, CancellationToken token = default)
+    public static EntryPoint EntryPoint(this Codebase program, string name, CancellationToken token = default)
     {
         var all = program.EntryPoints(token);
         var exact = all.Where(x => x.Method.Id.Value == name).ToArray() is { Length: > 0 } byId ? byId : all.Where(x => x.Method.DisplaySignature == name).ToArray();
@@ -65,7 +65,7 @@ public static class ProgramEntryPoints
                && method.Parameters is [] or [{ Type.DisplayName: "string[]" }] && method.ReturnType.DisplayName is "void" or "int" or "System.Threading.Tasks.Task" or "System.Threading.Tasks.Task<int>");
 
     // Public and reachable from outside: every containing type public too. Compiler-provided members hold no code.
-    private static bool IsPublicApi(ProgramIndex program, CallableFact method)
+    private static bool IsPublicApi(Codebase program, CallableFact method)
     {
         if (method.Body != BodyStatus.Source || method.Accessibility != "Public" || method.Kind is CallableKind.LocalFunction or CallableKind.Lambda
             || (method.Modifiers & CallableModifiers.Abstract) != 0 || method.DeclaringType is not { } declaring) return false;

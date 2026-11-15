@@ -10,17 +10,19 @@ internal sealed partial class ExceptionsCommand : ReportCommand
 
     public override ImmutableHashSet<string> Options { get; } = [.. TracedOptions, "--format"];
 
-    public override ImmutableDictionary<string, ExceptionView> Views { get; } = new Dictionary<string, ExceptionView>
-    {
-        ["uncaught"] = ExceptionView.Uncaught, ["caught"] = ExceptionView.Caught, ["miscaught"] = ExceptionView.Miscaught, ["thrown"] = ExceptionView.Thrown,
-    }.ToImmutableDictionary();
+    private enum ExceptionView { Uncaught, Caught, Miscaught, Thrown }
+
+    public override ImmutableArray<string> Views { get; } = ["uncaught", "caught", "miscaught", "thrown"];
+
+    // Null: no view word given (uncaught; with --format msbuild, uncaught and miscaught).
+    private static ExceptionView? View(Arguments arguments) => arguments.View is { } word ? Enum.Parse<ExceptionView>(word, ignoreCase: true) : null;
 
     public override void Validate(Arguments arguments)
     {
-        if (arguments.MSBuild && arguments.View is ExceptionView.Caught or ExceptionView.Thrown) throw new ArgumentException("--format msbuild reports uncaught and miscaught exceptions; caught ones and plain throws are not warnings.");
+        if (arguments.MSBuild && View(arguments) is ExceptionView.Caught or ExceptionView.Thrown) throw new ArgumentException("--format msbuild reports uncaught and miscaught exceptions; caught ones and plain throws are not warnings.");
         if (arguments.MSBuild && arguments.Locations) throw new ArgumentException("--format msbuild prints one line per finding; --locations does not apply.");
-        if (arguments.ThirdParty && arguments.View is not (null or ExceptionView.Uncaught)) throw new ArgumentException("--third-party applies to the uncaught view.");
-        if (arguments.View == ExceptionView.Thrown && arguments.Given.Overlaps(TracedOptions))
+        if (arguments.ThirdParty && View(arguments) is not (null or ExceptionView.Uncaught)) throw new ArgumentException("--third-party applies to the uncaught view.");
+        if (View(arguments) == ExceptionView.Thrown && arguments.Given.Overlaps(TracedOptions))
             throw new ArgumentException("thrown lists every throw in source and takes no options; --from, --third-party, --budget, --locations and --declared-only trace from entry points.");
         if (arguments.Budget <= 0) throw new ArgumentException("--budget must be positive.");
     }
@@ -31,8 +33,8 @@ internal sealed partial class ExceptionsCommand : ReportCommand
     protected override ValueTask<bool> ExecuteAsync(ReportContext context, CancellationToken token)
     {
         var report = context.Index.Exceptions(AnalysisOptions(context.Arguments), token);
-        if (context.Arguments.View == ExceptionView.Thrown) return ValueTask.FromResult(Throws(context, report, token));
-        string[] counts = context.Arguments.View switch
+        if (View(context.Arguments) == ExceptionView.Thrown) return ValueTask.FromResult(Throws(context, report, token));
+        string[] counts = View(context.Arguments) switch
         {
             // Build warnings default to every finding worth one: uncaught and miscaught.
             null when context.Arguments.MSBuild => [Uncaught(context, report, token), Miscaught(context, report, token)],

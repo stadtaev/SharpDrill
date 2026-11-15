@@ -17,7 +17,7 @@ public sealed class ResearchFixture : IAsyncLifetime
 public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<ResearchFixture>
 {
     private ProgramSnapshot S => fixture.Snapshot;
-    private ImmutableArray<ControllerActionFact> Actions => AspNetConventions.ControllerActions(new ProgramIndex(S));
+    private ImmutableArray<ControllerActionFact> Actions => AspNetConventions.ControllerActions(new Codebase(S));
     private CallableFact Method(string name) => Assert.Single(S.Callables, x => x.DisplaySignature == name);
     [Fact]
     public void Source_bindings_link_projects_and_preserve_locations()
@@ -45,7 +45,7 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
     [InlineData("Nested", "caught")]
     public void The_catch_around_each_call_site_decides_the_fate_of_the_repository_throw(string action, string expected)
     {
-        var index = new ProgramIndex(S);
+        var index = new Codebase(S);
         var root = Method("Research.Api.OrdersController." + (action.Contains('(') ? action : action + "()")).Id;
         var origin = Assert.Single(S.ThrowSites, x => x.Owner == Method("Research.Infrastructure.Repository." + (action is "AwaitCaught" or "Unobserved" ? "ReadAsync()" : "Read()")).Id).Id;
         var summary = ExceptionSummaryQuery.Analyze(index, [root]);
@@ -63,14 +63,14 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
     [Fact]
     public void Interface_without_implementation_is_uncertain_and_recursion_alone_is_not()
     {
-        var index = new ProgramIndex(S);
+        var index = new Codebase(S);
         CallableId Root(string action) => Method("Research.Api.OrdersController." + action).Id;
         var summary = ExceptionSummaryQuery.Analyze(index, [Root("Interface(Research.Infrastructure.IRepository)"), Root("Recursive()")], new(FollowCandidates: true));
         Assert.Contains(summary.Roots[Root("Interface(Research.Infrastructure.IRepository)")].Unknowns, x => x.ReasonCode == ExceptionReason.DispatchBoundary);
         Assert.True(summary.Roots[Root("Recursive()")].IsComplete);
     }
     // Same code as the "Writing your own rule" example in docs/overview.md; keeps the documentation honest.
-    private static IEnumerable<Finding> NoDirectInfrastructure(ProgramIndex index, LayerMap layers)
+    private static IEnumerable<Finding> NoDirectInfrastructure(Codebase index, LayerMap layers)
     {
         foreach (var action in AspNetConventions.ControllerActions(index).Select(x => x.Method))
             foreach (var site in index.Outgoing(action).Where(x => x.BoundTarget is { } target && layers.LayerOf(target) == "Infrastructure"))
@@ -80,7 +80,7 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
     [Fact]
     public void Documented_custom_rule_example_runs_on_the_fixture()
     {
-        var index = new ProgramIndex(S);
+        var index = new Codebase(S);
         var layers = new LayerMap(index, new([new(LayerScope.Project, "Research.Infrastructure", "Infrastructure")]));
         var findings = NoDirectInfrastructure(index, layers).ToArray();
         // Controllers only call the application layer directly; mapping the application project as Infrastructure flips that.
@@ -110,11 +110,11 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
                 Site("second", "Middle", "Implementation")],
             Implementations = [new(new("Declared"), new("Implementation"), ImplementationKind.Interface)]
         };
-        var index = new ProgramIndex(snapshot);
+        var index = new Codebase(snapshot);
         var layers = new LayerMap(index, new([new(LayerScope.Type, "Repo", "Infrastructure")]));
         Assert.Empty(NoDirectInfrastructure(index, layers));
         var direct = Site("actual-direct", "Action", "Implementation") with { Evidence = evidence with { SpanStart = 17 } };
-        index = new ProgramIndex(snapshot with { CallSites = snapshot.CallSites.Add(direct) });
+        index = new Codebase(snapshot with { CallSites = snapshot.CallSites.Add(direct) });
         layers = new LayerMap(index, new([new(LayerScope.Type, "Repo", "Infrastructure")]));
         var violation = Assert.Single(NoDirectInfrastructure(index, layers));
         Assert.Equal(Verdict.Violation, violation.Verdict);
@@ -135,7 +135,7 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
     [Fact]
     public void Every_fixture_example_has_a_reason_code_consistent_with_its_final_status()
     {
-        var index = new ProgramIndex(S);
+        var index = new Codebase(S);
         var summary = ExceptionSummaryQuery.Analyze(index, [.. Actions.Select(x => x.Method)], new(FollowCandidates: true));
         var miscaught = ExceptionHandlingQuery.Miscaught(index, summary);
         ExceptionWitness[] witnesses = [.. ExceptionHandlingQuery.Caught(index, summary).Select(x => x.Example), .. miscaught.Select(x => x.Example),
@@ -175,7 +175,7 @@ public sealed class ResearchTests(ResearchFixture fixture) : IClassFixture<Resea
     [Fact]
     public void Call_graph_keeps_each_call_site_and_invents_no_sibling_edges()
     {
-        var index = new ProgramIndex(S);
+        var index = new Codebase(S);
         var quiet = Method("Research.Infrastructure.Repository.Quiet()").Id;
         Assert.Equal([quiet, quiet], index.CallGraph.Graph.OutEdges(Method("Research.Application.Service.Repeat()").Id).Select(x => x.Target));
         Assert.DoesNotContain(index.CallGraph.Graph.OutEdges(Method("Research.Infrastructure.Repository.Read()").Id), x => x.Target == quiet);

@@ -11,9 +11,9 @@ internal static class ExceptionSummaryQuery
 {
     public static ExceptionSummaryResult Analyze(ProgramSnapshot snapshot, ImmutableArray<CallableId> roots,
         ExceptionSummaryOptions? options = null, CancellationToken token = default) =>
-        Analyze(new ProgramIndex(snapshot), roots, options, token);
+        Analyze(new Codebase(snapshot), roots, options, token);
 
-    public static ExceptionSummaryResult Analyze(ProgramIndex index, ImmutableArray<CallableId> roots,
+    public static ExceptionSummaryResult Analyze(Codebase index, ImmutableArray<CallableId> roots,
         ExceptionSummaryOptions? options = null, CancellationToken token = default)
     {
         options ??= new(); options.Validate(); token.ThrowIfCancellationRequested();
@@ -27,7 +27,7 @@ internal static class ExceptionSummaryQuery
     // (explicit throws, third-party calls) and uncertainties on it, Propagate pushes them up through caller sites to a
     // fixed point, Summarize freezes the result. Facts are keyed per method, not per path: a method is where effects
     // from all its callees merge, so each distinct effect is pushed to each caller once.
-    private sealed class Solver(ProgramIndex index, ExceptionSummaryOptions options, CancellationToken token)
+    private sealed class Solver(Codebase index, ExceptionSummaryOptions options, CancellationToken token)
     {
         private readonly CallGraph calls = index.GetCallGraph(token);
         private readonly HashSet<CallableId> reachable = [];

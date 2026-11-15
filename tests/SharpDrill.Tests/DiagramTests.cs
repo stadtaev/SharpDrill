@@ -13,7 +13,7 @@ public sealed class DiagramTests
         new(new(id), Project, null, null, CallableKind.Method, id + "()", "Public", Void, [], [], body, []);
     private static CallSiteFact Call(string id, string from, string? to, DispatchKind dispatch = DispatchKind.Direct) =>
         new(new(id), new(from), to is null ? null : new CallableId(to), to ?? "unknown", dispatch, [], Evidence, false, []);
-    private static ProgramIndex Index(CallableFact[] methods, CallSiteFact[] calls, ImplementationFact[]? implementations = null) =>
+    private static Codebase Index(CallableFact[] methods, CallSiteFact[] calls, ImplementationFact[]? implementations = null) =>
         new(new() { Callables = [.. methods], CallSites = [.. calls], Implementations = [.. implementations ?? []],
             Compilations = [new(Project, "/src/Example.csproj", "Example", "net10.0", "Debug", "default", "enabled", [], [])] });
 

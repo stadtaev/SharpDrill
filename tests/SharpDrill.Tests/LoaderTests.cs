@@ -19,6 +19,17 @@ public sealed class LoaderTests
     }
 
     [Fact]
+    public async Task The_consumer_api_reads_from_one_codebase()
+    {
+        var codebase = await Codebase.OpenAsync(Path.Combine(ResearchFixture.Root, "tests/Fixtures/ResearchSolution/ResearchSolution.slnx"));
+        Assert.Contains(codebase.EntryPoints(), x => x.Kind == EntryPointKind.ControllerAction);
+        Assert.NotEmpty(codebase.Exceptions().Uncaught);
+        var diagram = codebase.Diagram("OrdersController.Get");
+        Assert.Contains(diagram.Nodes, x => x.IsRoot && x.Label.Contains("OrdersController.Get", StringComparison.Ordinal));
+        Assert.Equal(3, codebase.Projects().Projects.Count);
+    }
+
+    [Fact]
     public async Task Conventional_solution_input_preserves_cross_project_source_facts()
     {
         var directory = Path.Combine(Path.GetTempPath(), "sharpdrill-solution-" + Guid.NewGuid().ToString("N"));
@@ -119,7 +130,7 @@ public sealed class LoaderTests
         Assert.Equal(BodyStatus.Source, repository.Body);
         Assert.NotEqual(action.Compilation, service.Compilation);
         Assert.NotEqual(service.Compilation, repository.Compilation);
-        Assert.Contains(AspNetConventions.ControllerActions(new ProgramIndex(snapshot)), x => x.Method == action.Id);
+        Assert.Contains(AspNetConventions.ControllerActions(new Codebase(snapshot)), x => x.Method == action.Id);
         Assert.Contains(snapshot.ThrowSites, x => x.Owner == repository.Id && x.StaticExceptionType?.DisplayName == "Research.Infrastructure.StorageException");
     }
 }

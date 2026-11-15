@@ -9,10 +9,10 @@ internal interface ICliCommand
     ImmutableHashSet<string> Options { get; }
 
     /// <summary>Words naming a view of the command's results, given without dashes (exceptions caught).</summary>
-    ImmutableDictionary<string, ExceptionView> Views => ImmutableDictionary<string, ExceptionView>.Empty;
+    ImmutableArray<string> Views => [];
 
     /// <summary>Cross-option rules and limit checks, run after parsing and before the project is loaded.</summary>
     void Validate(Arguments arguments) { }
 
-    Task<int> RunAsync(ProgramIndex index, Arguments arguments, CancellationToken token);
+    Task<int> RunAsync(Codebase index, Arguments arguments, CancellationToken token);
 }

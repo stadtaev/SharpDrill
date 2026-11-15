@@ -210,7 +210,7 @@ public sealed class ExtractionTests
             public class Svc(IBench bench) { public async Task<int> Run() => (await bench.Search()).Count; }
             """);
         var root = Assert.Single(snapshot.Callables, x => x.DisplaySignature == "Svc.Run()").Id;
-        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [root], new(FollowCandidates: true));
+        var result = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [root], new(FollowCandidates: true));
         Assert.Equal("System.InvalidOperationException", Assert.Single(result.Roots[root].Escapes).ExceptionType);
     }
 
@@ -554,7 +554,7 @@ public sealed class ExtractionTests
             public class BaseController : Microsoft.AspNetCore.Mvc.ControllerBase { [Microsoft.AspNetCore.Mvc.NonAction] public virtual void Helper() { } }
             public class Controller : BaseController { public override void Helper() { } public void Action() { } }
             """);
-        var action = Assert.Single(AspNetConventions.ControllerActions(new ProgramIndex(snapshot)));
+        var action = Assert.Single(AspNetConventions.ControllerActions(new Codebase(snapshot)));
         Assert.Equal("Controller.Action()", Assert.Single(snapshot.Callables, x => x.Id == action.Method).DisplaySignature);
         Assert.Equal(AspNetConventions.ControllerActionConvention, action.Convention);
     }
@@ -585,7 +585,7 @@ public sealed class ExtractionTests
             public class Plain { public void NotAnAction() { } }
             """);
         // Expected set was verified equal to the former extraction-time classification before it was removed.
-        var actions = AspNetConventions.ControllerActions(new ProgramIndex(snapshot));
+        var actions = AspNetConventions.ControllerActions(new Codebase(snapshot));
         Assert.Equal(new[] { "Api.Dispose()", "Api.Run()", "Poco.Act()" }, actions.Select(x => Assert.Single(snapshot.Callables, c => c.Id == x.Method).DisplaySignature).Order(StringComparer.Ordinal));
         Assert.Equal(actions.Select(x => x.Method.Value).Order(StringComparer.Ordinal), actions.Select(x => x.Method.Value));
     }
