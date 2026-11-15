@@ -4,9 +4,6 @@ using SharpDrill.Roslyn;
 
 namespace SharpDrill.Cli;
 
-/// <summary>Which exceptions to list: by fate along the call chains from entry points, or every throw in source.</summary>
-internal enum ExceptionView { Uncaught, Caught, Miscaught, Thrown }
-
 internal sealed record Arguments(string Command, ICliCommand Handler, string Input)
 {
     internal string Configuration { get; init; } = "Debug";
@@ -26,7 +23,7 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
     internal bool DeclaredOnly { get; init; }
     internal bool ThirdParty { get; init; }
     // Null: the command's default view (exceptions: uncaught; with --format msbuild, uncaught and miscaught).
-    internal ExceptionView? View { get; init; }
+    internal string? View { get; init; }
     internal bool Mermaid { get; init; }
     internal bool MSBuild { get; init; }
     internal string? Output { get; init; }
@@ -91,8 +88,8 @@ internal sealed record Arguments(string Command, ICliCommand Handler, string Inp
             // Words are a view the command knows, else the input; at most one of each.
             if (!option.StartsWith('-'))
             {
-                if (handler.Views.TryGetValue(option, out var view))
-                    parsed = parsed.View is null ? parsed with { View = view } : throw new ArgumentException($"Choose one view: {string.Join(", ", handler.Views.Keys.Order(StringComparer.Ordinal))}.");
+                if (handler.Views.Contains(option))
+                    parsed = parsed.View is null ? parsed with { View = option } : throw new ArgumentException($"Choose one view: {string.Join(", ", handler.Views)}.");
                 else input = input is null ? option : throw new ArgumentException($"Unexpected argument: {option}. Pass one input.");
                 continue;
             }

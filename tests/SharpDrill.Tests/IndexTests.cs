@@ -16,7 +16,7 @@ public sealed class IndexTests
     private static CallSiteFact Call(string id, string caller, string? target, string display) =>
         new(new(id), new(caller), target is null ? null : new CallableId(target), display, DispatchKind.Direct, [], Evidence, false, []);
 
-    private static ProgramIndex Index() => new(new ProgramSnapshot
+    private static Codebase Index() => new(new ProgramSnapshot
     {
         Compilations = [new(Project, "/repo/src/Orders.Api/Orders.Api.csproj", "Orders.Api", "net10.0", "Debug", "Latest", "Enable", [], [])],
         // A -> B -> A is a malformed but possible metadata shape; ancestry must still terminate.

@@ -6,20 +6,20 @@ namespace SharpDrill.Core;
 // DirectCall: direct dispatch to a bound target. DeclaredCall: interface/virtual/delegate/dynamic site, counted at its
 // declared binding. CandidateCall: from such a site to an implementation candidate (never an inferred runtime target).
 // TypeDependency: signature, inheritance, construction, body-use, field and property dependencies.
-public enum LayerEdgeKind { DirectCall, DeclaredCall, CandidateCall, TypeDependency }
+internal enum LayerEdgeKind { DirectCall, DeclaredCall, CandidateCall, TypeDependency }
 
 // Count is the number of supporting call sites or dependency facts. The witness is the supporting fact with the
 // smallest evidence location (path, then span), so it is stable across runs.
-public sealed record LayerEdge(string From, string To, LayerEdgeKind Kind, int Count,
+internal sealed record LayerEdge(string From, string To, LayerEdgeKind Kind, int Count,
     SourceEvidence? Evidence, string WitnessSource, string WitnessTarget);
 
 // ExternalReferences: calls/dependencies into referenced assemblies that no mapping covers (kept as a count, not dropped).
 // UnresolvedCalls: call sites without a known bound target.
-public sealed record LayerGraph(ImmutableArray<LayerEdge> Edges, int ExternalReferences, int UnresolvedCalls)
+internal sealed record LayerGraph(ImmutableArray<LayerEdge> Edges, int ExternalReferences, int UnresolvedCalls)
 {
     // A quotient of the call graph and the dependency graph by layer. Edges whose caller/owner is referenced code
     // (not analysed source) are not program edges and are skipped.
-    public static LayerGraph Build(ProgramIndex index, LayerMap map, CancellationToken cancellationToken = default)
+    public static LayerGraph Build(Codebase index, LayerMap map, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var edges = new List<LayerEdge>();

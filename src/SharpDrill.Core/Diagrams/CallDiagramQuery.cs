@@ -24,11 +24,22 @@ public sealed record CallDiagram(string Root, ImmutableArray<DiagramNode> Nodes,
     public bool IsComplete => Boundaries.IsEmpty && Limits.IsEmpty && Gaps.IsEmpty;
 }
 
+public static class CodebaseDiagrams
+{
+    /// <summary>What one entry point calls, as a bounded graph grouped by project. <paramref name="from"/> is matched as
+    /// in <see cref="CodebaseEntryPoints.EntryPoint"/>.</summary>
+    public static CallDiagram Diagram(this Codebase codebase, string from, DiagramOptions? options = null, CancellationToken token = default) =>
+        codebase.Diagram(codebase.EntryPoint(from, token), options, token);
+
+    public static CallDiagram Diagram(this Codebase codebase, EntryPoint from, DiagramOptions? options = null, CancellationToken token = default) =>
+        CallDiagramQuery.Build(codebase, from.Method.Id, options ?? new(), token);
+}
+
 // A bounded subgraph, not an enumeration of execution paths. Shared callees and recursive edges are retained.
 // The work limit bounds examined sites in this projection; snapshot loading and whole-graph construction precede it.
-public static class CallDiagramQuery
+internal static class CallDiagramQuery
 {
-    public static CallDiagram Build(ProgramIndex index, CallableId root, DiagramOptions options, CancellationToken token = default)
+    public static CallDiagram Build(Codebase index, CallableId root, DiagramOptions options, CancellationToken token = default)
     {
         options.Validate(); token.ThrowIfCancellationRequested();
         if (!index.ContainsCallable(root)) throw new ArgumentException($"Unknown root ID: {root.Value}");

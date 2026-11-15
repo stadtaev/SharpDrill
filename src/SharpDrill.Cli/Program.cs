@@ -1,12 +1,12 @@
 using SharpDrill.Cli;
 using SharpDrill.Core;
 
-return await EntryPoint.RunAsync(args);
+return await Tool.RunAsync(args);
 
-internal static class EntryPoint
+internal static class Tool
 {
     // The package version (set by the release pipeline), without the source-revision suffix the SDK appends.
-    internal static string Version { get; } = (typeof(EntryPoint).Assembly
+    internal static string Version { get; } = (typeof(Tool).Assembly
         .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
         .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "0.0.0").Split('+')[0];
 

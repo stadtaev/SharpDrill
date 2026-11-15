@@ -26,7 +26,7 @@ internal sealed record ExceptionTransferResult(ExceptionFlow Flow, ExceptionStat
 
 internal static class ExceptionTransfer
 {
-    internal static ExceptionTransferResult Start(ProgramIndex index, ThrowSiteFact origin, CancellationToken token,
+    internal static ExceptionTransferResult Start(Codebase index, ThrowSiteFact origin, CancellationToken token,
         bool collectEvidence = true)
     {
         var exact = origin.ExactExceptionType ?? (origin.IsExactType ? origin.StaticExceptionType : null);
@@ -37,7 +37,7 @@ internal static class ExceptionTransfer
         return Leaving(index.Callable(origin.Owner), ApplyRegions(index, flow, origin.ProtectedRegions, token, collectEvidence));
     }
 
-    internal static ExceptionTransferResult StartAtCall(ProgramIndex index, ThrowSiteId origin, CallSiteFact site, CancellationToken token)
+    internal static ExceptionTransferResult StartAtCall(Codebase index, ThrowSiteId origin, CallSiteFact site, CancellationToken token)
     {
         var flow = new ExceptionFlow(origin, null, new TypeUse(null, "System.Exception", NullabilityKind.Oblivious, []), null, false, false,
             ImmutableList<SourceEvidence>.Empty, ImmutableList<CatchId>.Empty) { AnyType = true };
@@ -45,7 +45,7 @@ internal static class ExceptionTransfer
     }
 
     // From is the method the exception leaves: the declared target, or the implementation candidate followed.
-    internal static ExceptionTransferResult Cross(ProgramIndex index, ExceptionFlow flow, CallSiteFact site, CallableId from, CancellationToken token,
+    internal static ExceptionTransferResult Cross(Codebase index, ExceptionFlow flow, CallSiteFact site, CallableId from, CancellationToken token,
         bool collectEvidence = true)
     {
         // The caller's try never sees it: async void rethrows on the thread pool, not at the call.
@@ -60,7 +60,7 @@ internal static class ExceptionTransfer
         return Leaving(index.Callable(site.Caller), ApplyRegions(index, flow, site.ProtectedRegions, token, collectEvidence));
     }
 
-    internal static ExceptionTransferResult ApplyRegions(ProgramIndex index, ExceptionFlow flow,
+    internal static ExceptionTransferResult ApplyRegions(Codebase index, ExceptionFlow flow,
         ImmutableArray<ExceptionRegionId> protectedRegions, CancellationToken token, bool collectEvidence = true)
     {
         foreach (var regionId in protectedRegions)
@@ -112,7 +112,7 @@ internal static class ExceptionTransfer
 
     // The full story of one origin along one path from a root (Path[0]) down to the throw: re-walked with evidence from the
     // throw up through Sites (innermost last) until a handler or the root decides it.
-    internal static ExceptionWitness Witness(ProgramIndex index, CallableId root, ImmutableArray<CallableId> path,
+    internal static ExceptionWitness Witness(Codebase index, CallableId root, ImmutableArray<CallableId> path,
         ImmutableArray<CallSiteFact> sites, bool via, ThrowSiteFact origin, CancellationToken token)
     {
         var current = ExceptionTransfer.Start(index, origin, token);
