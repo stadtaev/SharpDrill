@@ -59,10 +59,10 @@ public sealed record UnguardedCall(CallSiteFact Call, ImmutableArray<CallableFac
 /// <summary>Places the analysis could not follow an exception past, for one reason: open questions, not findings.</summary>
 public sealed record NotFollowed(ExceptionReason Reason, ImmutableArray<SourceEvidence> Places);
 
-public static class ProgramExceptions
+public static class CodebaseExceptions
 {
     /// <summary>Exceptions from the program's entry points (or the one Options.From names). Each view is computed on first read.</summary>
-    public static ExceptionReport Exceptions(this ProgramIndex program, ExceptionOptions? options = null, CancellationToken token = default)
+    public static ExceptionReport Exceptions(this Codebase program, ExceptionOptions? options = null, CancellationToken token = default)
     {
         options ??= new();
         if (options.Budget <= 0) throw new ArgumentException("The budget must be positive.");
@@ -72,12 +72,12 @@ public static class ProgramExceptions
 
 public sealed class ExceptionReport
 {
-    private readonly ProgramIndex program;
+    private readonly Codebase program;
     private readonly CancellationToken token;
     private readonly Lazy<ExceptionSummaryResult> summary;
     private readonly Dictionary<CallableId, ImmutableArray<BoundaryHandlingFact>> handlers = [];
 
-    internal ExceptionReport(ProgramIndex program, ExceptionOptions options, ImmutableArray<EntryPoint> entryPoints, CancellationToken token)
+    internal ExceptionReport(Codebase program, ExceptionOptions options, ImmutableArray<EntryPoint> entryPoints, CancellationToken token)
     {
         (this.program, this.token, Options, EntryPoints) = (program, token, options, entryPoints);
         summary = new(() => ExceptionSummaryQuery.Analyze(program, [.. entryPoints.Select(x => x.Method.Id)],

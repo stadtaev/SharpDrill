@@ -2,7 +2,7 @@ namespace SharpDrill.Core;
 
 // Resolves the configured layer of types and callables once per element. Precedence: longest prefix wins,
 // project mapping wins a tie. Callables use their compilation's project and their declaring type.
-public sealed class LayerMap(ProgramIndex index, LayerModel model)
+internal sealed class LayerMap(Codebase index, LayerModel model)
 {
     // Layer name for source elements that no mapping covers; referenced (metadata) elements stay null instead.
     public const string Unmapped = "(unmapped)";

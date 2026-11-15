@@ -11,6 +11,12 @@ public sealed record ProjectNode(CompilationId Id, string Name, string Path, str
 // A <ProjectReference> from Source to Target. Targets outside the loaded workspace are listed in ProjectMap.Unloaded.
 public sealed record ProjectReferenceEdge(CompilationId Source, CompilationId Target) : IEdge<CompilationId>;
 
+public static class CodebaseProjects
+{
+    /// <summary>The &lt;ProjectReference&gt; tree as MSBuild evaluated it, with each project's build settings.</summary>
+    public static ProjectMap Projects(this Codebase codebase) => ProjectMap.Build(codebase.Snapshot);
+}
+
 /// <summary>The workspace's project reference graph with each project's evaluated build settings.</summary>
 /// <remarks>Built from MSBuild facts only; code-level dependencies between projects are not consulted.</remarks>
 public sealed class ProjectMap
@@ -26,7 +32,7 @@ public sealed class ProjectMap
     // Projects nothing else references, in name order: the entry points of the tree.
     public ImmutableArray<CompilationId> Roots => [.. Graph.Nodes.Where(x => Graph.InEdges(x).IsEmpty)];
 
-    public static ProjectMap Build(ProgramSnapshot snapshot)
+    internal static ProjectMap Build(ProgramSnapshot snapshot)
     {
         var compilations = snapshot.Compilations.OrderBy(Name, StringComparer.Ordinal).ThenBy(x => x.Id.Value, StringComparer.Ordinal).ToArray();
         var byPath = compilations.GroupBy(x => System.IO.Path.GetFullPath(x.ProjectPath), PathComparer).ToDictionary(x => x.Key, x => x.First().Id, PathComparer);

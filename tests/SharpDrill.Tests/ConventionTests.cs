@@ -19,7 +19,7 @@ public sealed class ConventionTests
     [Fact]
     public void Controller_actions_follow_base_class_and_override_chains_through_metadata()
     {
-        var index = new ProgramIndex(new ProgramSnapshot
+        var index = new Codebase(new ProgramSnapshot
         {
             Types = [Type("Microsoft.AspNetCore.Mvc.ControllerBase", Metadata), Type("VendorBase", Metadata, "Microsoft.AspNetCore.Mvc.ControllerBase"),
                 Type("Orders", Source, "VendorBase"), Type("Hidden", Source, "Excluded"), Type("Excluded", Source, "Microsoft.AspNetCore.Mvc.ControllerBase", TypeModifiers.None, "Microsoft.AspNetCore.Mvc.NonControllerAttribute"),
@@ -40,7 +40,7 @@ public sealed class ConventionTests
         static CompilationFact Project(string name, params string[] references) =>
             new(new(name), $"/src/{name}.csproj", name, "net10.0", "Debug", "Preview", "Enable", [], []) { ProjectReferences = [.. references.Select(x => $"/src/{x}.csproj")] };
         static BoundaryHandlingFact Registration(string project, string name) => new(new(project), name, name, new($"/src/{project}/Program.cs", "", 0, 1, 1, 1, false));
-        var index = new ProgramIndex(new ProgramSnapshot
+        var index = new Codebase(new ProgramSnapshot
         {
             Compilations = [Project("Host", "Web"), Project("Web", "Shared"), Project("Shared"), Project("Other"), Project("Worker")],
             Callables = [Method("Web.Get", "T", new("Web")), Method("Shared.Get", "T", new("Shared")), Method("Other.Get", "T", new("Other")), Method("Host.Get", "T", new("Host"))],

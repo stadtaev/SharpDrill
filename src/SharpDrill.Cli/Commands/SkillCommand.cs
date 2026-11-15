@@ -38,7 +38,7 @@ internal static class SkillCommand
         if (Console.IsErrorRedirected || arguments.MSBuild) return;
         try
         {
-            if (HintFor(Directory.GetCurrentDirectory(), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), EntryPoint.Version) is { } hint)
+            if (HintFor(Directory.GetCurrentDirectory(), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), Tool.Version) is { } hint)
                 Console.Error.WriteLine(hint);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
@@ -69,7 +69,7 @@ internal static class SkillCommand
     internal static string Content()
     {
         using var stream = typeof(SkillCommand).Assembly.GetManifestResourceStream("SKILL.md")!;
-        return new StreamReader(stream).ReadToEnd().ReplaceLineEndings("\n").Replace("{{version}}", EntryPoint.Version, StringComparison.Ordinal);
+        return new StreamReader(stream).ReadToEnd().ReplaceLineEndings("\n").Replace("{{version}}", Tool.Version, StringComparison.Ordinal);
     }
 
     // The nearest directory holding .git (a directory, or a file in worktrees and submodules); else the current directory.

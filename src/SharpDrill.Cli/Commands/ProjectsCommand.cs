@@ -14,9 +14,9 @@ internal sealed class ProjectsCommand : ICliCommand
         if (arguments.Output is not null && !arguments.Mermaid) throw new ArgumentException("--output requires projects --mermaid.");
     }
 
-    public async Task<int> RunAsync(ProgramIndex index, Arguments arguments, CancellationToken token)
+    public async Task<int> RunAsync(Codebase index, Arguments arguments, CancellationToken token)
     {
-        var map = ProjectMap.Build(index.Snapshot);
+        var map = index.Projects();
         var output = Console.Out;
         foreach (var line in Tree(map))
         {

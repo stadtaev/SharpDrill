@@ -37,7 +37,7 @@ public sealed class CoreTests
     // Where the throw "origin" ends when analysed from "Action": exactly one ending in these snapshots.
     private static ExceptionWitness AnalyzeOrigin(ProgramSnapshot snapshot)
     {
-        var index = new ProgramIndex(snapshot);
+        var index = new Codebase(snapshot);
         return Assert.Single(ExceptionHandlingQuery.Fates(index, ExceptionSummaryQuery.Analyze(index, [new("Action")]), new("origin")));
     }
 
@@ -46,7 +46,7 @@ public sealed class CoreTests
     {
         var snapshot = Snapshot([Method("Action"), Method("Loop")],
             [Call("Action", "Loop", "forward"), Call("Loop", "Action", "back")]);
-        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        var result = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")]);
         Assert.Empty(result.Roots[new CallableId("Action")].Escapes);
         Assert.Empty(result.Roots[new CallableId("Action")].Unknowns);
         Assert.True(result.Roots[new CallableId("Action")].IsComplete);
@@ -60,7 +60,7 @@ public sealed class CoreTests
             [Call("Action", "Middle", "am"), Call("Other", "Middle", "om", regions: ["outer"]), Call("Middle", "Leaf", "ml", regions: ["inner"])],
             [Throw("Leaf")], [Handler("narrow", "Middle", HandlerOutcome.Intercepts, caught: Type("OtherException")), Handler("all", "Other", HandlerOutcome.Intercepts)],
             [Region("inner", "Middle", "narrow"), Region("outer", "Other", "all")]);
-        var index = new ProgramIndex(snapshot);
+        var index = new Codebase(snapshot);
         var summary = ExceptionSummaryQuery.Analyze(index, [new("Action"), new("Other")]);
         var miscaught = Assert.Single(ExceptionHandlingQuery.Miscaught(index, summary));
         Assert.Equal(new ExceptionRegionId("inner"), miscaught.Missed.Region);
@@ -76,7 +76,7 @@ public sealed class CoreTests
         var snapshot = Snapshot([Method("Action"), Method("Loop"), Method("Leaf")],
             [Call("Action", "Loop", "al", regions: ["try"]), Call("Loop", "Loop", "again"), Call("Loop", "Leaf", "ll")],
             [Throw("Leaf")], [Handler("catch", "Action", HandlerOutcome.Intercepts)], [Region("try", "Action", "catch")]);
-        var index = new ProgramIndex(snapshot);
+        var index = new Codebase(snapshot);
         var summary = ExceptionSummaryQuery.Analyze(index, [new("Action")]);
         var caught = Assert.Single(ExceptionHandlingQuery.Caught(index, summary));
         Assert.Equal(["Action", "Loop", "Leaf"], caught.Example.Path.Select(x => x.Value));
@@ -89,7 +89,7 @@ public sealed class CoreTests
         var snapshot = Snapshot([Method("Action"), Method("Loop")],
             [Call("Action", "Loop", "forward"), Call("Loop", "Action", "back")],
             [Throw("Loop", "one"), Throw("Loop", "two")]);
-        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        var result = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")]);
         Assert.Equal(new[] { "one", "two" }, result.Roots[new CallableId("Action")].Escapes.Select(x => x.Origin.Value).Order());
         Assert.Empty(result.Roots[new CallableId("Action")].Unknowns);
         var witness = result.GetWitness(new CallableId("Action"), new ThrowSiteId("one"));
@@ -104,7 +104,7 @@ public sealed class CoreTests
             [Call("Action", "Left", "al"), Call("Action", "Right", "ar"),
              Call("Left", "Shared", "ls", regions: ["try"]), Call("Right", "Shared", "rs")],
             [Throw("Shared")], [Handler("catch", "Left", HandlerOutcome.Intercepts)], [Region("try", "Left", "catch")]);
-        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        var result = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")]);
         Assert.Single(result.Roots[new CallableId("Action")].Escapes);
         Assert.Empty(result.Crossings[new CallSiteId("ls")].Escapes);
         Assert.Single(result.Crossings[new CallSiteId("rs")].Escapes);
@@ -119,7 +119,7 @@ public sealed class CoreTests
         var snapshot = Snapshot([Method("Action"), Method("A"), Method("B"), Method("C"), Method("Leaf")],
             [Call("Action", "A", longSite), Call("A", "B", "ab"), Call("B", "Leaf", "bl"), Call("Action", "C", shortSite), Call("C", "Leaf", "cl")],
             [Throw("Leaf")]);
-        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        var result = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")]);
         var witness = result.GetWitness(new CallableId("Action"), new ThrowSiteId("origin"));
         Assert.Equal(new[] { "Action", "C", "Leaf" }, witness.Path.Select(x => x.Value));
         Assert.Equal(new[] { shortSite, "cl" }, witness.Sites.Select(x => x.Value));
@@ -130,7 +130,7 @@ public sealed class CoreTests
     {
         var snapshot = Snapshot([Method("Action"), Method("Leaf")],
             [Call("Action", "Leaf", "known"), Call("Action", "Missing", "missing")], [Throw("Leaf")]);
-        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        var result = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")]);
         Assert.Single(result.Roots[new CallableId("Action")].Escapes);
         Assert.Contains(result.Roots[new CallableId("Action")].Unknowns, x => x.ReasonCode == ExceptionReason.UnresolvedTarget);
         Assert.False(result.Roots[new CallableId("Action")].IsComplete);
@@ -146,7 +146,7 @@ public sealed class CoreTests
         var snapshot = Snapshot([Method("Action"), Method("Middle"), Method("Leaf")],
             [Call("Action", "Middle", "am"), Call("Middle", "Leaf", "ml", regions: ["try"])],
             [Throw("Leaf"), next], [Handler("catch", "Middle", outcome, "next")], [Region("try", "Middle", "catch")]);
-        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        var result = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")]);
         var escape = Assert.Single(result.Roots[new CallableId("Action")].Escapes);
         Assert.Equal(expectedType, escape.ExceptionType);
         if (outcome == HandlerOutcome.Replaces)
@@ -170,7 +170,7 @@ public sealed class CoreTests
         var snapshot = Snapshot([Method("Action"), Method("Operation") with { ReturnsTask = true }],
             [Call("Action", "Operation", "call", regions: ["try"], awaited: awaited)], [Throw("Operation")],
             [Handler("catch", "Action", HandlerOutcome.Intercepts)], [Region("try", "Action", "catch")]);
-        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        var result = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")]);
         Assert.Empty(result.Roots[new CallableId("Action")].Escapes);
         Assert.Equal(complete, result.Roots[new CallableId("Action")].IsComplete);
         if (!awaited) Assert.Contains(result.Roots[new CallableId("Action")].Unknowns,
@@ -182,7 +182,7 @@ public sealed class CoreTests
     {
         var gap = new AnalysisGap(GapKind.Compilation, Project, null, "Compilation incomplete", Evidence);
         var snapshot = Snapshot([Method("Action"), Method("Other")], [], [Throw("Action")]) with { Gaps = [gap] };
-        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action"), new("Other")], new(MaxWork: 1, MaxFacts: 1));
+        var result = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action"), new("Other")], new(MaxWork: 1, MaxFacts: 1));
         Assert.Equal(gap, Assert.Single(result.GlobalGaps));
         Assert.True(result.IsComplete);
         Assert.False(result.WorkLimitReached); Assert.False(result.FactLimitReached);
@@ -206,15 +206,15 @@ public sealed class CoreTests
     {
         var snapshot = Snapshot([Method("Action"), Method("Middle"), Method("Leaf")],
             [Call("Action", "Middle", "am"), Call("Middle", "Leaf", "ml")], [Throw("Leaf")]);
-        var work = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")], new(MaxWork: 1));
+        var work = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")], new(MaxWork: 1));
         Assert.True(work.WorkLimitReached);
         Assert.False(work.Roots[new CallableId("Action")].IsComplete);
         Assert.Contains(work.Roots[new CallableId("Action")].Unknowns, x => x.ReasonCode == ExceptionReason.WorkLimit);
-        var facts = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")], new(MaxFacts: 1));
+        var facts = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")], new(MaxFacts: 1));
         Assert.True(facts.FactLimitReached);
         Assert.False(facts.Roots[new CallableId("Action")].IsComplete);
         Assert.Contains(facts.Roots[new CallableId("Action")].Unknowns, x => x.ReasonCode == ExceptionReason.FactLimit);
-        var exact = ExceptionSummaryQuery.Analyze(new ProgramIndex(Snapshot([Method("Action")], [], [Throw("Action")])),
+        var exact = ExceptionSummaryQuery.Analyze(new Codebase(Snapshot([Method("Action")], [], [Throw("Action")])),
             [new("Action")], new(MaxWork: 1, MaxFacts: 1));
         Assert.False(exact.WorkLimitReached);
         Assert.False(exact.FactLimitReached);
@@ -224,7 +224,7 @@ public sealed class CoreTests
     [Fact]
     public void Exception_summary_honors_cancellation_and_rejects_invalid_budgets()
     {
-        var index = new ProgramIndex(Snapshot([Method("Action")], []));
+        var index = new Codebase(Snapshot([Method("Action")], []));
         Assert.Throws<OperationCanceledException>(() => ExceptionSummaryQuery.Analyze(index, [new("Action")], token: new CancellationToken(true)));
         Assert.Throws<ArgumentException>(() => ExceptionSummaryQuery.Analyze(index, [new("Action")], new(MaxFacts: 0)));
     }
@@ -237,7 +237,7 @@ public sealed class CoreTests
         var region = Region("try", "Action", "catch") with { FinallyMayThrow = finallyMayThrow };
         var handler = Handler("catch", "Action", HandlerOutcome.Intercepts, filter: hasFilter ? "condition" : null);
         var snapshot = Snapshot([Method("Action")], [], [Throw("Action", regions: ["try"])], [handler], [region]);
-        var summary = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]).Roots[new CallableId("Action")];
+        var summary = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")]).Roots[new CallableId("Action")];
         if (hasFilter) { Assert.Single(summary.Escapes); Assert.Empty(summary.Unknowns); }
         else { Assert.Empty(summary.Escapes); Assert.Contains(summary.Unknowns, x => x.ReasonCode == ExceptionReason.FinallyUnsupported && x.Origin == new ThrowSiteId("origin")); }
     }
@@ -246,7 +246,7 @@ public sealed class CoreTests
     public void Exception_summary_budget_marks_crossing_effects_incomplete()
     {
         var snapshot = Snapshot([Method("Action"), Method("Leaf")], [Call("Action", "Leaf", "al")], [Throw("Leaf")]);
-        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")], new(MaxWork: 1));
+        var result = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")], new(MaxWork: 1));
         var crossing = result.Crossings[new CallSiteId("al")];
         Assert.False(crossing.IsComplete);
         Assert.Contains(crossing.Unknowns, x => x.ReasonCode == ExceptionReason.WorkLimit);
@@ -256,7 +256,7 @@ public sealed class CoreTests
     public void Exception_summary_marks_unresolved_crossing_unknown_with_evidence()
     {
         var snapshot = Snapshot([Method("Action")], [Call("Action", "Missing", "missing")]);
-        var crossing = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")])
+        var crossing = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")])
             .Crossings[new CallSiteId("missing")];
         Assert.False(crossing.IsComplete);
         Assert.Contains(crossing.Unknowns, x => x.ReasonCode == ExceptionReason.UnresolvedTarget
@@ -268,7 +268,7 @@ public sealed class CoreTests
     {
         var snapshot = Snapshot([Method("Action"), Method("Leaf")], [Call("Action", "Leaf", "al")],
             [Throw("Leaf") with { StaticExceptionType = null, ExactExceptionType = null, IsExactType = false }]);
-        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        var result = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")]);
         Assert.Empty(result.Crossings[new CallSiteId("al")].Escapes);
         Assert.Contains(result.Crossings[new CallSiteId("al")].Unknowns,
             x => x.ReasonCode == ExceptionReason.UnboundExceptionType && x.Origin == new ThrowSiteId("origin"));
@@ -282,7 +282,7 @@ public sealed class CoreTests
             [Call("Action", "Left", "al"), Call("Action", "Right", "ar"),
              Call("Left", "Leaf", "ll", regions: ["try"]), Call("Right", "Leaf", "rl")],
             [Throw("Leaf")], [Handler("catch", "Left", HandlerOutcome.Rethrows)], [Region("try", "Left", "catch")]);
-        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        var result = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")]);
         var escapes = result.Roots[new CallableId("Action")].Escapes;
         Assert.Equal(2, escapes.Length);
         var changed = Assert.Single(escapes, x => x.ReasonCode == ExceptionReason.ChangedMayEscape);
@@ -295,7 +295,7 @@ public sealed class CoreTests
         const int transitions = 3000;
         var methods = Enumerable.Range(0, transitions + 1).Select(i => Method($"M{i}")).ToArray();
         var calls = Enumerable.Range(0, transitions).Select(i => Call($"M{i}", $"M{i + 1}", $"site{i}")).ToArray();
-        var index = new ProgramIndex(Snapshot(methods, calls, [Throw($"M{transitions}")]));
+        var index = new Codebase(Snapshot(methods, calls, [Throw($"M{transitions}")]));
         var before = GC.GetAllocatedBytesForCurrentThread();
         var result = ExceptionSummaryQuery.Analyze(index, [new("M0")]);
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
@@ -393,7 +393,7 @@ public sealed class CoreTests
     public void An_iterator_is_uncertain_only_when_an_exception_leaves_it()
     {
         var iterator = Method("Items") with { IsIterator = true };
-        ExceptionMethodSummary Root(ProgramSnapshot snapshot) => ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]).Roots[new CallableId("Action")];
+        ExceptionMethodSummary Root(ProgramSnapshot snapshot) => ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")]).Roots[new CallableId("Action")];
         // Nothing can leave it: no finding and nothing uncertain, even when it recurses.
         var quiet = Root(Snapshot([Method("Action"), iterator], [Call("Action", "Items", "ai"), Call("Items", "Items", "ii")], []));
         Assert.Empty(quiet.Escapes); Assert.True(quiet.IsComplete);
@@ -424,7 +424,7 @@ public sealed class CoreTests
             [Call("Action", "Fire", "af", regions: ["outer"]), Call("Fire", "Leaf", "fl", regions: ["inner"])],
             [Throw("Leaf")], [Handler("miss", "Fire", HandlerOutcome.Intercepts, caught: Type("OtherException")), Handler("catch", "Action", HandlerOutcome.Intercepts)],
             [Region("inner", "Fire", "miss"), Region("outer", "Action", "catch")]);
-        var index = new ProgramIndex(snapshot);
+        var index = new Codebase(snapshot);
         var result = ExceptionSummaryQuery.Analyze(index, [new("Action")]);
         Assert.Empty(result.Roots[new CallableId("Action")].Escapes);
         Assert.True(result.Roots[new CallableId("Action")].IsComplete);
@@ -444,7 +444,7 @@ public sealed class CoreTests
         var snapshot = Snapshot([Method("Action"), Method("Guarded") with { IsAsync = true, ReturnsVoid = true }, Method("Leaf")],
             [Call("Action", "Guarded", "ag"), Call("Guarded", "Leaf", "gl", regions: ["try"])],
             [Throw("Leaf")], [Handler("catch", "Guarded", HandlerOutcome.Intercepts)], [Region("try", "Guarded", "catch")]);
-        var index = new ProgramIndex(snapshot);
+        var index = new Codebase(snapshot);
         var result = ExceptionSummaryQuery.Analyze(index, [new("Action")]);
         Assert.True(result.IsComplete);
         Assert.Empty(ExceptionHandlingQuery.Crashing(index, result));
@@ -457,7 +457,7 @@ public sealed class CoreTests
         // `T Get<T>(Func<T>)` awaited as a Task: not a custom awaitable, the throw surfaces at the call.
         var snapshot = Snapshot([Method("Action") with { IsAsync = true, ReturnsTask = true }, Method("Get")],
             [Call("Action", "Get", "ag", awaited: true)], [Throw("Get")]);
-        var result = ExceptionSummaryQuery.Analyze(new ProgramIndex(snapshot), [new("Action")]);
+        var result = ExceptionSummaryQuery.Analyze(new Codebase(snapshot), [new("Action")]);
         Assert.Empty(result.Roots[new CallableId("Action")].Unknowns);
         Assert.Equal(ExceptionStatus.MayEscape, AnalyzeOrigin(snapshot).Status);
     }
@@ -468,7 +468,7 @@ public sealed class CoreTests
         var missingBody = Snapshot([Method("Action") with { Body = BodyStatus.MetadataOnly }], []);
         Assert.Equal(ExceptionReason.MissingBody, Assert.Single(ExceptionSummaryQuery.Analyze(missingBody, [new("Action")]).Roots[new CallableId("Action")].Unknowns).ReasonCode);
         var missingTarget = Snapshot([Method("Action")], [Call("Action", "Absent", "missing")]);
-        Assert.Equal(CallTargetKind.Unresolved, new ProgramIndex(missingTarget).CallGraph.Resolve(new("missing")).Kind);
+        Assert.Equal(CallTargetKind.Unresolved, new Codebase(missingTarget).CallGraph.Resolve(new("missing")).Kind);
     }
 
     [Theory]

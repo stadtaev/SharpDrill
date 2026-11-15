@@ -30,8 +30,8 @@ sharpdrill skill                      # teach Copilot and Claude Code to use it
 From C#:
 
 ```csharp
-var program = await RoslynProgramLoader.OpenAsync("MyApp.slnx");
-foreach (var escape in program.Exceptions().Uncaught)
+var codebase = await Codebase.OpenAsync("MyApp.slnx");
+foreach (var escape in codebase.Exceptions().Uncaught)
     Console.WriteLine($"{escape.ExceptionType} may escape {escape.Example.EntryPoint.DisplaySignature}");
 ```
 
@@ -39,8 +39,8 @@ foreach (var escape in program.Exceptions().Uncaught)
 
 | Read | For |
 | --- | --- |
-| [CLI](docs/cli.md) | Commands, options, reading the output, build warnings (SD0001–SD0005), CI and agents. |
-| [Library](docs/library.md) | The C# API: open a program, entry points, the exception report, diagrams and graphs. |
+| [CLI](docs/cli.md) | Commands, options, reading the output, build warnings (SD0001–SD0005), GitHub/GitLab/Azure pipeline steps. |
+| [Library](docs/library.md) | The C# API: open a codebase, entry points, the exception report, diagrams and projects. |
 | [Coverage](docs/coverage.md) | What is modelled and what is not; how to read "may escape" and "not followed". |
 | [Samples](docs/samples/README.md) | Full outputs on the sample Web API in `tests/Fixtures`. |
 
@@ -59,8 +59,8 @@ dotnet run --project src/SharpDrill.Cli -- exceptions tests/Fixtures/ResearchSol
 | --- | --- |
 | `SharpDrill` | The `sharpdrill` .NET tool. |
 | `SharpDrill.MSBuild` | Optional: exception findings as warnings in every build ([settings](src/SharpDrill.Build/PACKAGE.md)). |
-| `SharpDrill.Core` | Fact model, `ProgramIndex`, entry points, exception report, call diagrams, project map. No Roslyn dependency. |
-| `SharpDrill.Roslyn` | Loads solutions and projects into a fact snapshot. |
+| `SharpDrill.Core` | `Codebase` and its queries: entry points, exception report, call diagrams, project map. No Roslyn dependency. |
+| `SharpDrill.Roslyn` | `Codebase.OpenAsync`: loads solutions and projects. |
 | `SharpDrill.Graph` | Generic immutable directed multigraph (SCC, quotient). |
 | `SharpDrill.Export.Mermaid` | Mermaid/Markdown for project maps and call diagrams. |
 

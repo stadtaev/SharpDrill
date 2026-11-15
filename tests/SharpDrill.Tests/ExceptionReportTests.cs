@@ -10,7 +10,7 @@ public sealed class ExceptionReportTests
     [Fact]
     public async Task A_console_app_is_entered_through_its_top_level_statements()
     {
-        var program = new ProgramIndex(await ExtractionTests.Extract("""
+        var program = new Codebase(await ExtractionTests.Extract("""
             try { Work.Parse(); } catch (System.FormatException) { }
             Work.Save();
             public static class Work
@@ -35,7 +35,7 @@ public sealed class ExceptionReportTests
     [Fact]
     public async Task A_classic_Main_is_an_entry_point_and_a_library_beside_it_is_not()
     {
-        var program = new ProgramIndex(await ExtractionTests.Extract("""
+        var program = new Codebase(await ExtractionTests.Extract("""
             public static class App { public static int Main(string[] args) { Lib.Run(); return 0; } }
             public class Lib { public static void Run() => throw new System.InvalidOperationException(); }
             """, output: OutputKind.ConsoleApplication));
@@ -48,7 +48,7 @@ public sealed class ExceptionReportTests
     [Fact]
     public async Task A_library_is_entered_through_its_public_methods()
     {
-        var program = new ProgramIndex(await ExtractionTests.Extract("""
+        var program = new Codebase(await ExtractionTests.Extract("""
             public class Store
             {
                 public void Save() => Write();

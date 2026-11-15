@@ -3,7 +3,7 @@ using SharpDrill.Core;
 
 namespace SharpDrill.Cli;
 
-internal sealed record ReportContext(ProgramIndex Index, Arguments Arguments, TextWriter Output, Display Display)
+internal sealed record ReportContext(Codebase Index, Arguments Arguments, TextWriter Output, Display Display)
 {
     internal ProgramSnapshot Snapshot => Index.Snapshot;
 }
@@ -13,11 +13,11 @@ internal abstract class ReportCommand : ICliCommand
 {
     public abstract ImmutableHashSet<string> Options { get; }
 
-    public virtual ImmutableDictionary<string, ExceptionView> Views => ImmutableDictionary<string, ExceptionView>.Empty;
+    public virtual ImmutableArray<string> Views => [];
 
     public virtual void Validate(Arguments arguments) { }
 
-    public async Task<int> RunAsync(ProgramIndex index, Arguments arguments, CancellationToken token)
+    public async Task<int> RunAsync(Codebase index, Arguments arguments, CancellationToken token)
     {
         var context = new ReportContext(index, arguments, Console.Out, new Display(index, arguments.Input));
         var incomplete = await ExecuteAsync(context, token);
@@ -56,7 +56,7 @@ internal static class BugReport
         Console.Error.WriteLine();
         Console.Error.WriteLine($"Sorry, we hit a bug on our side. {what}");
         Console.Error.WriteLine($"We are enthusiasts and fix these quickly when we hear about them: please copy-paste the lines below into an issue at {Issues}");
-        Console.Error.WriteLine($"  sharpdrill {EntryPoint.Version}, .NET {Environment.Version}, {System.Runtime.InteropServices.RuntimeInformation.OSDescription}");
+        Console.Error.WriteLine($"  sharpdrill {Tool.Version}, .NET {Environment.Version}, {System.Runtime.InteropServices.RuntimeInformation.OSDescription}");
         foreach (var line in details) Console.Error.WriteLine("  " + line);
     }
 }

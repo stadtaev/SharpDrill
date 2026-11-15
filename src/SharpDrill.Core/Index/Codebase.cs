@@ -5,7 +5,7 @@ namespace SharpDrill.Core;
 
 // Built once per snapshot: O(n) construction, dictionary lookups afterwards. Every grouped view keeps a
 // documented ordinal order so consumers (queries, rules, reports) stay deterministic without re-sorting.
-public sealed class ProgramIndex
+public sealed class Codebase
 {
     private readonly Dictionary<CallableId, CallableFact> callables;
     private readonly Dictionary<TypeId, TypeFact> types;
@@ -31,7 +31,7 @@ public sealed class ProgramIndex
     private readonly SemaphoreSlim dependencyGraphGate = new(1, 1);
     // Whole-program graphs are published only after a complete, uncancelled build.
     public CallGraph CallGraph => GetCallGraph();
-    public DiGraph<TypeId, DependencyEdge> DependencyGraph => GetDependencyGraph();
+    internal DiGraph<TypeId, DependencyEdge> DependencyGraph => GetDependencyGraph();
 
     public CallGraph GetCallGraph(CancellationToken cancellationToken = default)
     {
@@ -49,7 +49,7 @@ public sealed class ProgramIndex
         finally { callGraphGate.Release(); }
     }
 
-    public DiGraph<TypeId, DependencyEdge> GetDependencyGraph(CancellationToken cancellationToken = default)
+    internal DiGraph<TypeId, DependencyEdge> GetDependencyGraph(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (dependencyGraph is { } cached) return cached;
@@ -65,7 +65,7 @@ public sealed class ProgramIndex
         finally { dependencyGraphGate.Release(); }
     }
 
-    public ProgramIndex(ProgramSnapshot snapshot)
+    public Codebase(ProgramSnapshot snapshot)
     {
         Snapshot = snapshot;
         callables = snapshot.Callables.ToDictionary(x => x.Id);

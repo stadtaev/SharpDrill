@@ -39,7 +39,7 @@ internal static class ExceptionHandlingQuery
     private static bool Better(ExceptionWitness candidate, ExceptionWitness current) =>
         candidate.ViaCandidate != current.ViaCandidate ? !candidate.ViaCandidate : candidate.Path.Length < current.Path.Length;
 
-    public static ImmutableArray<CaughtFlow> Caught(ProgramIndex index, ExceptionSummaryResult result, CancellationToken token = default)
+    public static ImmutableArray<CaughtFlow> Caught(Codebase index, ExceptionSummaryResult result, CancellationToken token = default)
     {
         var witnesses = new Witnesses(index, result, token);
         var found = new Dictionary<(ThrowSiteId, CatchId), CaughtFlow>();
@@ -55,7 +55,7 @@ internal static class ExceptionHandlingQuery
         return [.. found.Values.OrderBy(x => x.Example, witnesses.Order).ThenBy(x => index.Catch(x.Catch).Evidence.SpanStart)];
     }
 
-    public static ImmutableArray<MiscaughtFlow> Miscaught(ProgramIndex index, ExceptionSummaryResult result, CancellationToken token = default)
+    public static ImmutableArray<MiscaughtFlow> Miscaught(Codebase index, ExceptionSummaryResult result, CancellationToken token = default)
     {
         var witnesses = new Witnesses(index, result, token);
         var fates = new Dictionary<ExceptionSummaryResult.FactRef, Fate>();
@@ -84,7 +84,7 @@ internal static class ExceptionHandlingQuery
             })];
     }
 
-    public static ImmutableArray<CrashingFlow> Crashing(ProgramIndex index, ExceptionSummaryResult result, CancellationToken token = default)
+    public static ImmutableArray<CrashingFlow> Crashing(Codebase index, ExceptionSummaryResult result, CancellationToken token = default)
     {
         var witnesses = new Witnesses(index, result, token);
         var found = new Dictionary<(ThrowSiteId, ThrowSiteId?, string?, CallableId), ExceptionWitness>();
@@ -113,7 +113,7 @@ internal static class ExceptionHandlingQuery
 
     /// <summary>Where one throw ends: one example per handler that stops it, per place it becomes Unknown and per root it
     /// may escape, in the order of their actions.</summary>
-    public static ImmutableArray<ExceptionWitness> Fates(ProgramIndex index, ExceptionSummaryResult result, ThrowSiteId origin, CancellationToken token = default)
+    public static ImmutableArray<ExceptionWitness> Fates(Codebase index, ExceptionSummaryResult result, ThrowSiteId origin, CancellationToken token = default)
     {
         var witnesses = new Witnesses(index, result, token);
         var stopped = result.Steps.Where(x => x.Result.Flow.Origin == origin && x.Result.Status is ExceptionStatus.Intercepted or ExceptionStatus.Unknown or ExceptionStatus.EscapesAsyncVoid)
@@ -135,7 +135,7 @@ internal static class ExceptionHandlingQuery
     }
 
     // Every step reachable upward from the fact: a root it reaches lets it escape (Unknown when its type is unbound).
-    private static Fate FateOf(ProgramIndex index, ExceptionSummaryResult result, ExceptionSummaryResult.FactRef start)
+    private static Fate FateOf(Codebase index, ExceptionSummaryResult result, ExceptionSummaryResult.FactRef start)
     {
         var (outcomes, roots) = (ImmutableHashSet.CreateBuilder<ExceptionStatus>(), ImmutableHashSet.CreateBuilder<string>(StringComparer.Ordinal));
         ExceptionSummaryResult.Step? undetermined = null;
@@ -163,7 +163,7 @@ internal static class ExceptionHandlingQuery
 
     // Example paths for steps: the shortest path from a root down to the step's method, then the provenance of the fact
     // that crossed it down to the throw. Proven callers are tried before implementation candidates.
-    private sealed class Witnesses(ProgramIndex index, ExceptionSummaryResult result, CancellationToken token)
+    private sealed class Witnesses(Codebase index, ExceptionSummaryResult result, CancellationToken token)
     {
         private readonly Dictionary<ExceptionSummaryResult.Step, ExceptionWitness?> cache = new(ReferenceEqualityComparer.Instance);
         private readonly Dictionary<CallableId, (ImmutableArray<CallableId> Path, ImmutableArray<CallSiteFact> Sites, bool Via)?> above = [];

@@ -3,7 +3,7 @@ using System.Collections.Immutable;
 namespace SharpDrill.Core;
 
 // ASP.NET Core conventions classified from extracted facts, so framework knowledge stays out of the snapshot.
-public static class AspNetConventions
+internal static class AspNetConventions
 {
     public const string ControllerActionConvention = "Declared public instance method on ControllerBase descendant or [Controller] type; excludes [NonAction].";
     private const string ControllerBase = "Microsoft.AspNetCore.Mvc.ControllerBase";
@@ -14,7 +14,7 @@ public static class AspNetConventions
         | CallableModifiers.ExplicitImplementation | CallableModifiers.Finalizer;
 
     // Source-declared actions ordered by ID. Inherited actions declared in referenced assemblies are not enumerated.
-    public static ImmutableArray<ControllerActionFact> ControllerActions(ProgramIndex index, CancellationToken cancellationToken = default)
+    public static ImmutableArray<ControllerActionFact> ControllerActions(Codebase index, CancellationToken cancellationToken = default)
     {
         var builder = ImmutableArray.CreateBuilder<ControllerActionFact>();
         foreach (var callable in index.Snapshot.Callables.OrderBy(x => x.Id.Value, StringComparer.Ordinal))
@@ -25,7 +25,7 @@ public static class AspNetConventions
         return builder.ToImmutable();
     }
 
-    public static bool IsControllerAction(ProgramIndex index, CallableFact method)
+    public static bool IsControllerAction(Codebase index, CallableFact method)
     {
         if (method.Body == BodyStatus.MetadataOnly || method.Kind != CallableKind.Method || (method.Modifiers & NotAnAction) != 0
             || method.Accessibility != "Public" || method.DeclaringType is not { } typeId || !index.TryGetType(typeId, out var type)) return false;
@@ -41,7 +41,7 @@ public static class AspNetConventions
     // Registrations that handle every exception leaving the action: exception middleware or a global MVC exception filter
     // registered in the action's project or in a project that references it (the host). AddExceptionHandler alone handles
     // nothing without UseExceptionHandler. This is registration evidence: middleware order and environment conditions are not checked.
-    public static ImmutableArray<BoundaryHandlingFact> GlobalHandlers(ProgramIndex index, CallableId action)
+    public static ImmutableArray<BoundaryHandlingFact> GlobalHandlers(Codebase index, CallableId action)
     {
         var compilations = index.Snapshot.Compilations;
         var byId = compilations.ToDictionary(x => x.Id);
@@ -63,7 +63,7 @@ public static class AspNetConventions
 
     private static bool Has(ImmutableArray<AttributeFact> attributes, string name) => attributes.Any(x => x.Name == name);
 
-    private static bool IsGeneric(ProgramIndex index, TypeFact type)
+    private static bool IsGeneric(Codebase index, TypeFact type)
     {
         for (TypeFact? current = type; current is not null; current = current.ContainingType is { } outer && index.TryGetType(outer, out var fact) ? fact : null)
             if ((current.Modifiers & TypeModifiers.Generic) != 0) return true;
@@ -71,7 +71,7 @@ public static class AspNetConventions
     }
 
     // The type followed by its base classes; cycle-safe for malformed metadata.
-    private static IEnumerable<TypeFact> BaseClassChain(ProgramIndex index, TypeFact type)
+    private static IEnumerable<TypeFact> BaseClassChain(Codebase index, TypeFact type)
     {
         var seen = new HashSet<TypeId>();
         for (TypeFact? current = type; current is not null && seen.Add(current.Id);

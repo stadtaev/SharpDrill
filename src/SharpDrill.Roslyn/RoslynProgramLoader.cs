@@ -7,12 +7,24 @@ using SharpDrill.Core;
 
 namespace SharpDrill.Roslyn;
 
+/// <summary>The consumer's front door: <c>await Codebase.OpenAsync("MyApp.slnx")</c>.</summary>
+public static class CodebaseLoading
+{
+    extension(Codebase)
+    {
+        /// <summary>Loads a restored .sln, .slnx or .csproj with default options: the codebase every query reads.</summary>
+        public static Task<Codebase> OpenAsync(string path, CancellationToken cancellationToken = default) =>
+            Codebase.OpenAsync(new AnalysisRequest(path), cancellationToken);
+
+        /// <summary>Loads with explicit options (configuration, framework, generated code, test projects).</summary>
+        public static async Task<Codebase> OpenAsync(AnalysisRequest request, CancellationToken cancellationToken = default) =>
+            new(await RoslynProgramLoader.LoadAsync(request, cancellationToken));
+    }
+}
+
+/// <summary>Loads the raw <see cref="ProgramSnapshot"/> (serializable facts); most consumers want <c>Codebase.OpenAsync</c>.</summary>
 public static class RoslynProgramLoader
 {
-    /// <summary>Loads a restored .sln, .slnx or .csproj with default options and indexes it: the program every query reads.</summary>
-    public static async Task<ProgramIndex> OpenAsync(string path, CancellationToken cancellationToken = default) =>
-        new(await LoadAsync(new AnalysisRequest(path), cancellationToken));
-
     public static Task<ProgramSnapshot> LoadAsync(AnalysisRequest request, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

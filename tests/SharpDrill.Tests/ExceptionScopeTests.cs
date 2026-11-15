@@ -157,7 +157,7 @@ public sealed class ExceptionScopeTests
     {
         var snapshot = Guarded(Snapshot([Method("Action"), Method("I", BodyStatus.NoBody), Method("Impl")],
             [Call("Action", "I", "ai", DispatchKind.Interface, region: "r")], [Throw("Impl")], [Implements("I", "Impl")]));
-        var index = new ProgramIndex(snapshot);
+        var index = new Codebase(snapshot);
         var summary = ExceptionSummaryQuery.Analyze(index, [Action], new(FollowCandidates: true));
         var caught = Assert.Single(ExceptionHandlingQuery.Caught(index, summary));
         Assert.True(caught.ViaCandidate);
@@ -173,7 +173,7 @@ public sealed class ExceptionScopeTests
     {
         var snapshot = Guarded(Snapshot([Method("Action"), Method("I", BodyStatus.NoBody), Method("Impl")],
             [Call("Action", "I", "ai", DispatchKind.Interface, region: "r"), Call("Action", "Impl", "ad", region: "r")], [Throw("Impl")], [Implements("I", "Impl")]));
-        var index = new ProgramIndex(snapshot);
+        var index = new Codebase(snapshot);
         var caught = Assert.Single(ExceptionHandlingQuery.Caught(index, ExceptionSummaryQuery.Analyze(index, [Action], new(FollowCandidates: true))));
         Assert.False(caught.ViaCandidate);
         var open = Snapshot([Method("Action"), Method("I", BodyStatus.NoBody), Method("Impl")],

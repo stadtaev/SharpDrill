@@ -30,7 +30,7 @@ public enum CallTargetKind { Source, Library, Dispatch, Unresolved }
 
 public readonly record struct CallTarget(CallTargetKind Kind, ImmutableArray<CallableId> Callees);
 
-// Whole-program call graph over every callable. Out-edges follow ProgramIndex.Outgoing order (target display, then
+// Whole-program call graph over every callable. Out-edges follow Codebase.Outgoing order (target display, then
 // site ID); a non-direct site's Declared edge is followed by its Candidate edges in ID order. Sites without a known
 // target are not edges: they are listed in UnresolvedSites so traversals can report them as boundaries.
 public sealed class CallGraph
@@ -49,7 +49,7 @@ public sealed class CallGraph
     // possibilities, never inferred runtime targets. Every site of the snapshot resolves; an unknown ID is a caller bug.
     public CallTarget Resolve(CallSiteId site) => targets.TryGetValue(site, out var target) ? target : throw new KeyNotFoundException($"Unknown call site: {site.Value}");
 
-    public static CallGraph Build(ProgramIndex index, CancellationToken cancellationToken = default)
+    public static CallGraph Build(Codebase index, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var builder = DiGraph<CallableId, CallEdge>.CreateBuilder();
@@ -90,7 +90,7 @@ public sealed class CallGraph
 
     // Transitive implementation candidates of a declared target in ID order. A declared target with its own source
     // body (a virtual method) is itself a candidate.
-    private static ImmutableArray<CallableId> Candidates(ProgramIndex index, CallableId declared, CancellationToken cancellationToken)
+    private static ImmutableArray<CallableId> Candidates(Codebase index, CallableId declared, CancellationToken cancellationToken)
     {
         var result = new SortedSet<string>(StringComparer.Ordinal);
         if (index.Callable(declared).Body == BodyStatus.Source) result.Add(declared.Value);

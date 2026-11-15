@@ -19,7 +19,7 @@ public sealed class ArchitectureTests
     private static readonly ImmutableArray<LayerMapping> Mappings = [new(LayerScope.Project, "Orders.Api", "API"),
         new(LayerScope.Project, "Orders.Application", "Application"), new(LayerScope.Project, "Orders.Infrastructure", "Infrastructure")];
 
-    private static ProgramIndex Program() => new(new ProgramSnapshot
+    private static Codebase Program() => new(new ProgramSnapshot
     {
         Compilations = [Project(Api, "Orders.Api"), Project(App, "Orders.Application"), Project(Infra, "Orders.Infrastructure"), Project(Tools, "Tools")],
         Types = [Type("Controller", Api, "Orders.Api"), Type("Service", App, "Orders.Application"), Type("IRepo", App, "Orders.Application"),
@@ -37,7 +37,7 @@ public sealed class ArchitectureTests
     [Fact]
     public void Layer_map_uses_longest_prefix_project_tie_break_and_namespace_boundaries()
     {
-        var index = new ProgramIndex(new ProgramSnapshot
+        var index = new Codebase(new ProgramSnapshot
         {
             Compilations = [Project(Api, "Orders.Api"), Project(Infra, "Orders.Infrastructure"), Project(Tools, "Tools")],
             Types = [Type("Controller", Api, "Orders.Api"), Type("Repo", Infra, "Orders.Infrastructure.Data"), Type("Lookalike", Tools, "Orders.InfrastructureX"),
@@ -76,7 +76,7 @@ public sealed class ArchitectureTests
         Assert.Equal(["c5"], calls.UnresolvedSites.Select(x => x.Id.Value));
         Assert.Same(calls, index.CallGraph);
 
-        var withBase = new ProgramIndex(index.Snapshot with
+        var withBase = new Codebase(index.Snapshot with
         {
             Dependencies = [.. index.Snapshot.Dependencies, new(new TypeId("Service"), null,
                 new TypeUse(new TypeId("Controller"), "Controller<Repo>", NullabilityKind.NotAnnotated, [Use("Repo")]), DependencyKind.Inheritance, At("s.cs", 9))]
@@ -90,7 +90,7 @@ public sealed class ArchitectureTests
     public void Call_sites_resolve_to_one_target_kind_shared_by_all_traversals()
     {
         var program = Program();
-        var index = new ProgramIndex(program.Snapshot with
+        var index = new Codebase(program.Snapshot with
         {
             Callables = [.. program.Snapshot.Callables, Method("Dispose", "Console", Metadata)],
             CallSites = [.. program.Snapshot.CallSites, Call("c7", "Load", "Dispose", At("s.cs", 3), DispatchKind.Interface),
@@ -149,7 +149,7 @@ public sealed class ArchitectureTests
         // Console.WriteLine is an unmapped referenced target; the metadata-owned signature fact is not a program edge.
         Assert.Equal(1, graph.ExternalReferences);
         // Base-type arguments are dependencies too: Repo : Base<IRepo> reaches IRepo's layer.
-        var generic = new ProgramIndex(index.Snapshot with
+        var generic = new Codebase(index.Snapshot with
         {
             Dependencies = [new(new TypeId("Controller"), null, new TypeUse(new TypeId("Repo"), "Repo<IRepo>", NullabilityKind.NotAnnotated, [Use("IRepo")]), DependencyKind.Inheritance, At("c.cs", 1))]
         });

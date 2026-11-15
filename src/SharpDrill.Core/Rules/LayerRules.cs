@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 
 namespace SharpDrill.Core;
 
-public static class LayerRules
+internal static class LayerRules
 {
     public const string AllowedDependenciesRuleId = "layer-dependency";
 

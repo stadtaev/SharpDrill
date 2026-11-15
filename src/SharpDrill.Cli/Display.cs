@@ -3,7 +3,7 @@ using SharpDrill.Core;
 namespace SharpDrill.Cli;
 
 /// <summary>How the CLI names program elements, shared by every command. Command-specific output lives in the command.</summary>
-internal sealed class Display(ProgramIndex index, string? input = null)
+internal sealed class Display(Codebase index, string? input = null)
 {
     private readonly HashSet<string> ambiguous = index.Snapshot.Callables.GroupBy(x => x.DisplaySignature)
         .Where(x => x.Count() > 1).Select(x => x.Key).ToHashSet(StringComparer.Ordinal);
